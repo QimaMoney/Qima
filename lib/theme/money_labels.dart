@@ -4,11 +4,13 @@ import '../blocs/money_cubit.dart';
 import '../l10n/app_localizations.dart';
 import '../models/book_account.dart';
 import '../models/book_entry.dart';
+import '../models/instrument_catalog.dart';
 import '../models/minor_units.dart';
 import '../models/money.dart';
 import '../models/money_settings.dart';
 import '../models/net_worth.dart';
 import 'masking.dart';
+import 'strings.dart';
 
 /// Names and icons for the money ledger, in the person's language. The
 /// ledger stores ids and English names; nothing here is stored.
@@ -63,7 +65,7 @@ extension MoneyLabels on AppLocalizations {
         EntryTemplate.billSplit => tplBillSplit,
         EntryTemplate.valuation => tplValuation,
         EntryTemplate.assetSale => tplAssetSale,
-        EntryTemplate.holdingTrade => tplHoldingTrade,
+        EntryTemplate.holdingTrade || EntryTemplate.holdingBuy || EntryTemplate.holdingSell || EntryTemplate.holdingIn || EntryTemplate.holdingOut || EntryTemplate.holdingFee => tplHoldingTrade,
         EntryTemplate.adjustment => tplAdjustment,
       };
 
@@ -99,6 +101,12 @@ extension MoneyLabels on AppLocalizations {
   /// An account's name as shown: a default category or system account the
   /// person never renamed reads in their language.
   String accountName(BookAccount a) {
+    // A holding is never stored, so its name is its instrument's: the
+    // catalog's (in the person's language) or a custom one's own name.
+    if (a.isHolding) {
+      final instrument = InstrumentCatalog.instrument(a.commodity!);
+      return instrument == null ? a.name : displayLabelFor(this, instrument.nameKey);
+    }
     if (!MoneyCubit.isUnrenamedDefault(a) && !a.isSystem) return a.name;
     return switch (a.id) {
       'category.groceries' => catGroceries,
@@ -179,7 +187,7 @@ class MoneyIcons {
         EntryTemplate.billSplit => Icons.call_split,
         EntryTemplate.valuation => Icons.trending_up,
         EntryTemplate.assetSale => Icons.sell_outlined,
-        EntryTemplate.holdingTrade => Icons.pie_chart_outline,
+        EntryTemplate.holdingTrade || EntryTemplate.holdingBuy || EntryTemplate.holdingSell || EntryTemplate.holdingIn || EntryTemplate.holdingOut || EntryTemplate.holdingFee => Icons.pie_chart_outline,
         EntryTemplate.opening || EntryTemplate.adjustment => Icons.flag_outlined,
       };
 }

@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import '../blocs/app_cubit.dart';
 import '../blocs/app_state.dart';
 import '../l10n/app_localizations.dart';
+import '../services/backup/backup_codec.dart';
 import '../theme/design_system.dart';
 import '../theme/qima_colors.dart';
 
@@ -87,7 +88,7 @@ class _ExportBackupSheetState extends State<ExportBackupSheet> {
       if (!mounted) return;
       setState(() {
         _working = false;
-        _error = l10n.backupExportSheetFailed;
+        _error = e is BackupError ? e.message(l10n) : l10n.backupExportSheetFailed;
       });
     }
   }

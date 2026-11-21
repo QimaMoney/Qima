@@ -106,13 +106,33 @@ class _QimaAppState extends State<QimaApp> {
     _tapSubscription = notificationTapPayloads.stream.listen(_handleNotificationTap);
     // The money ledger loads after init, once the cloud backend is settled
     // (see AppCubit.init), so a fresh device never seeds over synced data.
-    _cubit.init().then((_) async {
+    unawaited(_start());
+  }
+
+  /// Set when [AppCubit.init] threw, so nothing waits for it for ever.
+  bool _initFailed = false;
+
+  /// Start-up. A failure never leaves the app waiting: init's own failure is
+  /// logged and stops what waits for it, and a money ledger that cannot be
+  /// read is recorded for Settings while the rest carries on.
+  Future<void> _start() async {
+    try {
+      await _cubit.init();
+    } catch (error, stack) {
+      _initFailed = true;
+      debugPrint('Start-up failed: $error\n$stack');
+      return;
+    }
+    try {
       await _money.load();
-      _aiApps.start();
-      // Files shared to Qima while it was closed.
-      unawaited(_import.checkInbox());
-      await _consumeColdLaunchPayload();
-    });
+    } catch (error, stack) {
+      debugPrint('Reading the money ledger failed: $error\n$stack');
+      await _cubit.noteLoadFailed();
+    }
+    _aiApps.start();
+    // Files shared to Qima while it was closed.
+    unawaited(_import.checkInbox());
+    await _consumeColdLaunchPayload();
   }
 
   @override
@@ -141,6 +161,7 @@ class _QimaAppState extends State<QimaApp> {
   void _handleNotificationTap(String payload) {
     unawaited(() async {
       while (!_cubit.state.initialized) {
+        if (_initFailed || _cubit.isClosed) return;
         await Future<void>.delayed(const Duration(milliseconds: 50));
       }
       final navigator = _navigatorKey.currentState;

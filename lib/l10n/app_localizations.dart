@@ -9232,6 +9232,72 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Answer the setup questions again. Nothing you use is turned off.'**
   String get settingsHelpRunSetupSubtitle;
+
+  /// No description provided for @settingsNeedsAttention.
+  ///
+  /// In en, this message translates to:
+  /// **'Needs attention'**
+  String get settingsNeedsAttention;
+
+  /// No description provided for @settingsICloudSyncStatusAttention.
+  ///
+  /// In en, this message translates to:
+  /// **'Sync needs attention. See below.'**
+  String get settingsICloudSyncStatusAttention;
+
+  /// No description provided for @bookHealthMigration.
+  ///
+  /// In en, this message translates to:
+  /// **'Some holdings from before the update could not be read. They are still stored on this device and will be tried again the next time Qima starts.'**
+  String get bookHealthMigration;
+
+  /// No description provided for @bookHealthNewerBuild.
+  ///
+  /// In en, this message translates to:
+  /// **'Another device saved data with a newer version of Qima, so sync for it is paused here. Update Qima on this device.'**
+  String get bookHealthNewerBuild;
+
+  /// No description provided for @bookHealthLegacy.
+  ///
+  /// In en, this message translates to:
+  /// **'Data that an older version of Qima left in iCloud could not be read. Qima will try again on the next sync.'**
+  String get bookHealthLegacy;
+
+  /// No description provided for @bookHealthLoadFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Some of your data could not be loaded, so parts of Qima may look empty. Nothing was deleted. Close and reopen Qima to try again.'**
+  String get bookHealthLoadFailed;
+
+  /// No description provided for @backupErrorHoldingsUnreadable.
+  ///
+  /// In en, this message translates to:
+  /// **'Your holdings from before the update could not be read yet, so a backup now would leave them out. Close and reopen Qima, then try again.'**
+  String get backupErrorHoldingsUnreadable;
+
+  /// No description provided for @tradeSaveFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t save this. Nothing was changed. Try again.'**
+  String get tradeSaveFailed;
+
+  /// No description provided for @tradeRejectedNothing.
+  ///
+  /// In en, this message translates to:
+  /// **'This trade has nothing in it: the quantity or the amount is zero.'**
+  String get tradeRejectedNothing;
+
+  /// No description provided for @tradeRejectedCash.
+  ///
+  /// In en, this message translates to:
+  /// **'The money paid or received doesn\'t match this trade. Check the amount and the account\'s currency.'**
+  String get tradeRejectedCash;
+
+  /// No description provided for @backupImportReplaceDropsCash.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{Replacing removes the account that 1 trade was paid from or into, because this older backup doesn\'t have it.} other{Replacing removes the accounts that {count} trades were paid from or into, because this older backup doesn\'t have them.}}'**
+  String backupImportReplaceDropsCash(int count);
 }
 
 class _AppLocalizationsDelegate

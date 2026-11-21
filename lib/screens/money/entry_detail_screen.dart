@@ -32,7 +32,7 @@ class EntryDetailScreen extends StatelessWidget {
     final colors = context.colors;
     final hidden = context.select<AppCubit, bool>((c) => c.state.hideBalances);
     final state = context.watch<MoneyCubit>().state;
-    final entry = state.entries.where((e) => e.id == entryId).firstOrNull;
+    final entry = state.listed.where((e) => e.id == entryId).firstOrNull;
     if (entry == null) {
       return Scaffold(appBar: AppBar(), body: const SizedBox.shrink());
     }
@@ -40,8 +40,9 @@ class EntryDetailScreen extends StatelessWidget {
     final s = EntrySummary.of(entry, book, l10n);
     final locale = Localizations.localeOf(context).toLanguageTag();
     final editKind = EntryKind.forEntry(entry);
-    // The cash side of a holdings trade follows its holdings row.
-    final fromHoldings = entry.template == EntryTemplate.holdingTrade;
+    // A trade is edited and deleted from Holdings, which checks the sales
+    // that come after it.
+    final fromHoldings = state.isTradeView(entry);
     final amountText = minorText(s.amount.abs(), s.currency, hidden: hidden);
 
     return ScreenBackground(
@@ -59,16 +60,16 @@ class EntryDetailScreen extends StatelessWidget {
                 onPressed: () => EntryEditorScreen.open(context, editKind, existing: entry),
               ),
             if (!fromHoldings)
-            IconButton(
-              tooltip: l10n.commonDelete,
-              icon: const Icon(Icons.delete_outline),
-              onPressed: () async {
-                final ok = await confirmDelete(context, title: l10n.entryDeleteTitle, message: l10n.entryDeleteMessage, confirmLabel: l10n.commonDelete);
-                if (!ok || !context.mounted) return;
-                await context.read<MoneyCubit>().deleteEntry(entry.id);
-                if (context.mounted) Navigator.of(context).pop();
-              },
-            ),
+              IconButton(
+                tooltip: l10n.commonDelete,
+                icon: const Icon(Icons.delete_outline),
+                onPressed: () async {
+                  final ok = await confirmDelete(context, title: l10n.entryDeleteTitle, message: l10n.entryDeleteMessage, confirmLabel: l10n.commonDelete);
+                  if (!ok || !context.mounted) return;
+                  await context.read<MoneyCubit>().deleteEntry(entry.id);
+                  if (context.mounted) Navigator.of(context).pop();
+                },
+              ),
           ],
         ),
         body: ListView(
@@ -237,7 +238,7 @@ class _AllTransactionsScreenState extends State<AllTransactionsScreen> {
         entry: e,
         book: book,
         hidden: hidden,
-        forAccount: widget.accountId != null && (book.accounts[widget.accountId]?.side.onBalanceSheet ?? false) ? widget.accountId : null,
+        forAccount: widget.accountId != null && (book.accounts[widget.accountId]?.onMoneySheet ?? false) ? widget.accountId : null,
         onTap: () => EntryDetailScreen.open(context, e.id),
       ));
     }

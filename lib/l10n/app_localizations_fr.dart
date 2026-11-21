@@ -5469,4 +5469,56 @@ class AppLocalizationsFr extends AppLocalizations {
   @override
   String get settingsHelpRunSetupSubtitle =>
       'Répondez de nouveau aux questions. Rien de ce que vous utilisez n’est désactivé.';
+
+  @override
+  String get settingsNeedsAttention => 'À vérifier';
+
+  @override
+  String get settingsICloudSyncStatusAttention =>
+      'La synchronisation demande votre attention. Voir ci-dessous.';
+
+  @override
+  String get bookHealthMigration =>
+      'Certaines positions d\'avant la mise à jour n\'ont pas pu être lues. Elles sont toujours stockées sur cet appareil et seront relues au prochain démarrage de Qima.';
+
+  @override
+  String get bookHealthNewerBuild =>
+      'Un autre appareil a enregistré des données avec une version plus récente de Qima, la synchronisation est donc suspendue ici. Mettez Qima à jour sur cet appareil.';
+
+  @override
+  String get bookHealthLegacy =>
+      'Des données laissées dans iCloud par une version plus ancienne de Qima n\'ont pas pu être lues. Qima réessaiera à la prochaine synchronisation.';
+
+  @override
+  String get bookHealthLoadFailed =>
+      'Une partie de vos données n\'a pas pu être chargée, certaines zones de Qima peuvent donc sembler vides. Rien n\'a été supprimé. Fermez puis rouvrez Qima pour réessayer.';
+
+  @override
+  String get backupErrorHoldingsUnreadable =>
+      'Vos positions d\'avant la mise à jour n\'ont pas encore pu être lues, une sauvegarde maintenant les laisserait de côté. Fermez puis rouvrez Qima, puis réessayez.';
+
+  @override
+  String get tradeSaveFailed =>
+      'Impossible d\'enregistrer. Rien n\'a été modifié. Réessayez.';
+
+  @override
+  String get tradeRejectedNothing =>
+      'Cette opération est vide : la quantité ou le montant est nul.';
+
+  @override
+  String get tradeRejectedCash =>
+      'L\'argent payé ou reçu ne correspond pas à cette opération. Vérifiez le montant et la devise du compte.';
+
+  @override
+  String backupImportReplaceDropsCash(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other:
+          'Remplacer retire les comptes avec lesquels $count opérations ont été payées ou encaissées, car cette ancienne sauvegarde ne les a pas.',
+      one:
+          'Remplacer retire le compte avec lequel 1 opération a été payée ou encaissée, car cette ancienne sauvegarde ne l\'a pas.',
+    );
+    return '$_temp0';
+  }
 }

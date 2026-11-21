@@ -14,7 +14,6 @@ BackupPayload _payload() => const BackupPayload(
           'deleted': false,
         },
       ],
-      holdings: [],
       customInstruments: [],
       alerts: [],
       settings: BackupSettings(
@@ -24,6 +23,7 @@ BackupPayload _payload() => const BackupPayload(
         preferredChartRange: 'month1',
         widgetRefreshInterval: 15,
       ),
+      book: {'accounts': [], 'entries': [], 'recurring': [], 'settings': []},
     );
 
 const _app = BackupAppInfo(version: '1.2.0', build: '42');
@@ -50,6 +50,59 @@ void main() {
       final decoded = await BackupCodec.decodePayload(envelope);
       expect(decoded.watchcards, _payload().watchcards);
       expect(decoded.settings.baseCurrency, 'USD');
+    });
+  });
+
+  group('version 4', () {
+    test('writes version 4 with the book and neither a holdings nor a transactions list', () {
+      final file = jsonDecode(BackupCodec.encodePlain(payload: _payload(), app: _app)) as Map<String, dynamic>;
+      expect(file['version'], 4);
+      final payload = file['payload'] as Map<String, dynamic>;
+      expect(payload.keys.toSet(), {'watchcards', 'customInstruments', 'alerts', 'settings', 'book'});
+    });
+
+    test('reads a file with no holdings list, and ignores one a hand-edited file adds', () async {
+      final file = jsonDecode(BackupCodec.encodePlain(payload: _payload(), app: _app)) as Map<String, dynamic>;
+      expect((await BackupCodec.decodePayload(BackupCodec.parseEnvelope(jsonEncode(file)))).isLedger, isTrue);
+      (file['payload'] as Map<String, dynamic>)['holdings'] = [{'bogus': true}];
+      (file['payload'] as Map<String, dynamic>)['transactions'] = [{'bogus': true}];
+      final decoded = await BackupCodec.decodePayload(BackupCodec.parseEnvelope(jsonEncode(file)));
+      expect(decoded.isLedger, isTrue);
+      expect(decoded.holdings, isEmpty);
+      expect(decoded.transactions, isNull);
+    });
+
+    test('a file with no book is corrupted', () async {
+      final file = jsonDecode(BackupCodec.encodePlain(payload: _payload(), app: _app)) as Map<String, dynamic>;
+      (file['payload'] as Map<String, dynamic>).remove('book');
+      await expectLater(
+        () => BackupCodec.decodePayload(BackupCodec.parseEnvelope(jsonEncode(file))),
+        throwsA(isA<BackupError>().having((e) => e.kind, 'kind', BackupErrorKind.corrupted)),
+      );
+    });
+
+    test('a file with version 5 is refused with the newer-version error', () {
+      final file = jsonDecode(BackupCodec.encodePlain(payload: _payload(), app: _app)) as Map<String, dynamic>;
+      file['version'] = 5;
+      expect(
+        () => BackupCodec.parseEnvelope(jsonEncode(file)),
+        throwsA(isA<BackupError>().having((e) => e.kind, 'kind', BackupErrorKind.newerVersion)),
+      );
+    });
+
+    test('version 3 still needs its holdings list', () async {
+      final json = jsonEncode({
+        'format': 'qima-backup',
+        'version': 3,
+        'createdAt': '2026-03-10T00:00:00.000Z',
+        'app': {'version': '4.0.0', 'build': '1'},
+        'encrypted': false,
+        'payload': _payload().toJson(),
+      });
+      await expectLater(
+        () => BackupCodec.decodePayload(BackupCodec.parseEnvelope(json)),
+        throwsA(isA<BackupError>().having((e) => e.kind, 'kind', BackupErrorKind.corrupted)),
+      );
     });
   });
 

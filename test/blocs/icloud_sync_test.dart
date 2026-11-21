@@ -8,6 +8,7 @@ import 'package:qima/blocs/app_cubit.dart';
 import 'package:qima/blocs/app_state.dart';
 import 'package:qima/models/asset.dart';
 import 'package:qima/models/fx_history.dart';
+import 'package:qima/models/holding_transaction.dart';
 import 'package:qima/models/instrument_catalog.dart';
 import 'package:qima/models/quote.dart';
 import 'package:qima/models/watch_card.dart';
@@ -183,7 +184,7 @@ void main() {
   Future<void> settle(List<AppCubit> devices) async {
     for (final d in devices) {
       await d.watchlistStore.load();
-      await d.transactionsStore.load();
+      await d.holdings.load();
     }
   }
 
@@ -368,19 +369,31 @@ void main() {
   });
 
   group('external-change event reloads the right store', () {
-    test('a holdings.records change event triggers a holdings reload, not a watchlist reload', () async {
+    test('a ledger.entries change event reloads the trades and the book, and not the watchlist', () async {
       final dirA = await Directory.systemTemp.createTemp('qima_icloud_targeted2_a');
       final deviceA = await device(dirA);
 
       final dirB = await Directory.systemTemp.createTemp('qima_icloud_targeted2_b');
       final deviceB = await device(dirB);
       final cardsIdentityBefore = deviceB.state.cards;
+      final reloadedBook = <String?>[];
+      deviceB.onBookChanged = (key) async => reloadedBook.add(key);
 
-      // Directly push a holdings-only change through the cloud (as if
-      // another device wrote a lot) and confirm B's cards list is untouched
-      // (same identity) while a reload for holdings was attempted (no crash,
-      // no unrelated card churn).
-      //
+      // A trade made on A reaches the cloud as a change of the book's entries.
+      // (Only B receives the event: see the note below.)
+      LocalFileStore.overrideDirectoryForTesting(dirA);
+      await deviceA.saveTransaction(HoldingTransaction(
+        id: 'tx1',
+        instrumentID: gold.id,
+        kind: TransactionKind.buy,
+        quantity: 2,
+        unit: PriceUnit.troyOunce,
+        unitPrice: 2000,
+        currency: 'USD',
+        date: DateTime(2026, 1, 1),
+      ));
+      expect(cloudValues.keys, contains('ledger.entries'));
+
       // NOTE: `EventChannel.receiveBroadcastStream()` registers its message
       // handler via `binaryMessenger.setMessageHandler(name, ...)`, keyed
       // only by channel NAME — with two devices (two independent
@@ -392,11 +405,14 @@ void main() {
       // limitation of two `AppCubit`s sharing one static channel name
       // in-process — real usage never has two — so only B's reload is
       // awaited/asserted on.
-      cloudValues['holdings.records'] = '[]';
+      LocalFileStore.overrideDirectoryForTesting(dirB);
       final settled = watchForCloudSyncStatus(deviceB, CloudSyncStatus.upToDate);
-      broadcastChange('holdings.records');
+      broadcastChange('ledger.entries');
       await settled();
 
+      expect(deviceB.state.transactions.map((t) => t.id), ['tx1'], reason: 'the holdings side reloaded');
+      expect(reloadedBook, contains('ledger.entries'), reason: 'and so did the book');
+      expect(reloadedBook.toSet(), {'ledger.entries'});
       expect(deviceB.state.cards, same(cardsIdentityBefore));
 
       await settle([deviceA, deviceB]);
@@ -404,6 +420,28 @@ void main() {
       await deviceB.disposeCloudSync();
       await dirA.delete(recursive: true);
       await dirB.delete(recursive: true);
+    });
+
+    test('the old holdings keys are no longer loaded here', () async {
+      final dir = await Directory.systemTemp.createTemp('qima_icloud_old_holdings');
+      final deviceB = await device(dir);
+      final reloadedBook = <String?>[];
+      deviceB.onBookChanged = (key) async => reloadedBook.add(key);
+      final transactionsBefore = deviceB.state.transactions;
+
+      for (final key in ['holdings.records', 'transactions.records']) {
+        cloudValues[key] = '[]';
+        final settled = watchForCloudSyncStatus(deviceB, CloudSyncStatus.upToDate);
+        broadcastChange(key);
+        await settled();
+      }
+
+      expect(deviceB.state.transactions, same(transactionsBefore));
+      expect(reloadedBook, isEmpty);
+
+      await settle([deviceB]);
+      await deviceB.disposeCloudSync();
+      await dir.delete(recursive: true);
     });
   });
 

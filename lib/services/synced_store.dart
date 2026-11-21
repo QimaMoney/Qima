@@ -2,10 +2,14 @@ import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
 import 'dart:math';
+import 'dart:typed_data';
+
+import 'package:archive/archive.dart';
 
 import '../models/syncable.dart';
 import 'cloud_kv_store.dart';
 import 'local_file_store.dart';
+import 'switchable_cloud_kv_store.dart';
 
 /// A single synced record: the item plus merge metadata. [order] is
 /// fractional so items can be inserted between two others without
@@ -90,20 +94,63 @@ class JsonFileRecords<T extends Syncable> implements LocalRecords<T> {
   }
 }
 
+/// How a [SyncedStore] writes its cloud value.
+enum CloudFormat {
+  /// The records as one JSON list. What every existing key holds.
+  plainList,
+
+  /// `{"v":1,"z":"gzip","data":"<base64 of the gzipped JSON record list>"}`.
+  /// A value written by a newer version, or one that cannot be decoded, is
+  /// never overwritten (see [SyncedStore.cloudValueUnreadable]). That includes
+  /// a value where even one record fails `itemFromJson`: the whole key is
+  /// frozen rather than risk dropping the records this build cannot read. It
+  /// stays frozen until a build whose `itemFromJson` accepts every record
+  /// reads it, and only that build (or a user action that clears the key)
+  /// lifts it; this build keeps working from its local copy meanwhile. A plain list
+  /// already stored under the key is still read, and replaced by the envelope
+  /// on the next write.
+  envelope,
+}
+
 /// Conflict-free per-item merge engine on top of a local JSON mirror and a
 /// pluggable [CloudKVStore]. Mirrors `SyncedStore<Item: Syncable>.swift`
 /// (spec §2.10): last-write-wins per item, tombstoned deletes pruned after
-/// [tombstoneTTL].
+/// [tombstoneTTL] (365 days unless the store says otherwise).
 class SyncedStore<T extends Syncable> {
   final String filePath;
   final String cloudKey;
   final CloudKVStore cloud;
   final T Function(Map<String, dynamic>) itemFromJson;
   final List<T> Function()? seed;
+  final CloudFormat cloudFormat;
+
+  /// Decides a tie: when two records with the same id have equal `updatedAt`,
+  /// the one this returns true for ([incoming] against [stored]) wins,
+  /// whichever side it came from. Should be a strict order (not true both
+  /// ways). Without it a tie goes to the later record in the merge, and
+  /// [absorb] ignores a tie.
+  final bool Function(Record<T> incoming, Record<T> stored)? prefer;
+
+  /// How long a tombstone is kept; null keeps tombstones for ever.
+  final Duration? tombstoneTTL;
+
   final LocalRecords<T> _local;
   final Expando<_OperationQueue> _queues = Expando<_OperationQueue>();
+  bool _cloudUnreadable = false;
+  bool _cloudWriteSkipped = false;
+  String? _lastCloudRaw;
+  String? _skippedValue;
+  String? _skippedAgainstRaw;
 
-  static const Duration tombstoneTTL = Duration(days: 365);
+  /// What the cloud store tracked in total when the write was skipped (see
+  /// [SwitchableCloudKVStore.trackedBytes]); null for a store that does not
+  /// track.
+  int? _skippedTracked;
+
+  /// The envelope version this build reads and writes.
+  static const int envelopeVersion = 1;
+
+  static const Duration defaultTombstoneTTL = Duration(days: 365);
 
   /// [local] defaults to the JSON file at [filePath].
   SyncedStore({
@@ -113,13 +160,20 @@ class SyncedStore<T extends Syncable> {
     required this.cloud,
     this.seed,
     LocalRecords<T>? local,
+    this.cloudFormat = CloudFormat.plainList,
+    this.prefer,
+    this.tombstoneTTL = defaultTombstoneTTL,
   }) : _local = local ?? JsonFileRecords<T>(filePath, itemFromJson);
 
   Map<String, Record<T>> keyed(List<Record<T>> records) {
     final byId = <String, Record<T>>{};
     for (final record in records) {
       final existing = byId[record.item.id];
-      if (existing == null || !existing.updatedAt.isAfter(record.updatedAt)) {
+      if (existing == null) {
+        byId[record.item.id] = record;
+      } else if (prefer != null && existing.updatedAt == record.updatedAt) {
+        if (prefer!(record, existing)) byId[record.item.id] = record;
+      } else if (!existing.updatedAt.isAfter(record.updatedAt)) {
         byId[record.item.id] = record;
       }
     }
@@ -132,9 +186,11 @@ class SyncedStore<T extends Syncable> {
   }
 
   List<Record<T>> prune(List<Record<T>> records, {DateTime? now}) {
+    final ttl = tombstoneTTL;
+    if (ttl == null) return List.of(records);
     final current = now ?? DateTime.now();
     return records
-        .where((r) => !(r.deleted && current.difference(r.updatedAt) > tombstoneTTL))
+        .where((r) => !(r.deleted && current.difference(r.updatedAt) > ttl))
         .toList();
   }
 
@@ -171,20 +227,98 @@ class SyncedStore<T extends Syncable> {
 
   Future<void> _writeLocal(List<Record<T>> records) => _local.write(records);
 
+  /// True while the last cloud read found a value this build cannot use: an
+  /// envelope with a newer version, or one that does not decode. The store
+  /// then works from its local copy and leaves that key alone, until a read
+  /// finds a usable value (or none). Only stores using [CloudFormat.envelope]
+  /// ever report it.
+  bool get cloudValueUnreadable => _cloudUnreadable;
+
+  /// True after a cloud write was skipped because the store is full; false
+  /// after the next write that went through (or once the cloud already holds
+  /// what this store would write). An identical skipped write is not retried
+  /// until the records or the cloud value change, or the cloud store's
+  /// tracked total drops (another key shrank, so there may be room now).
+  bool get cloudWriteSkipped => _cloudWriteSkipped;
+
   Future<List<Record<T>>> _readCloud() async {
     final raw = await cloud.getString(cloudKey);
-    if (raw == null || raw.isEmpty) return [];
+    _lastCloudRaw = raw;
+    if (raw == null || raw.isEmpty) {
+      _cloudUnreadable = false;
+      return [];
+    }
+    if (cloudFormat == CloudFormat.envelope) {
+      final decoded = _decodeEnvelope(raw);
+      _cloudUnreadable = decoded == null;
+      return decoded ?? [];
+    }
+    _cloudUnreadable = false;
     try {
-      final decoded = jsonDecode(raw) as List<dynamic>;
-      return decoded.map((e) => Record.fromJson<T>(e as Map<String, dynamic>, itemFromJson)).toList();
+      return _recordsFromList(jsonDecode(raw) as List<dynamic>);
     } catch (_) {
       return [];
     }
   }
 
-  Future<void> _writeCloud(List<Record<T>> records) {
-    return cloud.setString(cloudKey, jsonEncode(records.map((r) => r.toJson()).toList()));
+  List<Record<T>> _recordsFromList(List<dynamic> list) {
+    return list.map((e) => Record.fromJson<T>(e as Map<String, dynamic>, itemFromJson)).toList();
   }
+
+  /// The records in an envelope or a legacy plain list; null when the value
+  /// is from a newer version or cannot be decoded.
+  List<Record<T>>? _decodeEnvelope(String raw) {
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is List<dynamic>) return _recordsFromList(decoded);
+      if (decoded is! Map<String, dynamic>) return null;
+      final version = decoded['v'];
+      if (version is! int || version > envelopeVersion || version < 1) return null;
+      if (decoded['z'] != 'gzip') return null;
+      final bytes = GZipDecoder().decodeBytes(base64Decode(decoded['data'] as String), verify: true);
+      return _recordsFromList(jsonDecode(utf8.decode(bytes)) as List<dynamic>);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  String _encodeCloud(List<Record<T>> records) {
+    final json = jsonEncode(records.map((r) => r.toJson()).toList());
+    if (cloudFormat == CloudFormat.plainList) return json;
+    final gzipped = Uint8List.fromList(GZipEncoder().encodeBytes(utf8.encode(json)));
+    return jsonEncode({'v': envelopeVersion, 'z': 'gzip', 'data': base64Encode(gzipped)});
+  }
+
+  /// Skipped while the key holds a value this build cannot read, so that
+  /// value survives.
+  Future<void> _writeCloud(List<Record<T>> records) async {
+    if (_cloudUnreadable) return;
+    final value = _encodeCloud(records);
+    final store = cloud;
+    final tracked = store is SwitchableCloudKVStore ? store.trackedBytes : null;
+    if (_cloudWriteSkipped && value == _skippedValue && _lastCloudRaw == _skippedAgainstRaw && !_roomFreed(tracked)) return;
+    var written = true;
+    if (store is SwitchableCloudKVStore) {
+      written = await store.trySetString(cloudKey, value);
+    } else {
+      await store.setString(cloudKey, value);
+    }
+    if (written) {
+      _cloudWriteSkipped = false;
+      _skippedValue = null;
+      _skippedAgainstRaw = null;
+      _skippedTracked = null;
+    } else {
+      _cloudWriteSkipped = true;
+      _skippedValue = value;
+      _skippedAgainstRaw = _lastCloudRaw;
+      _skippedTracked = tracked;
+    }
+  }
+
+  /// Whether the cloud store tracks less than it did when the write was
+  /// skipped.
+  bool _roomFreed(int? tracked) => tracked != null && _skippedTracked != null && tracked < _skippedTracked!;
 
   List<T> _liveSorted(List<Record<T>> records) {
     final live = records.where((r) => !r.deleted).toList()
@@ -206,7 +340,7 @@ class SyncedStore<T extends Syncable> {
     final cloudRecords = await _readCloud();
 
     List<Record<T>> merged;
-    if (local.isEmpty && cloudRecords.isEmpty && seed != null) {
+    if (local.isEmpty && cloudRecords.isEmpty && seed != null && !_cloudUnreadable) {
       final seeded = seed!();
       final distantPast = DateTime.fromMillisecondsSinceEpoch(-8640000000000000, isUtc: true);
       merged = <Record<T>>[
@@ -221,6 +355,11 @@ class SyncedStore<T extends Syncable> {
     final prunedCloud = prune(cloudRecords);
     if (!_sameRecordSet(prunedCloud, merged)) {
       await _writeCloud(merged);
+    } else if (!_cloudUnreadable) {
+      _cloudWriteSkipped = false;
+      _skippedValue = null;
+      _skippedAgainstRaw = null;
+      _skippedTracked = null;
     }
 
     return _liveSorted(merged);
@@ -233,6 +372,8 @@ class SyncedStore<T extends Syncable> {
       final other = byIdA[r.item.id];
       if (other == null) return false;
       if (other.deleted != r.deleted || other.order != r.order || other.updatedAt != r.updatedAt) return false;
+      // With a tie-breaker, equal stamps can still hold different content.
+      if (prefer != null && jsonEncode(other.item.toJson()) != jsonEncode(r.item.toJson())) return false;
     }
     return true;
   }
@@ -316,6 +457,35 @@ class SyncedStore<T extends Syncable> {
     return missing.length;
   }
 
+  /// One-way intake of records converted from another source. A record is
+  /// taken when its id has never been seen here (a tombstone counts as seen),
+  /// or when its `updatedAt` is strictly later than the stored one; anything
+  /// else, equal stamps included, is ignored. The record is kept as given,
+  /// metadata and all. One commit for the batch; returns whether anything
+  /// changed.
+  Future<bool> absorb(List<Record<T>> incoming) => _serialized(() => _absorb(incoming));
+
+  Future<bool> _absorb(List<Record<T>> incoming) async {
+    // Tombstones too old to keep would be pruned straight away (never, when
+    // the store keeps tombstones for ever).
+    final candidates = prune(incoming);
+    if (candidates.isEmpty) return false;
+    final byId = keyed(await _readLocal() + await _readCloud());
+    var changed = false;
+    for (final record in candidates) {
+      final stored = byId[record.item.id];
+      if (stored == null ||
+          record.updatedAt.isAfter(stored.updatedAt) ||
+          (prefer != null && record.updatedAt == stored.updatedAt && prefer!(record, stored))) {
+        byId[record.item.id] = record;
+        changed = true;
+      }
+    }
+    if (!changed) return false;
+    await _commit(byId.values.toList());
+    return true;
+  }
+
   /// Tombstones every item in [ids] in one commit.
   Future<List<T>> deleteAll(Iterable<String> ids) => _serialized(() => _deleteAll(ids));
 
@@ -374,10 +544,17 @@ class SyncedStore<T extends Syncable> {
   /// and every imported item is written, all re-stamped with [now]
   /// (defaulting to the current time) so this restore beats any older edit
   /// already sitting on another device once sync catches up.
-  Future<List<T>> importRecords(List<Record<T>> records, {required bool replace, DateTime? now}) => _serialized(() => _importRecords(records, replace: replace, now: now));
+  ///
+  /// [replaceWhere] limits a replace to part of the collection: only records
+  /// it selects are tombstoned or overwritten, and an imported record is
+  /// ignored unless it is selected itself and does not land on a stored
+  /// record outside the selection. Without it the whole collection is
+  /// replaced. It has no effect on a merge.
+  Future<List<T>> importRecords(List<Record<T>> records, {required bool replace, DateTime? now, bool Function(Record<T> record)? replaceWhere}) =>
+      _serialized(() => _importRecords(records, replace: replace, now: now, replaceWhere: replaceWhere));
 
-  Future<List<T>> _importRecords(List<Record<T>> records, {required bool replace, DateTime? now}) async {
-    final local = await _readLocal();
+  Future<List<T>> _importRecords(List<Record<T>> records, {required bool replace, DateTime? now, bool Function(Record<T> record)? replaceWhere}) async {
+    var local = await _readLocal();
     if (!replace) {
       final updatedLocal = merge(local, records);
       await _commit(updatedLocal);
@@ -385,6 +562,16 @@ class SyncedStore<T extends Syncable> {
     }
 
     final effectiveNow = now ?? DateTime.now();
+    if (replaceWhere != null) {
+      // A scope is judged against everything this store knows, cloud-only
+      // records included, so one outside the selection is never overwritten.
+      local = keyed([...local, ...await _readCloud()]).values.toList();
+      final localById = {for (final r in local) r.item.id: r};
+      records = [
+        for (final r in records)
+          if (replaceWhere(r) && (localById[r.item.id] == null || replaceWhere(localById[r.item.id]!))) r,
+      ];
+    }
     final importedIds = records.map((r) => r.item.id).toSet();
     // Every local LIVE item not present in the import is tombstoned (soft
     // deleted) rather than dropped, so the deletion itself propagates on
@@ -393,7 +580,7 @@ class SyncedStore<T extends Syncable> {
     // clock shouldn't reset just because a restore happened to run.
     final tombstoned = [
       for (final r in local)
-        if (r.deleted || importedIds.contains(r.item.id)) r else r.copyWith(deleted: true, updatedAt: effectiveNow),
+        if (r.deleted || importedIds.contains(r.item.id) || (replaceWhere != null && !replaceWhere(r))) r else r.copyWith(deleted: true, updatedAt: effectiveNow),
     ];
     final restamped = [for (final r in records) r.copyWith(updatedAt: effectiveNow)];
     final updatedLocal = [...tombstoned, ...restamped];

@@ -3369,5 +3369,23 @@
   "startTaskAlert": "Set a price alert",
   "startTaskBankMessages": "Set up bank messages",
   "settingsHelpRunSetup": "Run setup again",
-  "settingsHelpRunSetupSubtitle": "Answer the setup questions again. Nothing you use is turned off."
+  "settingsHelpRunSetupSubtitle": "Answer the setup questions again. Nothing you use is turned off.",
+  "settingsNeedsAttention": "Needs attention",
+  "settingsICloudSyncStatusAttention": "Sync needs attention. See below.",
+  "bookHealthMigration": "Some holdings from before the update could not be read. They are still stored on this device and will be tried again the next time Qima starts.",
+  "bookHealthNewerBuild": "Another device saved data with a newer version of Qima, so sync for it is paused here. Update Qima on this device.",
+  "bookHealthLegacy": "Data that an older version of Qima left in iCloud could not be read. Qima will try again on the next sync.",
+  "bookHealthLoadFailed": "Some of your data could not be loaded, so parts of Qima may look empty. Nothing was deleted. Close and reopen Qima to try again.",
+  "backupErrorHoldingsUnreadable": "Your holdings from before the update could not be read yet, so a backup now would leave them out. Close and reopen Qima, then try again.",
+  "tradeSaveFailed": "Couldn't save this. Nothing was changed. Try again.",
+  "tradeRejectedNothing": "This trade has nothing in it: the quantity or the amount is zero.",
+  "tradeRejectedCash": "The money paid or received doesn't match this trade. Check the amount and the account's currency.",
+  "backupImportReplaceDropsCash": "{count, plural, =1{Replacing removes the account that 1 trade was paid from or into, because this older backup doesn't have it.} other{Replacing removes the accounts that {count} trades were paid from or into, because this older backup doesn't have them.}}",
+  "@backupImportReplaceDropsCash": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  }
 }

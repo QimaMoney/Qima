@@ -2,8 +2,8 @@ import '../models/price_alert.dart';
 import 'cloud_kv_store.dart';
 import 'synced_store.dart';
 
-/// Thin wrapper over [SyncedStore] for price alert definitions. Mirrors
-/// `HoldingsStore` — no legacy migration needed for a from-scratch install.
+/// Thin wrapper over [SyncedStore] for price alert definitions. No legacy
+/// migration needed for a from-scratch install.
 class AlertsStore {
   final SyncedStore<PriceAlert> _store;
 

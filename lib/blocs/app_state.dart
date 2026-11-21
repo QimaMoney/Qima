@@ -33,7 +33,41 @@ enum CloudSyncStatus {
   /// The iCloud KVS quota (1 MB total, 1024 keys) was exceeded on a write —
   /// local data stays authoritative; the write is simply not reflected in
   /// the cloud until something is freed up (spec Phase 7 "Size guard").
-  storageFull;
+  storageFull,
+
+  /// A sync finished, but something about the book is not right (see
+  /// [BookHealth]); the Settings card says what.
+  needsAttention;
+}
+
+/// What is wrong with the book on this device, if anything. Each flag is one
+/// kind of problem with its own row in Settings; none stops the app.
+class BookHealth extends Equatable {
+  /// A step of the on-device migration to the ledger did not finish: the
+  /// trades from before the update are still stored, and are tried again on
+  /// the next start.
+  final bool migrationFailed;
+
+  /// A value in the old cloud keys could not be read this time; the next
+  /// cloud change or start tries again.
+  final bool legacyUnreadable;
+
+  /// A collection of the book was written to the cloud by a newer build, so
+  /// its sync is paused until this app is updated.
+  final bool newerVersion;
+
+  /// Loading the trades or the book failed, so what is shown may be missing
+  /// some of what is stored.
+  final bool loadFailed;
+
+  const BookHealth({this.migrationFailed = false, this.legacyUnreadable = false, this.newerVersion = false, this.loadFailed = false});
+
+  static const BookHealth fine = BookHealth();
+
+  bool get hasProblem => migrationFailed || legacyUnreadable || newerVersion || loadFailed;
+
+  @override
+  List<Object?> get props => [migrationFailed, legacyUnreadable, newerVersion, loadFailed];
 }
 
 /// The app's single source of truth. Mirrors `AppModel.swift` (spec §4.1).
@@ -140,6 +174,9 @@ class AppState extends Equatable {
   /// yet. Never stored.
   final bool tourRequested;
 
+  /// What is wrong with the book on this device; see [BookHealth].
+  final BookHealth bookHealth;
+
   /// Zakat choices (v3) — synced like [baseCurrency], see
   /// `Preferences.zakatSettings`.
   final ZakatSettings zakatSettings;
@@ -183,6 +220,7 @@ class AppState extends Equatable {
     this.setup,
     this.getStartedDismissed = false,
     this.tourRequested = false,
+    this.bookHealth = BookHealth.fine,
     this.zakatSettings = const ZakatSettings(),
   })  : seriesByID = seriesByID ?? const {},
         rates = rates ?? FXRates.usdIdentity,
@@ -237,6 +275,7 @@ class AppState extends Equatable {
     SetupAnswers? setup,
     bool? getStartedDismissed,
     bool? tourRequested,
+    BookHealth? bookHealth,
     ZakatSettings? zakatSettings,
   }) {
     final nextTransactions = transactions ?? (lots == null ? null : _buys(lots));
@@ -277,6 +316,7 @@ class AppState extends Equatable {
       setup: setup ?? this.setup,
       getStartedDismissed: getStartedDismissed ?? this.getStartedDismissed,
       tourRequested: tourRequested ?? this.tourRequested,
+      bookHealth: bookHealth ?? this.bookHealth,
       zakatSettings: zakatSettings ?? this.zakatSettings,
     );
   }
@@ -318,6 +358,7 @@ class AppState extends Equatable {
         setup,
         getStartedDismissed,
         tourRequested,
+        bookHealth,
         zakatSettings,
       ];
 }

@@ -19,6 +19,8 @@ import 'package:qima/models/instrument_catalog.dart';
 import 'package:qima/models/book_account.dart';
 import 'package:qima/models/book_entry.dart';
 import 'package:qima/models/fx_history.dart';
+import 'package:qima/models/holding_cash_id.dart';
+import 'package:qima/models/holding_transaction.dart';
 import 'package:qima/models/minor_units.dart';
 import 'package:qima/models/money.dart';
 import 'package:qima/models/money_settings.dart';
@@ -50,9 +52,11 @@ import 'package:qima/theme/money_labels.dart';
 import 'package:qima/services/local_file_store.dart';
 import 'package:qima/services/price_repository.dart';
 import 'package:qima/theme/app_theme.dart';
+import 'package:qima/widgets/money_widgets.dart';
 import 'package:qima/theme/help_topics.dart';
 import 'package:qima/widgets/help_button.dart';
 import 'package:qima/services/preferences.dart';
+import '../helpers/old_trade_entry.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// A recognizer the test speaks through.
@@ -141,6 +145,7 @@ void main() {
     app = AppCubit(repository: _OfflineRepository());
     app.emit(app.state.copyWith(initialized: true, rates: rates, fxHistory: FXHistory.empty, baseCurrency: 'SAR'));
     money = MoneyCubit(store: app.bookStore, baseCurrency: () => 'SAR', rates: () => app.state.rates);
+    app.onBookChanged = (key) => key == null ? money.load() : money.adoptCloudChanges(key);
     final inboxDir = Directory('${dir.path}/inbox')..createSync();
     importer = ImportCubit(
       inbox: FolderInbox(folders: [inboxDir]),
@@ -341,11 +346,139 @@ void main() {
     });
     await tester.pump();
     expect(money.state.book.balanceOf('rajhi'), before - sar(3000));
-    final cash = money.state.entries.firstWhere((e) => e.template == EntryTemplate.holdingTrade);
-    await tester.pumpWidget(wrap(EntryDetailScreen(entryId: cash.id), const Locale('en')));
+    // One entry: the trade, with the cash it moved.
+    final trade = money.state.entries.singleWhere((e) => e.template.isHoldingEntry);
+    expect(money.state.entries.where((e) => e.template == EntryTemplate.holdingTrade), isEmpty);
+    expect(app.state.transactions.single.id, trade.id);
+    await tester.pumpWidget(wrap(EntryDetailScreen(entryId: holdingCashId(trade.id)), const Locale('en')));
     await tester.pump();
     expect(find.byKey(const ValueKey('entryFromHoldings')), findsOneWidget);
     expect(find.byTooltip(l10n.commonDelete), findsNothing);
+    expect(find.byTooltip(l10n.entryEditTitle), findsNothing);
+  });
+
+  /// Every text on screen, in order.
+  List<String> texts(WidgetTester tester) => [for (final t in tester.widgetList<Text>(find.byType(Text))) t.data ?? t.textSpan?.toPlainText() ?? ''];
+
+  HoldingTransaction gold(String id, TransactionKind kind, double qty, double price, {double fee = 0}) => HoldingTransaction(
+      id: id, instrumentID: 'metal.XAU', kind: kind, quantity: qty, unit: PriceUnit.gram, unitPrice: price, fee: fee, currency: 'SAR', date: DateTime.now());
+
+  Future<void> saveTrade(WidgetTester tester, HoldingTransaction t, String? accountId) async {
+    await tester.runAsync(() async {
+      expect(await app.saveTransaction(t, cash: money.cashLegFor(t, accountId), label: accountId == null ? '' : 'Gold'), isNull);
+    });
+  }
+
+  testWidgets('a trade reads in its detail as the cash entry of an earlier build did', (tester) async {
+    await tester.runAsync(seed);
+    size(tester, const Size(390, 1600));
+    final l10n = await AppLocalizations.delegate.load(const Locale('en'));
+    await saveTrade(tester, gold('b1', TransactionKind.buy, 10, 300), 'rajhi');
+    // The same cash, as an earlier build stored it.
+    final rajhi = money.state.book.accounts['rajhi']!;
+    final old = oldHoldingTrade(money.builder, rajhi, sar(3000), DateTime.now(), incoming: false, id: 'old-cash', merchant: 'Gold');
+    await tester.runAsync(() => app.bookStore.entries.upsert(old).then((_) => money.load()));
+
+    await tester.pumpWidget(wrap(EntryDetailScreen(entryId: 'old-cash'), const Locale('en')));
+    await tester.pump();
+    final before = texts(tester);
+    await tester.pumpWidget(wrap(EntryDetailScreen(entryId: holdingCashId('b1')), const Locale('en')));
+    await tester.pump();
+    final after = texts(tester);
+    expect([for (final t in after) if (t != l10n.entryFromHoldings) t], before);
+    // In words: the bank down, Holdings up, one sentence on what it did to worth.
+    expect(after.where((t) => t.startsWith('Al Rajhi current account down by')), hasLength(1));
+    expect(after.where((t) => t.startsWith('Holdings up by') || t.startsWith('Holdings down by')), hasLength(1));
+    expect(after.where((t) => t.startsWith('Gold up') || t.startsWith('Gold down')), isEmpty);
+    expect(after, isNot(contains(l10n.hiuMove)));
+    expect(after, contains(l10n.hiuWorth));
+  });
+
+  testWidgets('trades are one filter chip in All transactions, and are found by the instrument name', (tester) async {
+    await tester.runAsync(seed);
+    // Wide, so every chip of the horizontal list is built.
+    size(tester, const Size(2400, 2400));
+    final l10n = await AppLocalizations.delegate.load(const Locale('en'));
+    await saveTrade(tester, gold('b1', TransactionKind.buy, 10, 300), 'rajhi');
+    await saveTrade(tester, gold('s1', TransactionKind.sell, 4, 320), 'rajhi');
+    // Held, not bought with money: for Holdings only.
+    await saveTrade(tester, gold('h1', TransactionKind.buy, 1, 300), null);
+    await tester.pumpWidget(wrap(const AllTransactionsScreen(), const Locale('en')));
+    await tester.pump();
+    expect(find.widgetWithText(ChoiceChip, l10n.tplHoldingTrade), findsOneWidget);
+    expect(find.byType(EntryRow).evaluate().where((e) => (e.widget as EntryRow).entry.template == EntryTemplate.holdingTrade), hasLength(2));
+    await tester.tap(find.widgetWithText(ChoiceChip, l10n.tplHoldingTrade));
+    await tester.pump();
+    expect(find.byType(EntryRow), findsNWidgets(2));
+    await tester.tap(find.widgetWithText(ChoiceChip, l10n.watchlistFilterAll));
+    await tester.pump();
+    await tester.enterText(find.byType(TextField), 'gold');
+    await tester.pump();
+    expect(find.byType(EntryRow), findsNWidgets(2));
+    await tester.enterText(find.byType(TextField), 'panda');
+    await tester.pump();
+    expect(find.byType(EntryRow), findsOneWidget);
+  });
+
+  group('a trade that cannot be saved', () {
+    Future<void> openFee(WidgetTester tester, {HoldingTransaction? existing}) async {
+      size(tester, const Size(390, 2400));
+      await tester.pumpWidget(wrap(TransactionEditorScreen(instrument: InstrumentCatalog.instrument('metal.XAU')!, defaultCurrency: 'SAR', existing: existing), const Locale('en')));
+      await tester.pump();
+    }
+
+    testWidgets('a fee that rounds to nothing is refused in words, and the screen stays open with nothing saved', (tester) async {
+      await tester.runAsync(seed);
+      final l10n = await AppLocalizations.delegate.load(const Locale('en'));
+      await openFee(tester);
+      await tester.tap(find.text(l10n.transactionKindFee));
+      await tester.pump();
+      await tester.enterText(find.byType(TextField).first, '0.001');
+      await tester.pump();
+      final entriesBefore = money.state.entries.length;
+      await tester.runAsync(() async {
+        await tester.tap(find.text(l10n.holdingsSave));
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+      });
+      await tester.pump();
+      expect(find.text(l10n.tradeRejectedNothing), findsOneWidget);
+      expect(find.textContaining('holding.metal'), findsNothing, reason: 'no developer text');
+      expect(find.byType(TransactionEditorScreen), findsOneWidget);
+      expect(app.state.transactions, isEmpty);
+      expect((await tester.runAsync(() => app.bookStore.entries.load()))!.length, entriesBefore);
+    });
+
+    testWidgets('any other failure is one general sentence, and nothing is changed', (tester) async {
+      await tester.runAsync(seed);
+      final l10n = await AppLocalizations.delegate.load(const Locale('en'));
+      // The id of a trade that is the id of an entry of another kind.
+      final spend = money.state.entries.firstWhere((e) => e.merchant == 'Panda');
+      final taken = gold(spend.id, TransactionKind.buy, 1, 300);
+      await openFee(tester, existing: taken);
+      final before = (await tester.runAsync(() => app.bookStore.entries.load()))!;
+      await tester.runAsync(() async {
+        await tester.tap(find.text(l10n.holdingsSave));
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+      });
+      await tester.pump();
+      expect(find.text(l10n.tradeSaveFailed), findsOneWidget);
+      expect(find.byType(TransactionEditorScreen), findsOneWidget);
+      expect(app.state.transactions, isEmpty);
+      expect((await tester.runAsync(() => app.bookStore.entries.load()))!, before);
+    });
+  });
+
+  testWidgets('a cash entry an earlier build left without its trade can be deleted from Money', (tester) async {
+    await tester.runAsync(seed);
+    size(tester, const Size(390, 1200));
+    final l10n = await AppLocalizations.delegate.load(const Locale('en'));
+    final rajhi = money.state.book.accounts['rajhi']!;
+    final orphan = oldHoldingTrade(money.builder, rajhi, sar(500), DateTime.now(), incoming: false, id: 'old-cash', merchant: 'Gold');
+    await tester.runAsync(() => app.bookStore.entries.upsert(orphan).then((_) => money.load()));
+    await tester.pumpWidget(wrap(const EntryDetailScreen(entryId: 'old-cash'), const Locale('en')));
+    await tester.pump();
+    expect(find.byKey(const ValueKey('entryFromHoldings')), findsNothing);
+    expect(find.byTooltip(l10n.commonDelete), findsOneWidget);
   });
 
   testWidgets('spend, income and transfer are tabs of one page that keep the amount', (tester) async {

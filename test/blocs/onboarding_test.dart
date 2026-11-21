@@ -6,6 +6,7 @@ import 'package:qima/blocs/app_cubit.dart';
 import 'package:qima/models/asset.dart';
 import 'package:qima/models/fx_history.dart';
 import 'package:qima/models/holding.dart';
+import 'package:qima/models/holding_transaction.dart';
 import 'package:qima/models/instrument_catalog.dart';
 import 'package:qima/models/money.dart';
 import 'package:qima/models/price_alert.dart';
@@ -144,13 +145,13 @@ void main() {
   });
 
   test('an existing install with holdings (default watchlist otherwise) is not shown the tour', () async {
-    // Writes straight through `HoldingsStore` (not `AppCubit.saveLot`, whose
-    // own unawaited backup-reminder refresh would otherwise still be in
+    // Writes straight through the holdings ledger (not `AppCubit.saveTransaction`,
+    // whose own unawaited backup-reminder refresh would otherwise still be in
     // flight when this cubit closes).
     final gold = InstrumentCatalog.instrument('metal.XAU')!;
     final seedCubit = makeCubit();
     await seedCubit.init();
-    await seedCubit.holdingsStore.upsert(HoldingLot(
+    await seedCubit.holdings.upsert(HoldingTransaction.fromLot(HoldingLot(
       id: 'lot-1',
       instrumentID: gold.id,
       quantity: 1,
@@ -158,7 +159,7 @@ void main() {
       unitCost: 1900,
       costCurrency: 'USD',
       date: DateTime(2024, 1, 1),
-    ));
+    )));
     await seedCubit.close();
 
     final cubit = makeCubit();

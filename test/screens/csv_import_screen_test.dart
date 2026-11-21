@@ -5,15 +5,16 @@ import 'package:qima/blocs/app_cubit.dart';
 import 'package:qima/l10n/app_localizations.dart';
 import 'package:qima/l10n/app_localizations_en.dart';
 import 'package:qima/models/asset.dart';
+import 'package:qima/models/book_entry.dart';
 import 'package:qima/models/holding_transaction.dart';
 import 'package:qima/models/money.dart';
 import 'package:qima/models/quote.dart';
 import 'package:qima/screens/csv_import_screen.dart';
 import 'package:qima/services/csv/csv_import.dart';
-import 'package:qima/services/holdings_store.dart';
+import 'package:qima/services/book_store.dart';
 import 'package:qima/services/preferences.dart';
 import 'package:qima/services/price_repository.dart';
-import 'package:qima/services/transactions_store.dart';
+import 'package:qima/services/holdings_ledger.dart';
 import 'package:qima/theme/app_theme.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -28,16 +29,20 @@ class _OfflineRepository extends PriceRepository {
   Future<QuoteSeries> cachedSeries(Instrument instrument) async => QuoteSeries.empty(instrument.id);
 }
 
-class _MemoryTransactionsStore extends TransactionsStore {
+class _MemoryHoldings extends HoldingsLedger {
   final Map<String, HoldingTransaction> rows = {};
 
-  _MemoryTransactionsStore() : super(legacyLots: HoldingsStore());
+  /// Thrown by the next import, in place of writing it.
+  Object? failWith;
+
+  _MemoryHoldings() : super(BookStore());
 
   @override
   Future<List<HoldingTransaction>> load() async => rows.values.toList();
 
   @override
   Future<List<HoldingTransaction>> addAll(List<HoldingTransaction> transactions) async {
+    if (failWith != null) throw failWith!;
     for (final t in transactions) {
       rows[t.id] = t;
     }
@@ -63,7 +68,7 @@ void main() {
   }
 
   Future<AppCubit> cubit() async {
-    final c = AppCubit(repository: _OfflineRepository(), transactionsStore: _MemoryTransactionsStore());
+    final c = AppCubit(repository: _OfflineRepository(), holdings: _MemoryHoldings());
     c.preferences = await Preferences.create();
     c.emit(c.state.copyWith(
       initialized: true,
@@ -126,6 +131,47 @@ void main() {
     await tester.tap(find.text(en.csvImportUndo));
     await tester.pumpAndSettle();
     expect(c.state.transactions, isEmpty);
+  });
+
+  testWidgets('a file that cannot be added says so in words, adds nothing, and can be tried again', (tester) async {
+    phone(tester);
+    final store = _MemoryHoldings();
+    final c = AppCubit(repository: _OfflineRepository(), holdings: store);
+    c.preferences = await Preferences.create();
+    c.emit(c.state.copyWith(
+      initialized: true,
+      baseCurrency: 'SAR',
+      rates: FXRates(base: 'USD', rates: const {'USD': 1, 'SAR': 3.75}, updatedAt: DateTime(2026)),
+    ));
+    await tester.pumpWidget(harness(c, const CsvImportScreen(fileName: 'broker.csv', text: csv)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(en.csvImportReview));
+    await tester.pumpAndSettle();
+
+    store.failWith = const HoldingRejected([EntryIssue(EntryProblem.zeroLine, 'x', 'The line on holding.metal.XAU is zero.')]);
+    await tester.tap(find.text(en.csvImportConfirm(2)));
+    await tester.pumpAndSettle();
+    expect(find.text(en.tradeRejectedNothing), findsOneWidget);
+    expect(find.textContaining('holding.metal'), findsNothing, reason: 'no developer text');
+    expect(store.rows, isEmpty);
+    expect(c.state.transactions, isEmpty);
+    expect(find.text(en.csvImportConfirm(2)), findsOneWidget, reason: 'still on the review');
+
+    // The notice is gone before the next try, which it would cover.
+    await tester.pump(const Duration(seconds: 6));
+    await tester.pumpAndSettle();
+    store.failWith = StateError('the store is not writable');
+    await tester.tap(find.text(en.csvImportConfirm(2)));
+    await tester.pumpAndSettle();
+    expect(find.text(en.tradeSaveFailed), findsOneWidget);
+
+    await tester.pump(const Duration(seconds: 6));
+    await tester.pumpAndSettle();
+    store.failWith = null;
+    await tester.tap(find.text(en.csvImportConfirm(2)));
+    await tester.pumpAndSettle();
+    expect(find.text(en.csvImportDoneTitle(2)), findsOneWidget);
+    expect(c.state.transactions, hasLength(2));
   });
 
   testWidgets('re-importing the same file finds only duplicates', (tester) async {

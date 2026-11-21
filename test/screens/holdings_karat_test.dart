@@ -18,6 +18,7 @@ import 'package:qima/services/preferences.dart';
 import 'package:qima/theme/app_theme.dart';
 import 'package:qima/theme/masking.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../helpers/money_provider.dart';
 
 /// Holdings karat feature (spec: "Holdings: karat per lot + totals & average
 /// cost"): the lot editor's karat selector, and HoldingsScreen's "Total
@@ -54,8 +55,8 @@ void main() {
   }
 
   Widget harness({required Widget home, required AppCubit cubit}) {
-    return BlocProvider<AppCubit>.value(
-      value: cubit,
+    return MultiBlocProvider(
+      providers: [BlocProvider<AppCubit>.value(value: cubit), testMoneyProvider(cubit)],
       child: MaterialApp(
         localizationsDelegates: AppLocalizations.localizationsDelegates,
         supportedLocales: AppLocalizations.supportedLocales,

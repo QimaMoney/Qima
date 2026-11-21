@@ -97,6 +97,11 @@ class SettingsScreen extends StatelessWidget {
                   const _ICloudSyncSection(),
                   const SizedBox(height: DS.spaceLG),
                 ],
+                if (state.bookHealth.hasProblem) ...[
+                  SectionHeader(l10n.settingsNeedsAttention),
+                  _BookHealthSection(health: state.bookHealth),
+                  const SizedBox(height: DS.spaceLG),
+                ],
                 SectionHeader(l10n.settingsSummaries),
                 DSCard(
                   padding: const EdgeInsets.symmetric(horizontal: DS.spaceMD, vertical: DS.spaceXS),
@@ -546,6 +551,8 @@ class _ICloudSyncSection extends StatelessWidget {
         return l10n.settingsICloudSyncStatusNotSignedIn;
       case CloudSyncStatus.storageFull:
         return l10n.settingsICloudSyncStatusStorageFull;
+      case CloudSyncStatus.needsAttention:
+        return l10n.settingsICloudSyncStatusAttention;
       case CloudSyncStatus.upToDate:
         final at = state.lastCloudSyncAt;
         if (at == null) return l10n.settingsICloudSyncStatusSyncing;
@@ -564,6 +571,7 @@ class _ICloudSyncSection extends StatelessWidget {
       builder: (context, state) {
         final statusText = _statusText(context, state, l10n);
         final statusColor = state.cloudSyncStatus == CloudSyncStatus.storageFull ||
+                state.cloudSyncStatus == CloudSyncStatus.needsAttention ||
                 state.cloudSyncStatus == CloudSyncStatus.notSignedIn
             ? colors.down
             : colors.textTertiary;
@@ -590,6 +598,46 @@ class _ICloudSyncSection extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+/// What is wrong with the book on this device, one row per kind of problem,
+/// each saying what happened and what to do. Shown only while there is one.
+class _BookHealthSection extends StatelessWidget {
+  final BookHealth health;
+
+  const _BookHealthSection({required this.health});
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final colors = context.colors;
+    final rows = [
+      if (health.migrationFailed) (const ValueKey('bookHealthMigration'), l10n.bookHealthMigration),
+      if (health.newerVersion) (const ValueKey('bookHealthNewerBuild'), l10n.bookHealthNewerBuild),
+      if (health.legacyUnreadable) (const ValueKey('bookHealthLegacy'), l10n.bookHealthLegacy),
+      if (health.loadFailed) (const ValueKey('bookHealthLoadFailed'), l10n.bookHealthLoadFailed),
+    ];
+    return DSCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (final (key, text) in rows)
+            Padding(
+              key: key,
+              padding: const EdgeInsets.symmetric(vertical: DS.spaceXS),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.warning_amber_rounded, size: 18, color: colors.down),
+                  const SizedBox(width: DS.spaceSM),
+                  Expanded(child: Text(text, style: TextStyle(color: colors.textSecondary, fontSize: 13))),
+                ],
+              ),
+            ),
+        ],
+      ),
     );
   }
 }

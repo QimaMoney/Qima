@@ -21,6 +21,7 @@ import 'package:qima/screens/transaction_editor_screen.dart';
 import 'package:qima/screens/watchlist_screen.dart';
 import 'package:qima/services/local_file_store.dart';
 import 'package:qima/services/price_repository.dart';
+import '../helpers/money_provider.dart';
 
 /// No-ops every network/shared_preferences-touching call `AppCubit` fires in
 /// the background (refresh, FX/history backfill) so the widget tests below
@@ -142,8 +143,8 @@ Future<void> _openWatch(WidgetTester tester, {AddStart start = AddStart.watchlis
 }
 
 Widget _app(AppCubit cubit, {Locale locale = const Locale('en')}) {
-  return BlocProvider<AppCubit>.value(
-    value: cubit,
+  return MultiBlocProvider(
+    providers: [BlocProvider<AppCubit>.value(value: cubit), testMoneyProvider(cubit)],
     child: MaterialApp(
       locale: locale,
       localizationsDelegates: AppLocalizations.localizationsDelegates,

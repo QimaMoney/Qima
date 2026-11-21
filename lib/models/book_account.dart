@@ -131,6 +131,10 @@ class BookAccount extends Equatable implements Syncable {
   /// spending and worth accounts, which keep a balance per currency.
   final String? currency;
 
+  /// For a holding: the instrument it counts (`metal.XAU`). A holding keeps
+  /// a quantity of it, not an amount of one currency.
+  final String? commodity;
+
   /// Off leaves the account out of net worth (for example, a car the person
   /// doesn't want counted). Its lines still balance.
   final bool countsInNetWorth;
@@ -167,6 +171,7 @@ class BookAccount extends Equatable implements Syncable {
     required this.side,
     required this.type,
     this.currency,
+    this.commodity,
     this.countsInNetWorth = true,
     this.archived = false,
     this.assetKind,
@@ -179,10 +184,33 @@ class BookAccount extends Equatable implements Syncable {
     this.statementRefs = const [],
   });
 
+  /// The id of the holding account for [instrumentId]. Holding accounts are
+  /// worked out from the lines that carry a commodity and never stored.
+  static String holdingId(String instrumentId) => 'holding.$instrumentId';
+
+  /// The account a holding of [instrumentId] is kept in.
+  factory BookAccount.holding(String instrumentId) =>
+      BookAccount(id: holdingId(instrumentId), name: instrumentId, side: AccountSide.own, type: AccountType.holding, commodity: instrumentId);
+
+  /// A holding account: one instrument, counted in quantity.
+  bool get isHolding => type == AccountType.holding && commodity != null;
+
+  /// Money you own or owe, in one currency: what the balance sheet, net
+  /// worth and every list of accounts are made of. A holding is not one:
+  /// the money on it is cost, in the currency of each trade, and its value
+  /// comes from live prices, so counting it would count it twice.
+  bool get onMoneySheet => side.onBalanceSheet && !isHolding;
+
   /// Why this account can't be used, or null when it is sound.
   String? get problem {
     if (!type.allows(side)) return 'A ${type.name} account can’t sit on the ${side.name} side.';
-    if (side.hasFixedCurrency && (currency == null || currency!.isEmpty)) return 'A ${side.name} account needs a currency.';
+    if (type == AccountType.holding) {
+      if (commodity == null || commodity!.isEmpty) return 'A holding account needs a commodity.';
+      if (currency != null) return 'A holding account keeps a quantity, so it takes no currency.';
+    } else if (commodity != null) {
+      return 'Only a holding has a commodity.';
+    }
+    if (side.hasFixedCurrency && type != AccountType.holding && (currency == null || currency!.isEmpty)) return 'A ${side.name} account needs a currency.';
     if (!side.hasFixedCurrency && currency != null) return 'A ${side.name} account keeps every currency, so it takes none.';
     if (assetKind != null && type != AccountType.asset) return 'Only an asset has a kind.';
     return null;
@@ -215,6 +243,7 @@ class BookAccount extends Equatable implements Syncable {
         side: side,
         type: type,
         currency: currency,
+        commodity: commodity,
         countsInNetWorth: countsInNetWorth ?? this.countsInNetWorth,
         archived: archived ?? this.archived,
         assetKind: assetKind ?? this.assetKind,
@@ -234,6 +263,7 @@ class BookAccount extends Equatable implements Syncable {
         'side': side.name,
         'type': type.name,
         if (currency != null) 'currency': currency,
+        if (commodity != null) 'commodity': commodity,
         if (!countsInNetWorth) 'countsInNetWorth': false,
         if (archived) 'archived': true,
         if (assetKind != null) 'assetKind': assetKind!.name,
@@ -252,6 +282,7 @@ class BookAccount extends Equatable implements Syncable {
         side: AccountSide.fromName(json['side'] as String),
         type: AccountType.fromName(json['type'] as String),
         currency: json['currency'] as String?,
+        commodity: json['commodity'] as String?,
         countsInNetWorth: json['countsInNetWorth'] as bool? ?? true,
         archived: json['archived'] as bool? ?? false,
         assetKind: AssetKind.fromName(json['assetKind'] as String?),
@@ -266,7 +297,7 @@ class BookAccount extends Equatable implements Syncable {
 
   @override
   List<Object?> get props =>
-      [id, name, side, type, currency, countsInNetWorth, archived, assetKind, boughtOn, cost, securedLoanId, heldForSale, creditLimit, note, statementRefs];
+      [id, name, side, type, currency, commodity, countsInNetWorth, archived, assetKind, boughtOn, cost, securedLoanId, heldForSale, creditLimit, note, statementRefs];
 }
 
 /// A calendar day as `yyyy-MM-dd`, so it is the same day on a device in

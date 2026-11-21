@@ -5,6 +5,7 @@ import 'package:uuid/uuid.dart';
 import '../blocs/app_cubit.dart';
 import '../blocs/app_state.dart';
 import '../l10n/app_localizations.dart';
+import '../models/holding_transaction.dart';
 import '../models/instrument_catalog.dart';
 import '../models/money.dart';
 import '../models/transaction_capture.dart';
@@ -13,6 +14,7 @@ import '../theme/masking.dart';
 import '../theme/qima_colors.dart';
 import '../theme/strings.dart';
 import '../widgets/section_header.dart';
+import '../widgets/trade_failure.dart';
 import 'holdings_screen.dart';
 import 'transaction_editor_screen.dart';
 
@@ -55,8 +57,18 @@ class _CaptureReviewScreenState extends State<CaptureReviewScreen> {
   Future<void> _confirm() async {
     final cubit = context.read<AppCubit>();
     final transaction = _draft.toTransaction(_id);
+    final messenger = ScaffoldMessenger.of(context);
+    final l10n = AppLocalizations.of(context)!;
     setState(() => _saving = true);
-    final conflict = await cubit.saveTransaction(transaction);
+    final HoldingTransaction? conflict;
+    try {
+      conflict = await cubit.saveTransaction(transaction);
+    } catch (error) {
+      debugPrint('Saving the captured trade failed: $error');
+      if (mounted) setState(() => _saving = false);
+      messenger.showSnackBar(SnackBar(content: Text(tradeFailureText(l10n, error))));
+      return;
+    }
     if (!mounted) return;
     setState(() => _saving = false);
     if (conflict != null) {
@@ -66,9 +78,7 @@ class _CaptureReviewScreenState extends State<CaptureReviewScreen> {
 
     // Captured before navigating away tears this context down.
     final navigator = Navigator.of(context);
-    final messenger = ScaffoldMessenger.of(context);
     final summary = transactionSummary(context, transaction, hidden: cubit.state.hideBalances);
-    final l10n = AppLocalizations.of(context)!;
     navigator.pushAndRemoveUntil(
       MaterialPageRoute(
         builder: (_) => HoldingsScreen(

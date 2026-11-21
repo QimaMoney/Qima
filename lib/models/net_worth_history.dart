@@ -31,7 +31,8 @@ class NetWorthHistory {
   }) {
     final counted = <String, int>{}; // account id → +1 own, −1 owe (shown sign folded in)
     for (final a in book.accounts.values) {
-      if (!a.side.onBalanceSheet || !a.countsInNetWorth) continue;
+      // A holding's cost is not its value: the live holdings are added below.
+      if (!a.onMoneySheet || !a.countsInNetWorth) continue;
       counted[a.id] = (a.side == AccountSide.own ? 1 : -1) * a.side.shownSign;
     }
     final entries = [

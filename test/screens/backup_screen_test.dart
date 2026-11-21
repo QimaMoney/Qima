@@ -34,7 +34,7 @@ void main() {
     cubit.preferences = await Preferences.create();
     cubit.backupService = BackupService(
       watchlistStore: cubit.watchlistStore,
-      holdingsStore: cubit.holdingsStore,
+      bookStore: cubit.bookStore,
       customInstrumentStore: cubit.customInstrumentStore,
       alertsStore: cubit.alertsStore,
       preferences: cubit.preferences,

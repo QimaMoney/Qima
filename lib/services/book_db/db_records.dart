@@ -8,13 +8,19 @@ import '../../models/syncable.dart';
 import '../local_file_store.dart';
 import '../synced_store.dart';
 import 'book_database.dart';
+import 'ledger_migration.dart';
+import 'ledger_plan.dart';
 
 /// One SQL statement and its arguments.
 typedef _Sql = (String, List<Object?>);
 
 /// A [LocalRecords] kept in the book database. `write` is row level: it
-/// compares the records with what is stored and touches only the rows that
-/// changed, in one transaction, logging each one in `changes`.
+/// compares the records with what this store last read and applies only the
+/// difference, in one transaction, logging each row it touches in `changes`.
+/// A row this store never read, because another store (another isolate, the
+/// background refresh) added it since, is never touched, so a write cannot
+/// undo someone else's save. When two stores change the same row the later
+/// writer wins.
 ///
 /// Subclasses say how one record maps to rows; the diff, the import of the
 /// old JSON file and the log are here.
@@ -46,55 +52,122 @@ abstract class DbRecords<T extends Syncable> implements LocalRecords<T> {
 
   String get _flag => 'imported.$collection';
 
+  /// What a collection needs before its first read or write: the ledger
+  /// collections wait for the migration of the old ones (it is done once per
+  /// file, and by whichever isolate gets there first), then every collection
+  /// imports its JSON file.
+  Future<void> _prepare(BookDatabase db) async {
+    if (LedgerNames.isLedger(collection)) await LedgerMigration.ensure(db);
+    await ensureImported(db);
+  }
+
+  /// Every stored record, for a migration that already holds a transaction on
+  /// [db].
+  Future<List<Record<T>>> storedIn(BookDatabase db) => _selectAll(db);
+
+  /// What this store last read or wrote, by id, and the database it came
+  /// from. A write is measured against it: the store changes the rows it has
+  /// changed since, and nothing else.
+  Map<String, Record<T>>? _known;
+  BookDatabase? _knownIn;
+
   @override
   Future<List<Record<T>>> read() async {
     final db = await BookDatabase.open();
-    await _ensureImported(db);
-    return db.transaction(() => _selectAll(db));
+    await _prepare(db);
+    final records = await db.transaction(() => _selectAll(db));
+    _remember(db, records);
+    return records;
   }
 
   @override
   Future<void> write(List<Record<T>> records) async {
     final db = await BookDatabase.open();
-    await _ensureImported(db);
-    final incoming = {for (final r in records) r.item.id: r};
-    await db.transaction(() async {
-      final stored = {for (final r in await _selectAll(db)) r.item.id: r};
-      final at = DateTime.now().toUtc().toIso8601String();
-      final statements = <_Sql>[];
-      for (final record in incoming.values) {
-        final before = stored[record.item.id];
-        final String op;
-        if (before == null) {
-          statements.addAll(_insertRecord(record));
-          op = record.deleted ? 'delete' : 'put';
-        } else {
-          final sameItem = _sameItem(before.item, record.item);
-          final sameMeta = before.order == record.order && before.deleted == record.deleted && _stamp(before) == _stamp(record);
-          if (sameItem && sameMeta) continue;
-          statements.addAll(sameItem ? _updateMeta(record) : _updateRecord(record));
-          // A move or a re-stamp is logged without the item, which did not
-          // change; only the first delete and a revival are worth a name.
-          if (!sameItem) {
-            op = record.deleted ? 'delete' : 'put';
-          } else if (!before.deleted && record.deleted) {
-            op = 'delete';
-          } else if (before.deleted && !record.deleted) {
-            op = 'put';
-          } else {
-            op = 'meta';
-          }
-        }
-        statements.add(_log(at, op, record.item.id, op == 'put' ? jsonEncode(record.item.toJson()) : null));
-      }
-      for (final id in stored.keys) {
-        if (incoming.containsKey(id)) continue;
-        statements.addAll(_removeRecord(id));
-        statements.add(_log(at, 'purge', id, null));
-      }
-      await _run(db, statements);
-    });
+    await _prepare(db);
+    final known = identical(_knownIn, db) ? _known! : <String, Record<T>>{};
+    final (changed, dropped) = _difference(known, records);
+    if (changed.isNotEmpty || dropped.isNotEmpty) {
+      await db.transaction(() => _apply(db, changed, dropped));
+    }
+    _remember(db, records);
   }
+
+  void _remember(BookDatabase db, List<Record<T>> records) {
+    _knownIn = db;
+    _known = {for (final r in records) r.item.id: r};
+  }
+
+  /// Applies to the stored rows what [records] changed against [known] (what
+  /// the caller last read): a record that is new or differs from its known
+  /// version is put, an id in [known] that [records] leaves out is purged.
+  /// A stored row the caller never read is left alone, and so is one that
+  /// already is what would be written, so nothing is logged for it. Runs
+  /// inside the transaction the caller holds. With nothing known (a caller
+  /// that only adds, like the migration) nothing is purged.
+  Future<void> writeIn(BookDatabase db, List<Record<T>> records, {Map<String, Record<T>> known = const {}}) async {
+    final (changed, dropped) = _difference(known, records);
+    await _apply(db, changed, dropped);
+  }
+
+  /// The records that differ from what [known] holds for their id, and the
+  /// ids [known] holds that [records] no longer has.
+  (List<Record<T>>, List<String>) _difference(Map<String, Record<T>> known, List<Record<T>> records) {
+    final incoming = {for (final r in records) r.item.id: r};
+    return (
+      [
+        for (final r in incoming.values)
+          if (!_same(known[r.item.id], r)) r,
+      ],
+      [
+        for (final id in known.keys)
+          if (!incoming.containsKey(id)) id,
+      ],
+    );
+  }
+
+  /// Puts [changed] and purges [dropped], logging each row it really
+  /// touches. If another store changed the same row meanwhile, this write
+  /// wins: the later writer's version is the one that stays.
+  Future<void> _apply(BookDatabase db, List<Record<T>> changed, List<String> dropped) async {
+    if (changed.isEmpty && dropped.isEmpty) return;
+    final stored = {for (final r in await _selectAll(db)) r.item.id: r};
+    final at = DateTime.now().toUtc().toIso8601String();
+    final statements = <_Sql>[];
+    for (final record in changed) {
+      final before = stored[record.item.id];
+      final String op;
+      if (before == null) {
+        statements.addAll(_insertRecord(record));
+        op = record.deleted ? 'delete' : 'put';
+      } else {
+        final sameItem = _sameItem(before.item, record.item);
+        if (sameItem && _sameMeta(before, record)) continue;
+        statements.addAll(sameItem ? _updateMeta(record) : _updateRecord(record));
+        // A move or a re-stamp is logged without the item, which did not
+        // change; only the first delete and a revival are worth a name.
+        if (!sameItem) {
+          op = record.deleted ? 'delete' : 'put';
+        } else if (!before.deleted && record.deleted) {
+          op = 'delete';
+        } else if (before.deleted && !record.deleted) {
+          op = 'put';
+        } else {
+          op = 'meta';
+        }
+      }
+      statements.add(_log(at, op, record.item.id, op == 'put' ? jsonEncode(record.item.toJson()) : null));
+    }
+    for (final id in dropped) {
+      if (!stored.containsKey(id)) continue;
+      statements.addAll(_removeRecord(id));
+      statements.add(_log(at, 'purge', id, null));
+    }
+    await _run(db, statements);
+  }
+
+  bool _same(Record<T>? a, Record<T> b) => a != null && _sameItem(a.item, b.item) && _sameMeta(a, b);
+
+  bool _sameMeta(Record<T> a, Record<T> b) => a.order == b.order && a.deleted == b.deleted && _stamp(a) == _stamp(b);
 
   /// Folds the collection's JSON file into the database the first time it is
   /// used, the way `SyncedStore.merge` folds two copies: per id the newer
@@ -106,7 +179,7 @@ abstract class DbRecords<T extends Syncable> implements LocalRecords<T> {
   /// A file that is there but cannot be read or parsed sets no flag and
   /// throws nothing away: the collection works from what the database holds,
   /// and the import is tried again on the next start.
-  Future<void> _ensureImported(BookDatabase db) async {
+  Future<void> ensureImported(BookDatabase db) async {
     if (await db.hasFlag(_flag) || db.skippedImports.contains(_flag)) return;
     final legacy = await _readLegacy();
     if (legacy == null) {
@@ -227,6 +300,11 @@ class DocumentRecords<T extends Syncable> extends DbRecords<T> {
 /// Entries: the keys `BookEntry.toJson` writes are columns, each line is a
 /// row in `entry_lines`, and any other key goes into `extra` so it is kept
 /// and comes back.
+///
+/// The table is shared: every row says which collection it belongs to, and
+/// this store reads, compares, rewrites and purges only its own. Entry ids
+/// are unique across collections (the id is the table's key), which holds for
+/// the ids the app makes.
 class EntryRecords extends DbRecords<BookEntry> {
   EntryRecords({required super.collection, required super.filePath}) : super(itemFromJson: BookEntry.fromJson);
 
@@ -255,18 +333,33 @@ class EntryRecords extends DbRecords<BookEntry> {
     ('base', 'base_amount', true),
   ];
 
+  /// The keys of a holding line that have a column. A line without them has
+  /// null there; one with a value of another type keeps it in `extra`.
+  static const List<(String, String, bool)> _optionalLineColumns = [
+    ('qty', 'quantity', true),
+    ('commodity', 'commodity', false),
+  ];
+
   @override
   Future<List<Record<BookEntry>>> _selectAll(BookDatabase db) async {
-    final lineRows = await db.customSelect('SELECT entry_id, idx, account_id, amount, currency, base_amount, extra FROM entry_lines ORDER BY entry_id, idx').get();
+    final lineRows = await db
+        .customSelect(
+          'SELECT l.entry_id, l.idx, l.account_id, l.amount, l.currency, l.base_amount, l.quantity, l.commodity, l.extra '
+          'FROM entry_lines l JOIN entries e ON e.id = l.entry_id WHERE e.collection = ? ORDER BY l.entry_id, l.idx',
+          variables: [Variable<String>(collection)],
+        )
+        .get();
     final linesByEntry = <String, List<Map<String, dynamic>>>{};
     for (final row in lineRows) {
       final data = row.data;
       linesByEntry.putIfAbsent(data['entry_id'] as String, () => []).add({
         for (final (key, column, _) in _lineColumns) key: data[column],
+        for (final (key, column, _) in _optionalLineColumns)
+          if (data[column] != null) key: data[column],
         ..._decode(data['extra']),
       });
     }
-    final rows = await db.customSelect('SELECT * FROM entries ORDER BY rowid').get();
+    final rows = await db.customSelect('SELECT * FROM entries WHERE collection = ? ORDER BY rowid', variables: [Variable<String>(collection)]).get();
     return [
       for (final row in rows)
         () {
@@ -289,9 +382,9 @@ class EntryRecords extends DbRecords<BookEntry> {
     final (values, extra, lines) = _split(record.item.toJson());
     return [
       (
-        'INSERT INTO entries (id, date, posted_date, template, status, base_currency, merchant, raw_merchant, note, source, extra, sort, updated_at, deleted) '
-            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [record.item.id, ...values, extra, ...DbRecords._meta(record)],
+        'INSERT INTO entries (id, collection, date, posted_date, template, status, base_currency, merchant, raw_merchant, note, source, extra, sort, updated_at, deleted) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [record.item.id, collection, ...values, extra, ...DbRecords._meta(record)],
       ),
       ..._lineStatements(record.item.id, lines),
     ];
@@ -303,8 +396,8 @@ class EntryRecords extends DbRecords<BookEntry> {
     return [
       (
         'UPDATE entries SET date = ?, posted_date = ?, template = ?, status = ?, base_currency = ?, merchant = ?, raw_merchant = ?, note = ?, source = ?, extra = ?, '
-            'sort = ?, updated_at = ?, deleted = ? WHERE id = ?',
-        [...values, extra, ...DbRecords._meta(record), record.item.id],
+            'sort = ?, updated_at = ?, deleted = ? WHERE id = ? AND collection = ?',
+        [...values, extra, ...DbRecords._meta(record), record.item.id, collection],
       ),
       ('DELETE FROM entry_lines WHERE entry_id = ?', [record.item.id]),
       ..._lineStatements(record.item.id, lines),
@@ -313,18 +406,18 @@ class EntryRecords extends DbRecords<BookEntry> {
 
   @override
   List<_Sql> _updateMeta(Record<BookEntry> record) => [
-        ('UPDATE entries SET sort = ?, updated_at = ?, deleted = ? WHERE id = ?', [...DbRecords._meta(record), record.item.id]),
+        ('UPDATE entries SET sort = ?, updated_at = ?, deleted = ? WHERE id = ? AND collection = ?', [...DbRecords._meta(record), record.item.id, collection]),
       ];
 
   @override
   List<_Sql> _removeRecord(String id) => [
         ('DELETE FROM entry_lines WHERE entry_id = ?', [id]),
-        ('DELETE FROM entries WHERE id = ?', [id]),
+        ('DELETE FROM entries WHERE id = ? AND collection = ?', [id, collection]),
       ];
 
   List<_Sql> _lineStatements(String entryId, List<List<Object?>> lines) => [
         for (final (i, line) in lines.indexed)
-          ('INSERT INTO entry_lines (entry_id, idx, account_id, amount, currency, base_amount, extra) VALUES (?, ?, ?, ?, ?, ?, ?)', [entryId, i, ...line]),
+          ('INSERT INTO entry_lines (entry_id, idx, account_id, amount, currency, base_amount, quantity, commodity, extra) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', [entryId, i, ...line]),
       ];
 
   /// Splits an entry's JSON into the column values, the leftover keys and the
@@ -347,9 +440,9 @@ class EntryRecords extends DbRecords<BookEntry> {
     return (values, rest.isEmpty ? null : jsonEncode(rest), lines ?? const []);
   }
 
-  /// One row per line (account, amount, currency, base amount, extra), or
-  /// null when a line does not fit the columns, in which case the entry keeps
-  /// `lines` whole in its own `extra`.
+  /// One row per line (account, amount, currency, base amount, quantity,
+  /// commodity, extra), or null when a line does not fit the columns, in which
+  /// case the entry keeps `lines` whole in its own `extra`.
   List<List<Object?>>? _splitLines(Object? lines) {
     if (lines is! List) return null;
     final out = <List<Object?>>[];
@@ -361,6 +454,15 @@ class EntryRecords extends DbRecords<BookEntry> {
         final value = rest.remove(key);
         if (numeric ? value is! int : (value is! String || !_storable(value))) return null;
         row.add(value);
+      }
+      for (final (key, _, numeric) in _optionalLineColumns) {
+        final value = rest[key];
+        if (numeric ? value is int : (value is String && _storable(value))) {
+          row.add(value);
+          rest.remove(key);
+        } else {
+          row.add(null);
+        }
       }
       row.add(rest.isEmpty ? null : jsonEncode(rest));
       out.add(row);

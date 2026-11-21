@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:qima/models/asset.dart';
 import 'package:qima/models/book_account.dart';
 import 'package:qima/models/book_entry.dart';
 import 'package:qima/services/book_db/book_database.dart';
@@ -453,7 +454,7 @@ void main() {
       expect(await store.entries.load(), hasLength(2));
       expect(await store.recurring.load(), isEmpty);
       expect((await store.loadSettings()).seenWhatsNew, isTrue);
-      expect(await count("SELECT count(*) FROM meta WHERE key LIKE 'imported.%'"), 4);
+      expect(await count("SELECT count(*) FROM meta WHERE key LIKE 'imported.ledger.%'"), 4);
     });
   });
 
@@ -498,6 +499,121 @@ void main() {
       final back = await store.load();
       expect(back.map((e) => e.id).toSet(), {for (var i = 0; i < 20; i++) 'n$i'});
       expect(back.every((e) => e.lines.length == 3 && e.isBalanced), isTrue);
+    });
+  });
+
+  group('holding lines and collections', () {
+    BookEntry holdingEntry(String id, {int quantity = 2500000000, double? raw}) => BookEntry(
+          id: id,
+          date: DateTime.utc(2026, 11, 8, 9, 30).toLocal(),
+          template: EntryTemplate.holdingBuy,
+          baseCurrency: 'SAR',
+          lines: [
+            EntryLine(
+              accountId: 'holding.metal.XAU',
+              amount: 1000,
+              currency: 'SAR',
+              baseAmount: 1000,
+              quantity: quantity,
+              commodity: 'metal.XAU',
+              unit: PriceUnit.gram,
+              karat: 21,
+              unitPrice: 0.1 + 0.2,
+              fee: 1.5,
+              quantityRaw: raw,
+            ),
+            const EntryLine(accountId: 'system.holdings', amount: -1000, currency: 'SAR', baseAmount: -1000),
+          ],
+        );
+
+    Future<void> otherRow(String id, {String collection = 'holdings.test'}) async {
+      await db.customStatement("INSERT INTO entries (id, collection, date, template, base_currency, sort, updated_at, deleted) VALUES ('$id', '$collection', '2026-11-08T09:30:00.000Z', 'holding_in', 'SAR', 0, '2026-11-08T10:00:00.000000Z', 0)");
+      await db.customStatement("INSERT INTO entry_lines (entry_id, idx, account_id, amount, currency, base_amount, quantity, commodity) VALUES ('$id', 0, 'a', 5, 'SAR', 5, 7, 'metal.XAU')");
+    }
+
+    test('quantity and commodity are columns, the other facts of the line are kept, and all come back', () async {
+      final e = holdingEntry('h1', raw: 2500000000.0000001 / 1e8);
+      await entries.write([_record(e), _record(_entry('m1'), order: 1)]);
+
+      final row = await db.customSelect("SELECT quantity, commodity, extra FROM entry_lines WHERE entry_id = 'h1' AND idx = 0").getSingle();
+      expect((row.data['quantity'], row.data['commodity']), (2500000000, 'metal.XAU'));
+      expect(jsonDecode(row.data['extra'] as String), {'unit': 'gram', 'karat': 21, 'px': 0.1 + 0.2, 'fee': 1.5, 'qtyRaw': 2500000000.0000001 / 1e8});
+      final cash = await db.customSelect("SELECT quantity, commodity, extra FROM entry_lines WHERE entry_id = 'h1' AND idx = 1").getSingle();
+      expect([cash.data['quantity'], cash.data['commodity'], cash.data['extra']], [null, null, null]);
+
+      final back = (await entries.read()).first.item;
+      expect(back, e);
+      expect(jsonEncode(back.toJson()), jsonEncode(e.toJson()));
+      expect(await entries.read(), hasLength(2));
+    });
+
+    test('a quantity or commodity of the wrong type stays in the line’s extra and comes back', () async {
+      final raw = holdingEntry('h2').toJson();
+      final line = (raw['lines'] as List<Map<String, dynamic>>)[0];
+      line['qty'] = 2.5;
+      line['commodity'] = 7;
+      final custom = EntryRecords.forTesting(collection: 'book.entries', filePath: 'book.entries.json', itemFromJson: (json) => _RawEntry(json, holdingEntry('h2')));
+      await custom.write([_record(_RawEntry(raw, holdingEntry('h2')))]);
+      expect((await custom.read()).single.item.toJson(), raw);
+      final row = await db.customSelect("SELECT quantity, commodity, extra FROM entry_lines WHERE entry_id = 'h2' AND idx = 0").getSingle();
+      expect([row.data['quantity'], row.data['commodity']], [null, null]);
+      expect(jsonDecode(row.data['extra'] as String), containsPair('qty', 2.5));
+    });
+
+    test('a line with a unit or a count this build does not know does not make the collection unreadable', () async {
+      await entries.write([_record(_entry('ok'))]);
+      await db.customStatement("INSERT INTO entries (id, collection, date, template, base_currency, sort, updated_at, deleted) VALUES ('later', 'book.entries', '2026-11-08T09:30:00.000Z', 'holding_in', 'SAR', 1, '2026-11-08T10:00:00.000000Z', 0)");
+      await db.customStatement(
+          "INSERT INTO entry_lines (entry_id, idx, account_id, amount, currency, base_amount, quantity, commodity, extra) VALUES ('later', 0, 'holding.metal.XAU', 0, 'SAR', 0, 5, 'metal.XAU', '{\"unit\":\"stone\",\"karat\":21.0}')");
+      final back = await entries.read();
+      expect(back.map((r) => r.item.id), ['ok', 'later']);
+      final line = back.last.item.lines.single;
+      expect((line.quantity, line.commodity, line.unit, line.karat), (5, 'metal.XAU', null, 21));
+    });
+
+    test('an entry that changes keeps its lines in step, quantity included', () async {
+      await entries.write([_record(holdingEntry('h3'))]);
+      await entries.write([_record(holdingEntry('h3', quantity: 100), at: DateTime.utc(2026, 11, 9))]);
+      expect((await entries.read()).single.item.lines.first.quantity, 100);
+      expect(await count('SELECT count(*) FROM entry_lines'), 2);
+    });
+
+    test('rows are put in the collection of the store that wrote them', () async {
+      await entries.write([_record(_entry('e1'))]);
+      expect(await count("SELECT count(*) FROM entries WHERE collection = 'book.entries'"), 1);
+      final other = EntryRecords(collection: 'holdings.test', filePath: 'holdings.json');
+      await other.write([_record(holdingEntry('h1'))]);
+      expect(await count("SELECT count(*) FROM entries WHERE collection = 'holdings.test'"), 1);
+    });
+
+    test('a store reads, writes and purges only its own collection', () async {
+      await otherRow('theirs');
+      await entries.write([_record(_entry('e1'), order: 0), _record(_entry('e2'), order: 1)]);
+      expect((await entries.read()).map((r) => r.item.id), ['e1', 'e2']);
+
+      // A write that leaves out every one of its own rows purges those only.
+      await entries.write([_record(_entry('e1'), order: 0)]);
+      expect((await entries.read()).map((r) => r.item.id), ['e1']);
+      await entries.write(const []);
+      expect(await entries.read(), isEmpty);
+      expect(await count("SELECT count(*) FROM entries WHERE id = 'theirs'"), 1);
+      expect(await count("SELECT count(*) FROM entry_lines WHERE entry_id = 'theirs'"), 1);
+
+      final other = EntryRecords(collection: 'holdings.test', filePath: 'holdings.json');
+      expect((await other.read()).map((r) => r.item.id), ['theirs']);
+      expect((await other.read()).single.item.lines.single.quantity, 7);
+    });
+
+    test('two stores over the table keep their own rows through writes and deletes', () async {
+      final other = EntryRecords(collection: 'holdings.test', filePath: 'holdings.json');
+      await entries.write([_record(_entry('e1')), _record(_entry('e2'), order: 1, deleted: true)]);
+      await other.write([_record(holdingEntry('h1')), _record(holdingEntry('h2'), order: 1)]);
+      await entries.write([_record(_entry('e1', amount: 5), at: DateTime.utc(2026, 11, 9))]);
+      await other.write([_record(holdingEntry('h1', quantity: 9), order: 3, at: DateTime.utc(2026, 11, 9))]);
+      expect((await entries.read()).map((r) => r.item.id), ['e1']);
+      expect((await other.read()).map((r) => r.item.id), ['h1']);
+      expect((await other.read()).single.item.lines.first.quantity, 9);
+      expect(await count('SELECT count(*) FROM entries'), 2);
     });
   });
 }

@@ -8,5 +8,6 @@ environment:
 
 # Only what lib/models and lib/mcp import. Keep these on the app's versions.
 dependencies:
+  crypto: ^3.0.7
   equatable: ^2.1.0
   intl: ^0.20.2

@@ -5427,4 +5427,56 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get settingsHelpRunSetupSubtitle =>
       'Answer the setup questions again. Nothing you use is turned off.';
+
+  @override
+  String get settingsNeedsAttention => 'Needs attention';
+
+  @override
+  String get settingsICloudSyncStatusAttention =>
+      'Sync needs attention. See below.';
+
+  @override
+  String get bookHealthMigration =>
+      'Some holdings from before the update could not be read. They are still stored on this device and will be tried again the next time Qima starts.';
+
+  @override
+  String get bookHealthNewerBuild =>
+      'Another device saved data with a newer version of Qima, so sync for it is paused here. Update Qima on this device.';
+
+  @override
+  String get bookHealthLegacy =>
+      'Data that an older version of Qima left in iCloud could not be read. Qima will try again on the next sync.';
+
+  @override
+  String get bookHealthLoadFailed =>
+      'Some of your data could not be loaded, so parts of Qima may look empty. Nothing was deleted. Close and reopen Qima to try again.';
+
+  @override
+  String get backupErrorHoldingsUnreadable =>
+      'Your holdings from before the update could not be read yet, so a backup now would leave them out. Close and reopen Qima, then try again.';
+
+  @override
+  String get tradeSaveFailed =>
+      'Couldn\'t save this. Nothing was changed. Try again.';
+
+  @override
+  String get tradeRejectedNothing =>
+      'This trade has nothing in it: the quantity or the amount is zero.';
+
+  @override
+  String get tradeRejectedCash =>
+      'The money paid or received doesn\'t match this trade. Check the amount and the account\'s currency.';
+
+  @override
+  String backupImportReplaceDropsCash(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other:
+          'Replacing removes the accounts that $count trades were paid from or into, because this older backup doesn\'t have them.',
+      one:
+          'Replacing removes the account that 1 trade was paid from or into, because this older backup doesn\'t have it.',
+    );
+    return '$_temp0';
+  }
 }

@@ -31,7 +31,7 @@ bool startTaskDone(StartTask task, AppState app, MoneyState money) => switch (ta
       StartTask.account => money.accounts.any((a) => !a.archived && const {AccountType.cash, AccountType.debit, AccountType.credit}.contains(a.type)),
       // An account's opening balance and a valuation are not transactions
       // the person recorded.
-      StartTask.transaction => money.entries.any((e) => e.template != EntryTemplate.opening && e.template != EntryTemplate.valuation),
+      StartTask.transaction => money.listed.any((e) => e.template != EntryTemplate.opening && e.template != EntryTemplate.valuation),
       StartTask.holding => app.transactions.isNotEmpty,
       StartTask.asset => money.ofType(AccountType.asset).isNotEmpty,
       StartTask.alert => app.alerts.isNotEmpty,

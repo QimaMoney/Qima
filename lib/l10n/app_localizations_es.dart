@@ -5468,4 +5468,56 @@ class AppLocalizationsEs extends AppLocalizations {
   @override
   String get settingsHelpRunSetupSubtitle =>
       'Vuelve a responder las preguntas. No se desactiva nada que uses.';
+
+  @override
+  String get settingsNeedsAttention => 'Requiere atención';
+
+  @override
+  String get settingsICloudSyncStatusAttention =>
+      'La sincronización requiere atención. Mira abajo.';
+
+  @override
+  String get bookHealthMigration =>
+      'No se pudieron leer algunas posiciones de antes de la actualización. Siguen guardadas en este dispositivo y se volverá a intentar la próxima vez que se abra Qima.';
+
+  @override
+  String get bookHealthNewerBuild =>
+      'Otro dispositivo guardó datos con una versión más nueva de Qima, así que su sincronización está en pausa aquí. Actualiza Qima en este dispositivo.';
+
+  @override
+  String get bookHealthLegacy =>
+      'No se pudieron leer unos datos que una versión anterior de Qima dejó en iCloud. Qima lo volverá a intentar en la próxima sincronización.';
+
+  @override
+  String get bookHealthLoadFailed =>
+      'No se pudieron cargar algunos de tus datos, así que partes de Qima pueden verse vacías. No se borró nada. Cierra y vuelve a abrir Qima para intentarlo de nuevo.';
+
+  @override
+  String get backupErrorHoldingsUnreadable =>
+      'Aún no se pudieron leer tus posiciones de antes de la actualización, así que una copia de seguridad ahora las dejaría fuera. Cierra y vuelve a abrir Qima y vuelve a intentarlo.';
+
+  @override
+  String get tradeSaveFailed =>
+      'No se pudo guardar. No se cambió nada. Inténtalo de nuevo.';
+
+  @override
+  String get tradeRejectedNothing =>
+      'Esta operación está vacía: la cantidad o el importe es cero.';
+
+  @override
+  String get tradeRejectedCash =>
+      'El dinero pagado o recibido no coincide con esta operación. Revisa el importe y la moneda de la cuenta.';
+
+  @override
+  String backupImportReplaceDropsCash(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other:
+          'Reemplazar quita las cuentas con las que se pagaron o se cobraron $count operaciones, porque esta copia más antigua no las tiene.',
+      one:
+          'Reemplazar quita la cuenta con la que se pagó o se cobró 1 operación, porque esta copia más antigua no la tiene.',
+    );
+    return '$_temp0';
+  }
 }

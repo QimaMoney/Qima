@@ -4,9 +4,9 @@ import 'package:workmanager/workmanager.dart';
 
 import 'alert_runtime_store.dart';
 import 'alerts_store.dart';
+import 'book_store.dart';
 import 'custom_instrument_store.dart';
-import 'holdings_store.dart';
-import 'transactions_store.dart';
+import 'holdings_ledger.dart';
 import 'notification_service.dart';
 import 'preferences.dart';
 import 'price_repository.dart';
@@ -111,7 +111,7 @@ void callbackDispatcher() {
       final pipeline = RefreshPipeline(
         repository: PriceRepository(),
         watchlistStore: WatchlistStore(),
-        transactionsStore: TransactionsStore(legacyLots: HoldingsStore()),
+        holdings: HoldingsLedger(BookStore()),
         customInstrumentStore: CustomInstrumentStore(),
         alertsStore: AlertsStore(),
         alertRuntimeStore: AlertRuntimeStore(),

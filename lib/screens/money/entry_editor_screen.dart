@@ -153,7 +153,7 @@ class _EntryEditorScreenState extends State<EntryEditorScreen> {
     }
 
     int lineOf(BookAccount? a) => a == null ? 0 : e.lines.firstWhere((l) => l.accountId == a.id).amount;
-    bool own(BookAccount a) => a.side.onBalanceSheet;
+    bool own(BookAccount a) => a.onMoneySheet;
     bool cat(BookAccount a) => a.type == AccountType.category && a.id != SystemAccount.interestAndFees.id;
     _date = e.date;
     _merchant.text = e.merchant;

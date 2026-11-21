@@ -23,6 +23,7 @@ import '../theme/strings.dart';
 import '../widgets/currency_field.dart';
 import '../widgets/help_button.dart';
 import '../widgets/section_header.dart';
+import '../widgets/trade_failure.dart';
 import 'holdings_screen.dart';
 
 /// The four choices at the top of the editor; [TransactionKind] splits
@@ -79,8 +80,9 @@ class _TransactionEditorScreenState extends State<TransactionEditorScreen> {
   late String _currency;
   late DateTime _date;
 
-  /// The Money side, when the app has one; holdings work without it.
-  MoneyCubit? _money;
+  /// The Money side: the account a trade is paid from or into, and its cash
+  /// leg, are kept in the book it is saved in.
+  late final MoneyCubit _money = context.read<MoneyCubit>();
 
   /// The account a buy, sell or fee was paid from or into; null when no
   /// cash moved (something already held).
@@ -103,14 +105,8 @@ class _TransactionEditorScreenState extends State<TransactionEditorScreen> {
     _note = TextEditingController(text: e?.note ?? '');
     _currency = e?.currency ?? widget.defaultCurrency;
     _date = e?.date ?? _today();
-    try {
-      _money = context.read<MoneyCubit>();
-    } catch (_) {
-      // No Money in this tree (some tests, the holdings-only screens).
-      _money = null;
-    }
     final existing = widget.existing;
-    _cashAccountId = existing == null ? null : _money?.holdingCashAccount(existing.id)?.id;
+    _cashAccountId = existing == null ? null : _money.holdingCashAccount(existing.id)?.id;
     if (e != null) {
       _unit = e.unit;
       _karat = e.karat;
@@ -215,7 +211,6 @@ class _TransactionEditorScreenState extends State<TransactionEditorScreen> {
   /// accounts whose currency converts to the trade's.
   List<BookAccount> _cashAccounts() {
     final money = _money;
-    if (money == null) return const [];
     final b = money.builder;
     bool converts(String? c) {
       if (c == null) return false;
@@ -232,22 +227,25 @@ class _TransactionEditorScreenState extends State<TransactionEditorScreen> {
 
   Future<void> _save(AppCubit cubit) async {
     final candidate = _candidate;
-    final conflict = await cubit.saveTransaction(candidate);
+    final account = _movesCash && _cashAccounts().any((a) => a.id == _cashAccountId) ? _cashAccountId : null;
+    final label = displayLabel(context, widget.instrument.nameKey);
+    final messenger = ScaffoldMessenger.of(context);
+    final l10n = AppLocalizations.of(context)!;
+    // The trade and the cash it moved are one record: saved together, or
+    // refused together, and the screen stays open.
+    final HoldingTransaction? conflict;
+    try {
+      final cash = _money.cashLegFor(candidate, account);
+      conflict = await cubit.saveTransaction(candidate, cash: cash, label: cash == null ? '' : label);
+    } catch (error) {
+      debugPrint('Saving the trade failed: $error');
+      messenger.showSnackBar(SnackBar(content: Text(tradeFailureText(l10n, error))));
+      return;
+    }
     if (!mounted) return;
     if (conflict != null) {
       await showLedgerConflict(context, conflict, deleting: false);
       return;
-    }
-    final money = _money;
-    if (money != null) {
-      final account = _movesCash && _cashAccounts().any((a) => a.id == _cashAccountId) ? _cashAccountId : null;
-      try {
-        await money.syncHoldingCash(candidate, accountId: account, label: displayLabel(context, widget.instrument.nameKey));
-      } on BookRejected catch (e) {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.issues.map((i) => i.detail).join('\n'))));
-        return;
-      }
-      if (!mounted) return;
     }
     Navigator.of(context).pop();
   }

@@ -2,7 +2,9 @@ import '../models/book_account.dart';
 import '../models/book_entry.dart';
 import '../models/default_categories.dart';
 import '../models/money_settings.dart';
+import '../models/legacy_collapse.dart';
 import '../models/syncable.dart';
+import 'book_db/ledger_plan.dart';
 import 'book_records.dart';
 import 'cloud_kv_store.dart';
 import 'synced_store.dart';
@@ -10,18 +12,25 @@ import 'synced_store.dart';
 /// The money ledger on disk: accounts, entries, recurring payments and
 /// Money's settings, each a [SyncedStore] synced like every other collection.
 ///
-/// Locally the four collections live in one SQLite file (`book.sqlite`), and
-/// on web in the JSON files; the cloud copy and the merge are the same either way.
+/// The four live under the cloud keys `ledger.*`, in the envelope format, and
+/// keep their tombstones for ever. Those keys are only ever opened by these
+/// stores. The keys earlier builds used (`book.accounts`, `book.entries`,
+/// `book.recurring`, `money.settings`, plain lists) are not read or written by
+/// this build; their names are in [LedgerNames], for the reader of old cloud data.
 ///
-/// Holdings are not here. They stay in the holdings ledger
-/// (`TransactionsStore`) and join the balance sheet at live prices.
+/// Locally the four collections live in one SQLite file (`book.sqlite`), and
+/// on web in JSON files; the cloud copy and the merge are the same either way.
+/// The first use of any of them moves what an earlier build kept to the ledger
+/// names (see `LedgerMigration`).
+///
+/// A holdings trade is an entry here too (see `HoldingsLedger`); its
+/// holding account is not counted in the balance sheet, and holdings join
+/// net worth at live prices.
 class BookStore {
-  static const String accountsKey = 'book.accounts';
-  static const String entriesKey = 'book.entries';
-  static const String recurringKey = 'book.recurring';
-  static const String settingsKey = 'money.settings';
-
-  static const String _entriesFile = 'book.entries.json';
+  static const String accountsKey = LedgerNames.accounts;
+  static const String entriesKey = LedgerNames.entries;
+  static const String recurringKey = LedgerNames.recurring;
+  static const String settingsKey = LedgerNames.settings;
 
   static const List<String> cloudKeys = [accountsKey, entriesKey, recurringKey, settingsKey];
 
@@ -31,30 +40,42 @@ class BookStore {
   final SyncedStore<MoneySettings> settings;
 
   BookStore({CloudKVStore? cloud})
-      : accounts = _store(accountsKey, 'book.accounts.json', BookAccount.fromJson, cloud),
+      : accounts = _store(accountsKey, LedgerNames.accountsFile, LedgerNames.legacyAccountsFile, BookAccount.fromJson, cloud),
         entries = SyncedStore<BookEntry>(
-          filePath: _entriesFile,
+          filePath: LedgerNames.entriesFile,
           cloudKey: entriesKey,
           itemFromJson: BookEntry.fromJson,
           cloud: cloud ?? LocalOnlyCloudKVStore(),
           seed: () => const [],
-          local: bookEntryRecords(collection: entriesKey, filePath: _entriesFile),
+          local: bookEntryRecords(collection: entriesKey, file: LedgerNames.entriesFile, legacyFile: LedgerNames.legacyEntriesFile),
+          cloudFormat: CloudFormat.envelope,
+          prefer: LegacyCollapse.prefer,
+          tombstoneTTL: null,
         ),
-        recurring = _store(recurringKey, 'book.recurring.json', RecurringPayment.fromJson, cloud),
-        settings = _store(settingsKey, 'money.settings.json', MoneySettings.fromJson, cloud);
+        recurring = _store(recurringKey, LedgerNames.recurringFile, LedgerNames.legacyRecurringFile, RecurringPayment.fromJson, cloud),
+        settings = _store(settingsKey, LedgerNames.settingsFile, LedgerNames.legacySettingsFile, MoneySettings.fromJson, cloud);
 
-  /// A collection kept as documents. The file name is the JSON file earlier
+  /// A collection kept as documents. [legacyFile] is the JSON file earlier
   /// versions used, and is what the database imports from.
-  static SyncedStore<T> _store<T extends Syncable>(String key, String file, T Function(Map<String, dynamic>) fromJson, CloudKVStore? cloud) {
+  static SyncedStore<T> _store<T extends Syncable>(String key, String file, String legacyFile, T Function(Map<String, dynamic>) fromJson, CloudKVStore? cloud) {
     return SyncedStore<T>(
       filePath: file,
       cloudKey: key,
       itemFromJson: fromJson,
       cloud: cloud ?? LocalOnlyCloudKVStore(),
       seed: () => const [],
-      local: bookDocumentRecords<T>(collection: key, filePath: file, itemFromJson: fromJson),
+      local: bookDocumentRecords<T>(collection: key, file: file, legacyFile: legacyFile, itemFromJson: fromJson),
+      cloudFormat: CloudFormat.envelope,
+      tombstoneTTL: null,
     );
   }
+
+  /// A step of the ledger migration that did not finish this run, and why;
+  /// empty when none failed. A trade is in the book only once the step that
+  /// folds the holdings ledger into it is done, so a screen that finds
+  /// holdings empty where the person had some can say that it will be tried
+  /// again on the next start. Call it after the book has loaded.
+  Future<Map<String, Object>> ledgerProblems() => bookLedgerProblems();
 
   /// Adds the default categories that aren't there yet. Fixed ids and
   /// an old timestamp make it safe on every device: a category the person

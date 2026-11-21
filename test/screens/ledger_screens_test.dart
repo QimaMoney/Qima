@@ -9,6 +9,7 @@ import 'package:qima/l10n/app_localizations_ar.dart';
 import 'package:qima/l10n/app_localizations_en.dart';
 import 'package:qima/models/asset.dart';
 import 'package:qima/models/fx_history.dart';
+import 'package:qima/models/holding_entry_codec.dart';
 import 'package:qima/models/holding_transaction.dart';
 import 'package:qima/models/instrument_catalog.dart';
 import 'package:qima/models/metal_breakdown.dart';
@@ -17,13 +18,14 @@ import 'package:qima/models/quote.dart';
 import 'package:qima/screens/holdings_screen.dart';
 import 'package:qima/screens/transaction_editor_screen.dart';
 import 'package:qima/services/local_file_store.dart';
-import 'package:qima/services/holdings_store.dart';
+import 'package:qima/services/book_store.dart';
 import 'package:qima/services/preferences.dart';
-import 'package:qima/services/transactions_store.dart';
+import 'package:qima/services/holdings_ledger.dart';
 import 'package:qima/services/price_repository.dart';
 import 'package:qima/theme/app_theme.dart';
 import 'package:qima/theme/masking.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../helpers/money_provider.dart';
 
 /// Never touches the network: a save that starts tracking a new instrument
 /// would otherwise try to fetch its price.
@@ -36,10 +38,10 @@ class _OfflineRepository extends PriceRepository {
 }
 
 /// In memory, so saves complete inside the widget test's fake clock.
-class _MemoryTransactionsStore extends TransactionsStore {
+class _MemoryHoldings extends HoldingsLedger {
   final Map<String, HoldingTransaction> _rows = {};
 
-  _MemoryTransactionsStore() : super(legacyLots: HoldingsStore());
+  _MemoryHoldings() : super(BookStore());
 
   List<HoldingTransaction> get _all => _rows.values.toList();
 
@@ -47,7 +49,7 @@ class _MemoryTransactionsStore extends TransactionsStore {
   Future<List<HoldingTransaction>> load() async => _all;
 
   @override
-  Future<List<HoldingTransaction>> upsert(HoldingTransaction transaction) async {
+  Future<List<HoldingTransaction>> upsert(HoldingTransaction transaction, {CashLeg? cash, String? baseCurrency, String merchant = ''}) async {
     _rows[transaction.id] = transaction;
     return _all;
   }
@@ -98,11 +100,11 @@ void main() {
       );
 
   Future<AppCubit> cubitWith(List<HoldingTransaction> transactions, {bool hidden = false}) async {
-    final store = _MemoryTransactionsStore();
+    final store = _MemoryHoldings();
     for (final t in transactions) {
       await store.upsert(t);
     }
-    final cubit = AppCubit(repository: _OfflineRepository(), transactionsStore: store);
+    final cubit = AppCubit(repository: _OfflineRepository(), holdings: store);
     cubit.preferences = await Preferences.create();
     cubit.emit(cubit.state.copyWith(
       initialized: true,
@@ -118,8 +120,8 @@ void main() {
     return cubit;
   }
 
-  Widget harness(AppCubit cubit, Widget home, {Locale locale = const Locale('en')}) => BlocProvider<AppCubit>.value(
-        value: cubit,
+  Widget harness(AppCubit cubit, Widget home, {Locale locale = const Locale('en')}) => MultiBlocProvider(
+        providers: [BlocProvider<AppCubit>.value(value: cubit), testMoneyProvider(cubit)],
         child: MaterialApp(
           locale: locale,
           localizationsDelegates: AppLocalizations.localizationsDelegates,

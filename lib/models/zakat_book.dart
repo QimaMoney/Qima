@@ -50,7 +50,8 @@ class ZakatOnBook {
     double sum(bool Function(BookAccount) test) {
       var total = 0.0;
       for (final a in book.accounts.values) {
-        if (!a.side.onBalanceSheet || !test(a)) continue;
+        // Holdings are assessed at their value, in `holdings`, not their cost.
+        if (!a.onMoneySheet || !test(a)) continue;
         final b = book.balanceOf(a.id);
         if (b <= 0) continue;
         final v = NetWorthSummary.inCurrency(b, a.currency!, currency, rates);

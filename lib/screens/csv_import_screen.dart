@@ -16,6 +16,7 @@ import '../theme/qima_colors.dart';
 import '../theme/strings.dart';
 import '../widgets/help_button.dart';
 import '../widgets/section_header.dart';
+import '../widgets/trade_failure.dart';
 import 'currency_picker.dart';
 import 'holdings_screen.dart';
 
@@ -69,7 +70,18 @@ class _CsvImportScreenState extends State<CsvImportScreen> {
     final plan = _plan;
     if (plan == null || _busy) return;
     setState(() => _busy = true);
-    final ids = await context.read<AppCubit>().importTransactions(plan.ready);
+    final messenger = ScaffoldMessenger.of(context);
+    final l10n = AppLocalizations.of(context)!;
+    final List<String> ids;
+    try {
+      ids = await context.read<AppCubit>().importTransactions(plan.ready);
+    } catch (error) {
+      // Nothing was added: the file can be fixed and tried again.
+      debugPrint('Importing the trades failed: $error');
+      if (mounted) setState(() => _busy = false);
+      messenger.showSnackBar(SnackBar(content: Text(tradeFailureText(l10n, error))));
+      return;
+    }
     if (!mounted) return;
     setState(() {
       _busy = false;

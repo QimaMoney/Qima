@@ -267,6 +267,14 @@ class _ImportPreviewScreenState extends State<ImportPreviewScreen> {
           l10n.backupImportDiff(diff.added, diff.updated, diff.removed),
           style: TextStyle(color: colors.textSecondary, fontSize: 12, fontWeight: FontWeight.w600),
         ),
+        if (_mode == BackupImportMode.replace && preview.cashSidesReplaced > 0) ...[
+          const SizedBox(height: DS.spaceXS),
+          Text(
+            l10n.backupImportReplaceDropsCash(preview.cashSidesReplaced),
+            key: const ValueKey('replaceDropsCash'),
+            style: TextStyle(color: colors.down, fontSize: 12),
+          ),
+        ],
         const SizedBox(height: DS.spaceLG),
         FilledButton(
           onPressed: _restoring ? null : () => _restore(context),

@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -6,6 +7,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:qima/blocs/app_cubit.dart';
 import 'package:qima/l10n/app_localizations.dart';
 import 'package:qima/models/asset.dart';
+import 'package:qima/models/holding_entry_codec.dart';
+import 'package:qima/models/holding_transaction.dart';
 import 'package:qima/models/watch_card.dart';
 import 'package:qima/screens/import_preview_screen.dart';
 import 'package:qima/services/backup/backup_service.dart';
@@ -70,7 +73,7 @@ void main() {
     cubit.preferences = await Preferences.create();
     cubit.backupService = BackupService(
       watchlistStore: cubit.watchlistStore,
-      holdingsStore: cubit.holdingsStore,
+      bookStore: cubit.bookStore,
       customInstrumentStore: cubit.customInstrumentStore,
       alertsStore: cubit.alertsStore,
       preferences: cubit.preferences,
@@ -168,6 +171,55 @@ void main() {
     final strings = await l10n();
     expect(find.text(strings.backupImportModeMergeFooter), findsOneWidget);
     expect(find.text(strings.backupImportRestoreButton), findsOneWidget);
+  }, timeout: const Timeout(Duration(seconds: 30)));
+
+  testWidgets('an older file with no book says, in replace mode only, that the accounts trades were paid from go', (tester) async {
+    useTallSurface(tester);
+    final cubit = await populatedCubit();
+    await tester.runAsync(() async {
+      await cubit.holdings.upsert(
+        HoldingTransaction(id: 'd1', instrumentID: 'metal.XAU', kind: TransactionKind.buy, quantity: 2, unit: PriceUnit.troyOunce, unitPrice: 1500, currency: 'USD', date: DateTime(2026, 3, 1)),
+        cash: const CashLeg(accountId: 'bank', currency: 'USD', amount: 300000, baseAmount: 300000),
+        baseCurrency: 'USD',
+      );
+    });
+    final older = jsonEncode({
+      'format': 'qima-backup',
+      'version': 3,
+      'createdAt': '2026-03-10T00:00:00.000Z',
+      'app': {'version': '4.0.0', 'build': '1'},
+      'encrypted': false,
+      'payload': {
+        'watchcards': [],
+        'customInstruments': [],
+        'alerts': [],
+        'holdings': [],
+        'transactions': [],
+        'settings': {'baseCurrency': 'USD', 'appLanguage': 'system', 'appearance': 'system', 'preferredChartRange': 'month1', 'widgetRefreshInterval': 15},
+      },
+    });
+
+    await _runAsyncAndSettle(tester, () => tester.pumpWidget(harness(cubit, PickedBackupFile(name: 'qima-backup-2026-03-10.json', raw: older))));
+
+    final strings = await l10n();
+    expect(find.byKey(const ValueKey('replaceDropsCash')), findsNothing, reason: 'a merge keeps the trades as they are');
+    await tester.tap(find.text(strings.backupImportModeReplace));
+    await tester.pump();
+    expect(find.text(strings.backupImportReplaceDropsCash(1)), findsOneWidget);
+    await tester.tap(find.text(strings.backupImportModeMerge));
+    await tester.pump();
+    expect(find.byKey(const ValueKey('replaceDropsCash')), findsNothing);
+  }, timeout: const Timeout(Duration(seconds: 30)));
+
+  testWidgets('a file of this version has no such line, whatever the mode', (tester) async {
+    useTallSurface(tester);
+    final json = await plainBackupJson(tester);
+    final cubit = await populatedCubit();
+    await _runAsyncAndSettle(tester, () => tester.pumpWidget(harness(cubit, PickedBackupFile(name: 'qima-backup-2026-01-01.json', raw: json))));
+    final strings = await l10n();
+    await tester.tap(find.text(strings.backupImportModeReplace));
+    await tester.pump();
+    expect(find.byKey(const ValueKey('replaceDropsCash')), findsNothing);
   }, timeout: const Timeout(Duration(seconds: 30)));
 
   testWidgets('an encrypted backup shows the password prompt first', (tester) async {

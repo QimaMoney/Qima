@@ -11,6 +11,7 @@ import '../models/backup.dart';
 import '../models/custom_instrument.dart';
 import '../models/fx_history.dart';
 import '../models/holding.dart';
+import '../models/holding_entry_codec.dart';
 import '../models/holding_transaction.dart';
 import '../models/ledger.dart';
 import '../models/holding_totals.dart';
@@ -37,9 +38,9 @@ import '../services/app_lock_service.dart';
 import '../services/background_refresh.dart';
 import '../services/backup/backup_service.dart';
 import '../services/cloud_kv_store.dart';
+import '../services/legacy_absorber.dart';
 import '../services/custom_instrument_store.dart';
-import '../services/holdings_store.dart';
-import '../services/transactions_store.dart';
+import '../services/holdings_ledger.dart';
 import '../services/notification_service.dart';
 import '../services/preferences.dart';
 import '../services/home_widget_service.dart';
@@ -60,8 +61,11 @@ class AppCubit extends Cubit<AppState> {
 
   final PriceRepository repository;
   final WatchlistStore watchlistStore;
-  final HoldingsStore holdingsStore;
-  final TransactionsStore transactionsStore;
+
+  /// The trades, kept in the book ([bookStore]) as one entry each. Every
+  /// write here is one record, so the cash a trade moved is never out of step
+  /// with it.
+  final HoldingsLedger holdings;
   final CustomInstrumentStore customInstrumentStore;
   final AppLockService appLockService;
   final AlertsStore alertsStore;
@@ -74,7 +78,8 @@ class AppCubit extends Cubit<AppState> {
 
   /// Set by `MoneyCubit`'s owner: reloads the money ledger after another
   /// device changed [key], or every part of it when [key] is null (a
-  /// restore).
+  /// restore). Called with [BookStore.entriesKey] after a trade is saved or
+  /// deleted here, since a trade is an entry in that ledger.
   Future<void> Function(String? key)? onBookChanged;
 
   /// The OS's on-device language model (v4). Features reach it through
@@ -94,7 +99,7 @@ class AppCubit extends Cubit<AppState> {
 
   /// Shared cloud key-value backend for every synced store + [preferences]
   /// (spec Phase 7). Always constructed (even on platforms/tests that never
-  /// enable it) so [watchlistStore]/[holdingsStore]/etc default-construct
+  /// enable it) so [watchlistStore]/[bookStore]/etc default-construct
   /// against the SAME instance rather than each getting their own — turning
   /// sync on/off is then just [SwitchableCloudKVStore.setEnabled], with no
   /// store ever rebuilt. Callers that inject their own stores (most unit
@@ -102,6 +107,16 @@ class AppCubit extends Cubit<AppState> {
   /// backend it was given (normally none, i.e. [LocalOnlyCloudKVStore]).
   final SwitchableCloudKVStore cloudStore;
   StreamSubscription<CloudKVChangeEvent>? _cloudChangesSubscription;
+
+  /// Takes what devices on an earlier build still write to the old cloud keys
+  /// into the book. Only ever runs while the cloud is on.
+  late final LegacyAbsorber _legacy = LegacyAbsorber.forBook(bookStore, cloudStore, enabled: () => cloudStore.enabled);
+
+  /// What stopped the last read of the old cloud keys (an error from a store
+  /// or the cloud, or an old value this build cannot read), or null. The
+  /// next cloud change or start tries again.
+  Object? get legacyAbsorbProblem => _legacyProblem ?? _legacy.lastProblem;
+  Object? _legacyProblem;
 
   /// The device locale consulted for onboarding step 5's base-currency
   /// prefill (see [_deviceRegionCurrency]). Defaults to the real OS locale;
@@ -119,8 +134,7 @@ class AppCubit extends Cubit<AppState> {
   factory AppCubit({
     PriceRepository? repository,
     WatchlistStore? watchlistStore,
-    HoldingsStore? holdingsStore,
-    TransactionsStore? transactionsStore,
+    HoldingsLedger? holdings,
     CustomInstrumentStore? customInstrumentStore,
     AppLockService? appLockService,
     AlertsStore? alertsStore,
@@ -136,20 +150,18 @@ class AppCubit extends Cubit<AppState> {
     // Built once up front so every default-constructed store below shares
     // the exact same backend — see [cloudStore]'s doc comment.
     final resolvedCloudStore = cloudStore ?? SwitchableCloudKVStore();
-    final resolvedHoldingsStore = holdingsStore ?? HoldingsStore(cloud: resolvedCloudStore);
+    final resolvedBookStore = bookStore ?? BookStore(cloud: resolvedCloudStore);
     return AppCubit._(
       repository: repository ?? PriceRepository(),
       watchlistStore: watchlistStore ?? WatchlistStore(cloud: resolvedCloudStore),
-      holdingsStore: resolvedHoldingsStore,
-      transactionsStore:
-          transactionsStore ?? TransactionsStore(legacyLots: resolvedHoldingsStore, cloud: resolvedCloudStore),
+      holdings: holdings ?? HoldingsLedger(resolvedBookStore),
       customInstrumentStore: customInstrumentStore ?? CustomInstrumentStore(cloud: resolvedCloudStore),
       appLockService: appLockService ?? AppLockService(),
       alertsStore: alertsStore ?? AlertsStore(cloud: resolvedCloudStore),
       alertRuntimeStore: alertRuntimeStore ?? AlertRuntimeStore(),
       notificationService: notificationService ?? NotificationService(),
       cloudStore: resolvedCloudStore,
-      bookStore: bookStore ?? BookStore(cloud: resolvedCloudStore),
+      bookStore: resolvedBookStore,
       aiAssist: aiAssist ?? platformAiAssist(),
       dictation: dictation ?? const PlatformDictation(),
       textRecognition: textRecognition ?? const PlatformTextRecognition(),
@@ -160,8 +172,7 @@ class AppCubit extends Cubit<AppState> {
   AppCubit._({
     required this.repository,
     required this.watchlistStore,
-    required this.holdingsStore,
-    required this.transactionsStore,
+    required this.holdings,
     required this.customInstrumentStore,
     required this.appLockService,
     required this.alertsStore,
@@ -184,8 +195,6 @@ class AppCubit extends Cubit<AppState> {
     preferences = await Preferences.create(cloud: cloudStore);
     backupService = BackupService(
       watchlistStore: watchlistStore,
-      holdingsStore: holdingsStore,
-      transactionsStore: transactionsStore,
       customInstrumentStore: customInstrumentStore,
       alertsStore: alertsStore,
       bookStore: bookStore,
@@ -208,7 +217,12 @@ class AppCubit extends Cubit<AppState> {
     final iCloudSyncEnabled = preferences.iCloudSyncEnabled;
     final cloudEnabledAtStartup = iCloudSyncEnabled && iCloudAccountAvailable;
     cloudStore.setEnabled(cloudEnabledAtStartup);
-    if (cloudEnabledAtStartup) await cloudStore.synchronize();
+    if (cloudEnabledAtStartup) {
+      await cloudStore.synchronize();
+      // Before the first load, so what an old device wrote is already in the
+      // book when it is read.
+      await _absorbLegacy();
+    }
 
     final customs = await customInstrumentStore.load();
     InstrumentCatalog.reloadCustom(customs.map((c) => c.instrument).toList());
@@ -233,7 +247,8 @@ class AppCubit extends Cubit<AppState> {
     final cards = await _loadCardsSeeding(watchlistStore, seedCards);
     final alerts = await alertsStore.load();
 
-    final transactions = await transactionsStore.load();
+    final transactions = await _tryLoadTrades() ?? const <HoldingTransaction>[];
+    final health = await _readHealth();
     final rates = await repository.cachedRates();
     final fxHistory = await repository.cachedFXHistory();
 
@@ -272,7 +287,7 @@ class AppCubit extends Cubit<AppState> {
     _pipeline = RefreshPipeline(
       repository: repository,
       watchlistStore: watchlistStore,
-      transactionsStore: transactionsStore,
+      holdings: holdings,
       customInstrumentStore: customInstrumentStore,
       alertsStore: alertsStore,
       alertRuntimeStore: alertRuntimeStore,
@@ -311,10 +326,14 @@ class AppCubit extends Cubit<AppState> {
       backupReminderDue: backupService.isReminderDue(),
       iCloudSyncEnabled: iCloudSyncEnabled,
       iCloudAccountAvailable: iCloudAccountAvailable,
-      cloudSyncStatus: _statusFor(
-        syncEnabled: iCloudSyncEnabled,
-        accountAvailable: iCloudAccountAvailable,
-        platformSupported: platformSupportsICloud,
+      bookHealth: health,
+      cloudSyncStatus: _settled(
+        _statusFor(
+          syncEnabled: iCloudSyncEnabled,
+          accountAvailable: iCloudAccountAvailable,
+          platformSupported: platformSupportsICloud,
+        ),
+        health,
       ),
       lastCloudSyncAt: cloudEnabledAtStartup ? DateTime.now() : null,
       shouldShowOnboarding: shouldShowOnboarding,
@@ -494,14 +513,19 @@ class AppCubit extends Cubit<AppState> {
   /// listener, it doesn't repeat that initial enable/merge.
   void startSync() {
     _reloadByCloudKey = {
+      // First, so an event naming nothing absorbs before the ledger reloads.
+      for (final key in LegacyAbsorber.keys) key: () async => _reloadAfterLegacy(await _absorbLegacy()),
       'watchcards.records': () => _reloadWatchlist(),
-      // A lot arriving from a device still on 2.x is migrated on reload.
-      'holdings.records': () => _reloadHoldings(),
-      TransactionsStore.cloudKey: () => _reloadHoldings(),
       'custominstruments.records': () => _reloadCustomInstruments(),
       'alerts.records': () => _reloadAlerts(),
       'zakatSettings': () => _reloadZakatSettings(),
-      for (final key in BookStore.cloudKeys) key: () async => onBookChanged?.call(key),
+      for (final key in BookStore.cloudKeys)
+        if (key != BookStore.entriesKey) key: () async => onBookChanged?.call(key),
+      // The trades are entries of the book: a change there reaches both.
+      BookStore.entriesKey: () async {
+        await _reloadHoldings();
+        await onBookChanged?.call(BookStore.entriesKey);
+      },
     };
 
     if (!platformSupportsICloud) return;
@@ -534,6 +558,7 @@ class AppCubit extends Cubit<AppState> {
 
     if (!userInitiatedEnable || !accountAvailable) {
       cloudStore.setEnabled(false);
+      _legacy.reset();
       if (isClosed) return;
       emit(state.copyWith(
         iCloudSyncEnabled: userInitiatedEnable,
@@ -545,6 +570,7 @@ class AppCubit extends Cubit<AppState> {
     if (isClosed) return;
     emit(state.copyWith(iCloudSyncEnabled: true, cloudSyncStatus: CloudSyncStatus.syncing));
     cloudStore.setEnabled(true);
+    _legacy.reset();
     await adoptCloudChanges();
   }
 
@@ -587,6 +613,7 @@ class AppCubit extends Cubit<AppState> {
         // The signed-in account changed (switched or signed out) — re-check
         // rather than trust the stale `iCloudAccountAvailable`/cached data,
         // since keys now visible may belong to a different account.
+        _legacy.reset();
         await _refreshICloudAvailabilityAndSync(userInitiatedEnable: state.iCloudSyncEnabled);
         return;
       case CloudKVChangeReason.serverChange:
@@ -602,8 +629,70 @@ class AppCubit extends Cubit<AppState> {
       final reload = _reloadByCloudKey[key];
       if (reload != null) await reload();
     }
+    await _refreshHealth();
     if (isClosed) return;
-    emit(state.copyWith(cloudSyncStatus: CloudSyncStatus.upToDate, lastCloudSyncAt: DateTime.now()));
+    emit(state.copyWith(cloudSyncStatus: _syncedStatus, lastCloudSyncAt: DateTime.now()));
+  }
+
+  /// Where a finished sync stands: up to date, unless a write was left out
+  /// because the cloud store is full, or the book has a problem (see
+  /// [_refreshHealth], which is run first).
+  CloudSyncStatus get _syncedStatus => cloudStore.overLimit ? CloudSyncStatus.storageFull : _settled(CloudSyncStatus.upToDate, state.bookHealth);
+
+  /// [status] unless it says "up to date" while [health] has a problem.
+  static CloudSyncStatus _settled(CloudSyncStatus status, BookHealth health) =>
+      status == CloudSyncStatus.upToDate && health.hasProblem ? CloudSyncStatus.needsAttention : status;
+
+  /// True while the last read of the trades failed, until one succeeds.
+  bool _loadFailed = false;
+
+  /// The trades, or null when the book could not be read. The failure is
+  /// kept for [BookHealth.loadFailed]; start-up and every reload go on with
+  /// what they have rather than stop.
+  Future<List<HoldingTransaction>?> _tryLoadTrades() async {
+    try {
+      final trades = await holdings.load();
+      _loadFailed = false;
+      return trades;
+    } catch (error) {
+      _loadFailed = true;
+      debugPrint('Reading the trades failed: $error');
+      return null;
+    }
+  }
+
+  /// Records that a load made outside this cubit (the money ledger, at
+  /// start-up) failed, so Settings says so.
+  Future<void> noteLoadFailed() async {
+    _loadFailed = true;
+    await _refreshHealth();
+  }
+
+  /// What is wrong with the book now: the migration steps that did not
+  /// finish, an unreadable old cloud value, a collection written by a newer
+  /// build, a failed load. Never throws.
+  Future<BookHealth> _readHealth() async {
+    var migrationFailed = false;
+    try {
+      migrationFailed = (await bookStore.ledgerProblems()).isNotEmpty;
+    } catch (error) {
+      debugPrint('Reading the migration state failed: $error');
+    }
+    return BookHealth(
+      migrationFailed: migrationFailed,
+      legacyUnreadable: legacyAbsorbProblem != null,
+      newerVersion: [bookStore.accounts, bookStore.entries, bookStore.recurring, bookStore.settings].any((s) => s.cloudValueUnreadable),
+      loadFailed: _loadFailed,
+    );
+  }
+
+  /// Reads [BookHealth] again and, when it changed, publishes it with the
+  /// sync status that goes with it.
+  Future<void> _refreshHealth() async {
+    final health = await _readHealth();
+    if (isClosed || health == state.bookHealth) return;
+    final status = state.cloudSyncStatus == CloudSyncStatus.needsAttention ? CloudSyncStatus.upToDate : state.cloudSyncStatus;
+    emit(state.copyWith(bookHealth: health, cloudSyncStatus: _settled(status, health)));
   }
 
   Future<void> _reloadWatchlist() async {
@@ -611,9 +700,38 @@ class AppCubit extends Cubit<AppState> {
     if (!isClosed && cards != state.cards) emit(state.copyWith(cards: cards));
   }
 
+  /// Reads the old cloud keys into the book (see [LegacyAbsorber]) and
+  /// returns the ledger keys that changed. A failure is kept in
+  /// [legacyAbsorbProblem] and the next run tries again; it never stops the
+  /// sync it is part of.
+  Future<Set<String>> _absorbLegacy() async {
+    try {
+      final changed = await _legacy.absorb();
+      _legacyProblem = null;
+      return changed;
+    } catch (error) {
+      _legacyProblem = error;
+      debugPrint('Reading the old cloud keys failed: $error');
+      return {};
+    }
+  }
+
+  /// Reloads what [changed] ledger keys (from [_absorbLegacy]) touched, the
+  /// way a change of those keys by another device would: the trades and the
+  /// book for entries, the book for the others. Entries last, so no entry is
+  /// shown before the account it posts to.
+  Future<void> _reloadAfterLegacy(Set<String> changed) async {
+    for (final key in [BookStore.accountsKey, BookStore.recurringKey, BookStore.settingsKey, BookStore.entriesKey]) {
+      if (isClosed) return;
+      if (!changed.contains(key)) continue;
+      if (key == BookStore.entriesKey) await _reloadHoldings();
+      await onBookChanged?.call(key);
+    }
+  }
+
   Future<void> _reloadHoldings() async {
-    final transactions = await transactionsStore.load();
-    if (!isClosed && transactions != state.transactions) emit(state.copyWith(transactions: transactions));
+    final transactions = await _tryLoadTrades();
+    if (transactions != null && !isClosed && transactions != state.transactions) emit(state.copyWith(transactions: transactions));
   }
 
   Future<void> _reloadCustomInstruments() async {
@@ -640,14 +758,17 @@ class AppCubit extends Cubit<AppState> {
   Future<void> adoptCloudChanges() async {
     if (!state.iCloudSyncEnabled) return;
     await cloudStore.synchronize();
+    // Before the loads below, which then include what it took.
+    await _absorbLegacy();
     await _reloadWatchlist();
     await _reloadHoldings();
     await _reloadCustomInstruments();
     await _reloadAlerts();
     await _reloadZakatSettings();
     await onBookChanged?.call(null);
+    await _refreshHealth();
     if (isClosed) return;
-    emit(state.copyWith(cloudSyncStatus: CloudSyncStatus.upToDate, lastCloudSyncAt: DateTime.now()));
+    emit(state.copyWith(cloudSyncStatus: _syncedStatus, lastCloudSyncAt: DateTime.now()));
   }
 
   /// Cancels the cloud-change subscription — called from tests/teardown or
@@ -1267,14 +1388,24 @@ class AppCubit extends Cubit<AppState> {
         state.transactions.where((t) => t.id != transaction.id),
       );
 
+  /// Tells Money the book changed under it: a trade is an entry there, so
+  /// its lists, balances and analysis follow every write made here.
+  Future<void> _notifyBook() async => await onBookChanged?.call(BookStore.entriesKey);
+
   /// Saves [transaction] unless it would break a sale; returns that sale
-  /// instead of saving when it would.
-  Future<HoldingTransaction?> saveTransaction(HoldingTransaction transaction) async {
+  /// instead of saving when it would. [cash] is the account it was paid from
+  /// or into (null when no cash moved) and [label] the instrument's name as
+  /// Money shows it; trade and cash are one record, so they are saved
+  /// together or not at all. Throws [HoldingRejected], saving nothing, when
+  /// the trade would not make a sound entry.
+  Future<HoldingTransaction?> saveTransaction(HoldingTransaction transaction, {CashLeg? cash, String label = ''}) async {
     final conflict = conflictForSave(transaction);
     if (conflict != null) return conflict;
     final isNewInstrument = !trackedInstruments.any((i) => i.id == transaction.instrumentID);
-    final transactions = await transactionsStore.upsert(transaction);
+    final transactions = await holdings.upsert(transaction, cash: cash, baseCurrency: state.baseCurrency, merchant: label);
+    if (isClosed) return null;
     emit(state.copyWith(transactions: transactions));
+    await _notifyBook();
     unawaited(_markDataChanged());
     if (isNewInstrument) {
       final instrument = InstrumentCatalog.instrument(transaction.instrumentID);
@@ -1288,8 +1419,10 @@ class AppCubit extends Cubit<AppState> {
   Future<List<String>> importTransactions(List<HoldingTransaction> transactions) async {
     if (transactions.isEmpty) return const [];
     final trackedBefore = trackedInstruments.map((i) => i.id).toSet();
-    final all = await transactionsStore.addAll(transactions);
+    final all = await holdings.addAll(transactions);
+    if (isClosed) return [for (final t in transactions) t.id];
     emit(state.copyWith(transactions: all));
+    await _notifyBook();
     unawaited(_markDataChanged());
     final added = {for (final t in transactions) t.instrumentID}.difference(trackedBefore);
     if (added.isNotEmpty) {
@@ -1305,8 +1438,10 @@ class AppCubit extends Cubit<AppState> {
 
   /// Removes everything one import added.
   Future<void> undoImport(List<String> ids) async {
-    final all = await transactionsStore.deleteAll(ids);
+    final all = await holdings.deleteAll(ids);
+    if (isClosed) return;
     emit(state.copyWith(transactions: all));
+    await _notifyBook();
     unawaited(_markDataChanged());
   }
 
@@ -1315,8 +1450,10 @@ class AppCubit extends Cubit<AppState> {
   Future<HoldingTransaction?> deleteTransaction(HoldingTransaction transaction) async {
     final conflict = conflictForDelete(transaction);
     if (conflict != null) return conflict;
-    final transactions = await transactionsStore.delete(transaction.id);
+    final transactions = await holdings.delete(transaction.id);
+    if (isClosed) return null;
     emit(state.copyWith(transactions: transactions));
+    await _notifyBook();
     unawaited(_markDataChanged());
     return null;
   }
@@ -1445,6 +1582,7 @@ class AppCubit extends Cubit<AppState> {
     await backupService.import(payload, mode: mode);
     await _reloadAllStores();
     await onBookChanged?.call(null);
+    await _refreshHealth();
     await _refreshBackupReminder();
   }
 
@@ -1457,7 +1595,7 @@ class AppCubit extends Cubit<AppState> {
     InstrumentCatalog.reloadCustom(customs.map((c) => c.instrument).toList());
 
     final cards = await watchlistStore.load();
-    final transactions = await transactionsStore.load();
+    final transactions = await _tryLoadTrades() ?? state.transactions;
     final alerts = await alertsStore.load();
     final baseCurrency = await preferences.baseCurrency;
     final appLanguage = await preferences.appLanguage;

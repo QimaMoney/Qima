@@ -26,6 +26,19 @@ class BookDatabase extends GeneratedDatabase {
   /// tried again on the next start, not on every operation.
   final Set<String> skippedImports = {};
 
+  /// The ledger migration of this file, once something in this isolate has
+  /// asked for it (see `LedgerMigration.ensure`).
+  Future<void>? ledgerMigration;
+
+  /// Whether the ledger migration also runs step B, the collapse of holdings
+  /// trades into book entries. Always on in the app; a test of the migration
+  /// itself turns it off to run the steps one at a time.
+  bool collapseHoldings = true;
+
+  /// A step of the ledger migration that did not finish this run, and why.
+  /// It is tried again on the next start; the book works meanwhile.
+  final Map<String, Object> ledgerProblems = {};
+
   BookDatabase._(super.executor, this.path);
 
   /// The database in the directory `LocalFileStore` uses, opened once per
@@ -76,10 +89,22 @@ class BookDatabase extends GeneratedDatabase {
   /// Widget tests run under fake async, where work on another isolate never
   /// completes, so they open the file in this isolate. The app opens it on a
   /// background isolate so the interface never waits on disk.
-  static QueryExecutor _executorFor(File file) {
-    if (Platform.environment.containsKey('FLUTTER_TEST')) return NativeDatabase(file);
-    return NativeDatabase.createInBackground(file);
-  }
+  static QueryExecutor _executorFor(File file) => executorFor(file, inBackground: !Platform.environment.containsKey('FLUTTER_TEST'));
+
+  /// The executor the app uses, in this isolate or on a background one. A
+  /// test can pick either, whichever the environment would not.
+  @visibleForTesting
+  static QueryExecutor executorFor(File file, {required bool inBackground}) =>
+      inBackground ? NativeDatabase.createInBackground(file, setup: _configure) : NativeDatabase(file, setup: _configure);
+
+  /// Runs on every connection the moment the file is opened, before any
+  /// migration: a second process (a background task) or isolate may hold the
+  /// file for a moment, and the migration must wait for it, not fail. A top
+  /// level or static function, so it can be sent to the background isolate;
+  /// `database` is the sqlite3 handle, which this library does not import.
+  static void _configure(dynamic database) => database.execute(_busyTimeout);
+
+  static const String _busyTimeout = 'PRAGMA busy_timeout = 5000';
 
   static Future<void> closeAll() async {
     final all = _open.values.toList();
@@ -93,33 +118,63 @@ class BookDatabase extends GeneratedDatabase {
   Iterable<TableInfo<Table, dynamic>> get allTables => const [];
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
 
-  // No onUpgrade: drift's default throws when the version moves without a
-  // step written for it, which is what a missed migration should do.
+  // drift runs onCreate and onUpgrade outside a transaction and only records
+  // the new version once they return, so each runs in a transaction of its own
+  // here: a stop half way leaves the file as it was. A step is also skipped
+  // when it has already been done, so the next start (or another isolate that
+  // read the old version at the same moment and waited for this one) can run
+  // it again without failing. A later version adds its own step to
+  // onUpgrade; without one drift would carry on at the new version unmigrated.
   @override
   MigrationStrategy get migration => MigrationStrategy(
-        onCreate: (m) async {
+        onCreate: (m) => transaction(() async {
           for (final statement in _schemaV1) {
             await customStatement(statement);
           }
+          await _upgradeToV2();
+        }),
+        onUpgrade: (m, from, to) {
+          // A file from a later build is never opened by this one: it would
+          // be stamped back to this version with its newer shape unread.
+          if (from > to) throw StateError('The book database is version $from; this build reads up to version $to. Update the app.');
+          return transaction(() async {
+            if (from < 2) await _upgradeToV2();
+          });
         },
-        // A second process (a background task) may hold the file for a moment.
-        beforeOpen: (details) => customStatement('PRAGMA busy_timeout = 5000'),
+        // The setup of the connection has set this already; this is for an
+        // executor that was opened without it.
+        beforeOpen: (details) => customStatement(_busyTimeout),
       );
+
+  /// Entries get a collection (so a second store can share the table) and
+  /// lines get the quantity of a holding. Moves no data: every row that is
+  /// already there is in 'book.entries'.
+  Future<void> _upgradeToV2() async {
+    for (final (table, column, definition) in _schemaV2Columns) {
+      final present = await customSelect('SELECT 1 FROM pragma_table_info(?) WHERE name = ?', variables: [Variable<String>(table), Variable<String>(column)]).get();
+      if (present.isEmpty) await customStatement('ALTER TABLE $table ADD COLUMN $column $definition');
+    }
+    for (final statement in _schemaV2Indexes) {
+      await customStatement(statement);
+    }
+  }
 
   Future<bool> hasFlag(String key) async {
     final rows = await customSelect('SELECT 1 FROM meta WHERE key = ?', variables: [Variable<String>(key)]).get();
     return rows.isNotEmpty;
   }
 
+  // Every statement is safe to run on a file that already has its result: two
+  // isolates opening a new file at once both create it, one after the other.
   static const List<String> _schemaV1 = [
-    'CREATE TABLE meta (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL)',
+    'CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL)',
     // One row per entry. The columns are the keys BookEntry.toJson writes; a
     // key with no column (or with a value a column would not return
     // unchanged) is kept in `extra`, so nothing a model writes is ever
     // dropped.
-    '''CREATE TABLE entries (
+    '''CREATE TABLE IF NOT EXISTS entries (
       id TEXT PRIMARY KEY NOT NULL,
       date TEXT,
       posted_date TEXT,
@@ -135,8 +190,8 @@ class BookDatabase extends GeneratedDatabase {
       updated_at TEXT NOT NULL,
       deleted INTEGER NOT NULL DEFAULT 0
     )''',
-    'CREATE INDEX entries_date ON entries (date)',
-    '''CREATE TABLE entry_lines (
+    'CREATE INDEX IF NOT EXISTS entries_date ON entries (date)',
+    '''CREATE TABLE IF NOT EXISTS entry_lines (
       entry_id TEXT NOT NULL,
       idx INTEGER NOT NULL,
       account_id TEXT NOT NULL,
@@ -146,9 +201,9 @@ class BookDatabase extends GeneratedDatabase {
       extra TEXT,
       PRIMARY KEY (entry_id, idx)
     )''',
-    'CREATE INDEX entry_lines_account ON entry_lines (account_id)',
+    'CREATE INDEX IF NOT EXISTS entry_lines_account ON entry_lines (account_id)',
     // Accounts, recurring payments and settings: the item's JSON as the body.
-    '''CREATE TABLE documents (
+    '''CREATE TABLE IF NOT EXISTS documents (
       collection TEXT NOT NULL,
       id TEXT NOT NULL,
       body TEXT NOT NULL,
@@ -160,7 +215,7 @@ class BookDatabase extends GeneratedDatabase {
     // Append-only, one row for every record a write put, deleted, moved
     // (`meta`) or purged. Left unbounded for now: a later phase reads it and
     // compacts it.
-    '''CREATE TABLE changes (
+    '''CREATE TABLE IF NOT EXISTS changes (
       seq INTEGER PRIMARY KEY AUTOINCREMENT,
       at TEXT NOT NULL,
       collection TEXT NOT NULL,
@@ -168,6 +223,20 @@ class BookDatabase extends GeneratedDatabase {
       op TEXT NOT NULL,
       body TEXT
     )''',
+  ];
+
+  /// Table, column and definition, added to a file that has the v1 schema.
+  static const List<(String, String, String)> _schemaV2Columns = [
+    ('entries', 'collection', "TEXT NOT NULL DEFAULT 'book.entries'"),
+    // A signed count of 1e-8 of the commodity's unit; the line's other facts
+    // of a holding (unit, karat, price, fee) are kept in `extra`.
+    ('entry_lines', 'quantity', 'INTEGER'),
+    ('entry_lines', 'commodity', 'TEXT'),
+  ];
+
+  static const List<String> _schemaV2Indexes = [
+    'CREATE INDEX IF NOT EXISTS entries_collection ON entries (collection)',
+    'CREATE INDEX IF NOT EXISTS entry_lines_commodity ON entry_lines (commodity) WHERE commodity IS NOT NULL',
   ];
 }
 

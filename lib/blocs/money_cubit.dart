@@ -7,8 +7,8 @@ import '../models/book_account.dart';
 import '../models/book_entry.dart';
 import '../models/categorizer.dart';
 import '../models/default_categories.dart';
-import '../models/deterministic_uuid.dart';
 import '../models/entry_builder.dart';
+import '../models/holding_entry_codec.dart';
 import '../models/holding_transaction.dart';
 import '../models/money.dart';
 import '../models/money_analysis.dart';
@@ -46,7 +46,7 @@ class MoneyState extends Equatable {
   /// order they were added.
   List<BookAccount> get balanceAccounts => [
         for (final a in accounts)
-          if (a.side.onBalanceSheet && !a.isSystem) a,
+          if (a.onMoneySheet && !a.isSystem) a,
       ];
 
   List<BookAccount> ofType(AccountType type, {bool archived = false}) => [
@@ -71,8 +71,25 @@ class MoneyState extends Equatable {
   /// its total Net worth instead of Portfolio.
   bool get hasBook => balanceAccounts.isNotEmpty;
 
+  /// How Money shows [e]. A trade is one entry in the book, but Money lists
+  /// it as the cash that moved: the entry between the cash account and
+  /// Holdings, named for the instrument. Null for a trade that moved no cash,
+  /// which is a matter for Holdings. Every other entry is shown as it is.
+  /// The one place that decides how a trade looks in Money's lists, search,
+  /// detail and summaries.
+  static BookEntry? view(BookEntry e) => e.template.isHoldingEntry ? HoldingEntryCodec.cashHalf(e) : e;
+
+  /// The entries Money lists: [entries] as [view] shows them.
+  late final List<BookEntry> listed = [for (final e in entries) ?view(e)];
+
+  /// Whether [listed] entry [e] is the cash view of a trade, which is not
+  /// stored as such: the trade is edited and deleted from Holdings. A
+  /// `holding_trade` entry of an earlier build whose trade is gone is stored,
+  /// and is only cash.
+  bool isTradeView(BookEntry e) => e.template == EntryTemplate.holdingTrade && !entries.any((x) => x.id == e.id);
+
   /// Entries newest first, the way every list shows them.
-  List<BookEntry> get entriesNewestFirst => [...entries]..sort((a, b) => b.date.compareTo(a.date));
+  List<BookEntry> get entriesNewestFirst => [...listed]..sort((a, b) => b.date.compareTo(a.date));
 
   List<BookEntry> entriesFor(String accountId) => [
         for (final e in entriesNewestFirst)
@@ -142,21 +159,24 @@ class MoneyCubit extends Cubit<MoneyState> {
     emit(state.copyWith(loaded: true, accounts: accounts, entries: entries, recurring: recurring, settings: settings));
   }
 
-  /// Reloads the one store whose cloud key changed on another device.
+  /// Reloads the one store whose cloud key changed on another device, or
+  /// that was written behind this cubit's back (a trade saved from
+  /// Holdings). Nothing in the cloud for the key is a reason to read the
+  /// local copy, not to skip it.
   Future<void> adoptCloudChanges(String cloudKey) async {
     switch (cloudKey) {
       case BookStore.accountsKey:
-        final a = await store.accounts.adoptCloudChanges();
-        if (a != null && !isClosed) emit(state.copyWith(accounts: a));
+        final a = await store.accounts.adoptCloudChanges() ?? await store.loadAccounts();
+        if (!isClosed) emit(state.copyWith(accounts: a));
       case BookStore.entriesKey:
-        final e = await store.entries.adoptCloudChanges();
-        if (e != null && !isClosed) emit(state.copyWith(entries: e));
+        final e = await store.entries.adoptCloudChanges() ?? await store.entries.load();
+        if (!isClosed) emit(state.copyWith(entries: e));
       case BookStore.recurringKey:
-        final r = await store.recurring.adoptCloudChanges();
-        if (r != null && !isClosed) emit(state.copyWith(recurring: r));
+        final r = await store.recurring.adoptCloudChanges() ?? await store.recurring.load();
+        if (!isClosed) emit(state.copyWith(recurring: r));
       case BookStore.settingsKey:
-        final s = await store.settings.adoptCloudChanges();
-        if (s != null && !isClosed) emit(state.copyWith(settings: s.isEmpty ? const MoneySettings() : s.first));
+        final s = await store.settings.adoptCloudChanges() ?? await store.settings.load();
+        if (!isClosed) emit(state.copyWith(settings: s.isEmpty ? const MoneySettings() : s.first));
     }
   }
 
@@ -266,6 +286,7 @@ class MoneyCubit extends Cubit<MoneyState> {
   /// feature's template turns that feature on; the feature is returned so
   /// the screen can offer Undo.
   Future<MoneyFeature?> saveEntry(BookEntry entry) async {
+    if (entry.template.isHoldingEntry) throw StateError('A trade is saved from Holdings.');
     final others = [for (final e in state.entries) if (e.id != entry.id) e];
     _check(Book(state.accounts, [...others, entry]), entry);
     final old = state.entries.where((e) => e.id == entry.id).firstOrNull;
@@ -340,6 +361,7 @@ class MoneyCubit extends Cubit<MoneyState> {
 
   Future<void> deleteEntry(String id) async {
     final old = state.entries.where((e) => e.id == id).firstOrNull;
+    if (old != null && old.template.isHoldingEntry) throw StateError('A trade is deleted from Holdings.');
     final stated = old == null ? const <(BookEntry, String, int)>[] : _laterValues(_assetsIn(old), old.date, except: id);
     final entries = await store.entries.delete(id);
     if (isClosed) return;
@@ -527,19 +549,14 @@ class MoneyCubit extends Cubit<MoneyState> {
   // Holdings and cash
   // -------------------------------------------------------------------
 
-  /// The id of the cash entry that belongs to the holdings row [transactionId]:
-  /// derived from it, so every device links the same pair and editing or
-  /// deleting the row finds its cash entry.
-  static String holdingCashId(String transactionId) => deterministicUuid('holding-cash:$transactionId');
-
   /// The account the holdings row [transactionId] was paid from or into,
-  /// or null when it moved no cash.
+  /// or null when it moved no cash: the cash line of its entry.
   BookAccount? holdingCashAccount(String transactionId) {
-    final e = state.entries.where((e) => e.id == holdingCashId(transactionId)).firstOrNull;
+    final e = state.entries.where((e) => e.id == transactionId && e.template.isHoldingEntry).firstOrNull;
     if (e == null) return null;
     for (final l in e.lines) {
       final a = state.book.accounts[l.accountId];
-      if (a != null && a.side.onBalanceSheet) return a;
+      if (a != null && a.onMoneySheet) return a;
     }
     return null;
   }
@@ -550,37 +567,26 @@ class MoneyCubit extends Cubit<MoneyState> {
           if (!a.archived && (a.type == AccountType.debit || a.type == AccountType.cash || a.type == AccountType.credit)) a,
       ];
 
-  /// Keeps the cash side of holdings row [t] in step with it: a buy or fee
-  /// takes what it cost off [accountId], a sell puts what it brought in,
-  /// converted at today's rate when the account keeps another currency.
-  /// No account, or a transfer, removes any cash entry the row had.
-  Future<void> syncHoldingCash(HoldingTransaction t, {String? accountId, String label = ''}) async {
-    final id = holdingCashId(t.id);
+  /// The cash side of holdings row [t] when it is paid from or into
+  /// [accountId]: a buy or fee takes what it cost off the account, a sell
+  /// puts what it brought in, converted at today's rate when the account
+  /// keeps another currency. Null when no cash moved: no account (or one the
+  /// book does not have), a transfer, or an amount that rounds to nothing.
+  /// Pure; `AppCubit.saveTransaction` saves it with the trade.
+  CashLeg? cashLegFor(HoldingTransaction t, String? accountId) {
     final account = accountId == null ? null : state.book.accounts[accountId];
+    final currency = account?.currency;
     final total = switch (t.kind) {
       TransactionKind.buy => t.totalCost,
       TransactionKind.sell => t.netProceeds,
       TransactionKind.fee => t.fee,
       TransactionKind.transferIn || TransactionKind.transferOut => 0.0,
     };
-    final has = state.entries.any((e) => e.id == id);
-    if (account == null || account.currency == null || total <= 0) {
-      if (has) await deleteEntry(id);
-      return;
-    }
+    if (account == null || currency == null || total <= 0) return null;
     final b = builder;
-    final amount = b.convert(MinorUnits.fromMajor(total, t.currency), t.currency, account.currency!);
-    if (amount <= 0) {
-      if (has) await deleteEntry(id);
-      return;
-    }
-    await saveEntry(b.holdingTrade(account, amount, t.date, incoming: t.kind == TransactionKind.sell, id: id, merchant: label));
-  }
-
-  /// Removes the cash entry of a deleted holdings row, if it had one.
-  Future<void> removeHoldingCash(String transactionId) async {
-    final id = holdingCashId(transactionId);
-    if (state.entries.any((e) => e.id == id)) await deleteEntry(id);
+    final amount = b.convert(MinorUnits.fromMajor(total, t.currency), t.currency, currency);
+    if (amount <= 0) return null;
+    return CashLeg(accountId: account.id, currency: currency, amount: amount, baseAmount: b.toBase(amount, currency));
   }
 
   // -------------------------------------------------------------------

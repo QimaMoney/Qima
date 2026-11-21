@@ -9,7 +9,9 @@ import 'package:qima/l10n/app_localizations.dart';
 import 'package:qima/l10n/app_localizations_ar.dart';
 import 'package:qima/l10n/app_localizations_en.dart';
 import 'package:qima/models/asset.dart';
+import 'package:qima/models/book_entry.dart';
 import 'package:qima/models/fx_history.dart';
+import 'package:qima/models/holding_entry_codec.dart';
 import 'package:qima/models/holding_transaction.dart';
 import 'package:qima/models/metal_breakdown.dart';
 import 'package:qima/models/money.dart';
@@ -19,13 +21,14 @@ import 'package:qima/screens/capture_review_screen.dart';
 import 'package:qima/screens/holdings_screen.dart';
 import 'package:qima/screens/transaction_editor_screen.dart';
 import 'package:qima/services/dictation_service.dart';
-import 'package:qima/services/holdings_store.dart';
+import 'package:qima/services/book_store.dart';
 import 'package:qima/services/local_file_store.dart';
 import 'package:qima/services/preferences.dart';
 import 'package:qima/services/price_repository.dart';
-import 'package:qima/services/transactions_store.dart';
+import 'package:qima/services/holdings_ledger.dart';
 import 'package:qima/theme/app_theme.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../helpers/money_provider.dart';
 
 class _OfflineRepository extends PriceRepository {
   @override
@@ -35,10 +38,13 @@ class _OfflineRepository extends PriceRepository {
   Future<QuoteSeries> cachedSeries(Instrument instrument) async => QuoteSeries.empty(instrument.id);
 }
 
-class _MemoryTransactionsStore extends TransactionsStore {
+class _MemoryHoldings extends HoldingsLedger {
   final Map<String, HoldingTransaction> rows = {};
 
-  _MemoryTransactionsStore() : super(legacyLots: HoldingsStore());
+  /// Thrown by the next save, in place of writing it.
+  Object? failWith;
+
+  _MemoryHoldings() : super(BookStore());
 
   List<HoldingTransaction> get _all => rows.values.toList();
 
@@ -46,7 +52,8 @@ class _MemoryTransactionsStore extends TransactionsStore {
   Future<List<HoldingTransaction>> load() async => _all;
 
   @override
-  Future<List<HoldingTransaction>> upsert(HoldingTransaction transaction) async {
+  Future<List<HoldingTransaction>> upsert(HoldingTransaction transaction, {CashLeg? cash, String? baseCurrency, String merchant = ''}) async {
+    if (failWith != null) throw failWith!;
     rows[transaction.id] = transaction;
     return _all;
   }
@@ -99,9 +106,9 @@ void main() {
     addTearDown(tester.view.reset);
   }
 
-  Future<(AppCubit, _MemoryTransactionsStore)> cubit({DictationService? dictation}) async {
-    final store = _MemoryTransactionsStore();
-    final cubit = AppCubit(repository: _OfflineRepository(), transactionsStore: store, dictation: dictation);
+  Future<(AppCubit, _MemoryHoldings)> cubit({DictationService? dictation}) async {
+    final store = _MemoryHoldings();
+    final cubit = AppCubit(repository: _OfflineRepository(), holdings: store, dictation: dictation);
     cubit.preferences = await Preferences.create();
     cubit.emit(cubit.state.copyWith(
       initialized: true,
@@ -112,8 +119,8 @@ void main() {
     return (cubit, store);
   }
 
-  Widget harness(AppCubit cubit, Widget home, {Locale locale = const Locale('en')}) => BlocProvider<AppCubit>.value(
-        value: cubit,
+  Widget harness(AppCubit cubit, Widget home, {Locale locale = const Locale('en')}) => MultiBlocProvider(
+        providers: [BlocProvider<AppCubit>.value(value: cubit), testMoneyProvider(cubit)],
         child: MaterialApp(
           locale: locale,
           localizationsDelegates: AppLocalizations.localizationsDelegates,
@@ -238,6 +245,35 @@ void main() {
     expect(store.rows, isEmpty);
     expect(find.byType(CaptureReviewScreen), findsOneWidget);
   });
+
+  for (final (name, error, message) in <(String, Object, String Function(AppLocalizationsEn))>[
+    ('a trade that would not balance', HoldingRejected([EntryIssue(EntryProblem.unbalanced, 'x', 'The lines are off by 5 in EGP.')]), (l) => l.tradeRejectedCash),
+    ('a trade of nothing', HoldingRejected([EntryIssue(EntryProblem.zeroLine, 'x', 'The line on holding.metal.XAU is zero.')]), (l) => l.tradeRejectedNothing),
+    ('any other failure', StateError('Entry x is not a holding.'), (l) => l.tradeSaveFailed),
+  ]) {
+    testWidgets('$name is explained in words, and the review stays open with nothing saved', (tester) async {
+      phone(tester);
+      final (c, store) = await cubit();
+      await openAdd(tester, c);
+      await tester.enterText(find.byType(TextField), '20 g of 21K gold at 4,100 EGP, bought on the 12th');
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(en.captureRecordThis));
+      await tester.pumpAndSettle();
+      store.failWith = error;
+      await tester.tap(find.widgetWithText(FilledButton, en.captureConfirm));
+      await tester.pumpAndSettle();
+      expect(find.text(message(en)), findsOneWidget);
+      expect(find.textContaining('holding.metal'), findsNothing, reason: 'no developer text');
+      expect(find.byType(CaptureReviewScreen), findsOneWidget);
+      expect(store.rows, isEmpty);
+      // Confirm is available again, and works once the cause is gone.
+      store.failWith = null;
+      await tester.tap(find.widgetWithText(FilledButton, en.captureConfirm));
+      await tester.pumpAndSettle();
+      expect(store.rows, hasLength(1));
+      expect(find.byType(HoldingsScreen), findsOneWidget);
+    });
+  }
 
   testWidgets('Arabic, with Arabic-Indic digits', (tester) async {
     phone(tester);

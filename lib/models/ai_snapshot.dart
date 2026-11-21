@@ -1,6 +1,8 @@
 import 'book.dart';
 import 'book_account.dart';
 import 'book_entry.dart';
+import 'holding_cash_id.dart';
+import 'holding_entry_codec.dart';
 import 'money.dart';
 import 'money_settings.dart';
 
@@ -80,13 +82,35 @@ class AiSnapshot {
         baseCurrency: baseCurrency,
         rates: rates,
         accounts: [for (final a in accounts) a.copyWith(note: '', statementRefs: const [])],
-        entries: [for (final e in entries) _withoutRawMerchant(e)],
+        entries: [for (final e in entries) ?_shown(e)],
         planned: List.of(planned),
         budgets: Map.of(settings.budgets),
         budgetCurrency: settings.budgetCurrency,
         holdingsValue: holdingsValue,
         holdings: holdings,
       );
+
+  /// The one place an entry enters the snapshot: what an AI app may see of it,
+  /// or null when it sees nothing.
+  static BookEntry? _shown(BookEntry e) {
+    final projected = _asCashTrade(e);
+    return projected == null ? null : _withoutRawMerchant(projected);
+  }
+
+  /// A trade as the cash that moved, in the shape the snapshot always had: a
+  /// `holding_trade` entry between the cash account and `system.holdings`.
+  /// Quantities, prices and the holding account stay in Qima. A trade that
+  /// moved no cash (nothing but quantity, or cost against Holdings) is left
+  /// out.
+  ///
+  /// The entry keeps the id the cash half always had
+  /// ([holdingCashId]), so a reader that remembered an id
+  /// before the trade became one entry still finds the same record. The
+  /// trade's own note belongs to the trade and is not part of that shape.
+  static BookEntry? _asCashTrade(BookEntry e) {
+    if (!e.template.isHoldingEntry) return e;
+    return HoldingEntryCodec.cashHalf(e);
+  }
 
   static BookEntry _withoutRawMerchant(BookEntry e) => e.rawMerchant.isEmpty
       ? e

@@ -18,12 +18,12 @@ import 'alerts_store.dart';
 import 'backup/backup_reminder_notifier.dart';
 import 'backup/backup_service.dart';
 import 'custom_instrument_store.dart';
+import 'holdings_ledger.dart';
 import 'home_widget_service.dart';
 import 'notification_service.dart';
 import 'preferences.dart';
 import 'price_converter.dart';
 import 'price_repository.dart';
-import 'transactions_store.dart';
 import 'watchlist_store.dart';
 import 'zakat_reminder_notifier.dart';
 
@@ -44,7 +44,7 @@ import 'zakat_reminder_notifier.dart';
 class RefreshPipeline {
   final PriceRepository repository;
   final WatchlistStore watchlistStore;
-  final TransactionsStore transactionsStore;
+  final HoldingsLedger holdings;
   final CustomInstrumentStore customInstrumentStore;
   final AlertsStore alertsStore;
   final AlertRuntimeStore alertRuntimeStore;
@@ -56,7 +56,7 @@ class RefreshPipeline {
   RefreshPipeline({
     required this.repository,
     required this.watchlistStore,
-    required this.transactionsStore,
+    required this.holdings,
     required this.customInstrumentStore,
     required this.alertsStore,
     required this.alertRuntimeStore,
@@ -68,10 +68,9 @@ class RefreshPipeline {
         backupService = backupService ??
             BackupService(
               watchlistStore: watchlistStore,
-              holdingsStore: transactionsStore.legacyLots,
-              transactionsStore: transactionsStore,
               customInstrumentStore: customInstrumentStore,
               alertsStore: alertsStore,
+              bookStore: holdings.book,
               preferences: preferences,
             );
 
@@ -138,7 +137,7 @@ class RefreshPipeline {
     InstrumentCatalog.reloadCustom(customs.map((c) => c.instrument).toList());
 
     final cards = await watchlistStore.load();
-    final transactions = await transactionsStore.load();
+    final transactions = await holdings.load();
     final alerts = await alertsStore.load();
     final baseCurrency = await preferences.baseCurrency;
 

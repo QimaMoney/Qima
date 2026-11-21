@@ -172,6 +172,21 @@ void main() {
       expect(() => run('list_transactions', {'limit': 0}), throwsA(isA<ToolInputError>()));
     });
 
+    test('the kinds it advertises and accepts are the money ones, not the holdings ledger’s', () {
+      const kinds = [
+        'opening', 'spend', 'income', 'transfer', 'atm', 'swap', 'card_payment', 'loan_payment', 'lent', 'borrowed', 'repayment_in', 'repayment_out', //
+        'refund', 'declined', 'cash_count', 'bill_split', 'valuation', 'asset_sale', 'holding_trade', 'adjustment',
+      ];
+      final tool = QimaTools.all.firstWhere((t) => t.name == 'list_transactions');
+      expect(((tool.inputSchema['properties'] as Map)['kind'] as Map)['enum'], kinds);
+      for (final kind in kinds) {
+        expect(() => run('list_transactions', {'kind': kind}), returnsNormally, reason: kind);
+      }
+      for (final kind in ['holding_buy', 'holding_sell', 'holding_in', 'holding_out', 'holding_fee']) {
+        expect(() => run('list_transactions', {'kind': kind}), throwsA(isA<ToolInputError>()), reason: kind);
+      }
+    });
+
     test('spending for this month counts the budget and planned payments still due', () {
       final r = run('get_spending');
       expect(r['month'], '2026-11');
