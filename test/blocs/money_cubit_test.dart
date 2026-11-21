@@ -265,8 +265,8 @@ void main() {
       // Not in a budgeted category: not promised from the budget.
       await m.saveRecurring(RecurringPayment(id: 'gym', name: 'Gym', amount: sar(200), fromAccountId: 'rajhi', categoryId: 'category.health', start: DateTime(2026, 11, 20)));
       final now = m.monthAnalysis(DateTime(2026, 11, 10), currency: 'SAR', rates: rates);
-      expect(now.planned, 3000);
-      expect(now.leftToSpend, 500);
+      expect(now.planned, sar(3000));
+      expect(now.leftToSpend, sar(500));
       // A past month has nothing still to come.
       expect(m.monthAnalysis(DateTime(2026, 10, 1), currency: 'SAR', rates: rates).planned, 0);
     });

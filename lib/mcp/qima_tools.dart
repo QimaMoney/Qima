@@ -240,21 +240,21 @@ abstract final class QimaTools {
     return {
       'month': '${month.year}-${month.month.toString().padLeft(2, '0')}',
       'currency': c,
-      'spent': _round(analysis.spent, c),
-      'income': _round(analysis.income, c),
-      'net': _round(analysis.net, c),
+      'spent': _minor(analysis.spent, c),
+      'income': _minor(analysis.income, c),
+      'net': _minor(analysis.net, c),
       'by_category': [
         for (final (id, v) in analysis.byCategory)
           {
             'category': name(id),
-            'spent': _round(v, c),
-            if (analysis.budgets[id] case final b?) 'budget': _round(b, c),
+            'spent': _minor(v, c),
+            if (analysis.budgets[id] case final b?) 'budget': _minor(b, c),
           },
       ],
       if (analysis.hasBudget) ...{
-        'budget': _round(analysis.budget, c),
-        if (thisMonth) 'planned_still_to_pay': _round(analysis.planned, c),
-        'left_to_spend': _round(analysis.leftToSpend, c),
+        'budget': _minor(analysis.budget, c),
+        if (thisMonth) 'planned_still_to_pay': _minor(analysis.planned, c),
+        'left_to_spend': _minor(analysis.leftToSpend, c),
       },
       if (analysis.missingRates.isNotEmpty) 'left_out_currencies': (analysis.missingRates.toList()..sort()),
       ..._freshness(s),
@@ -379,6 +379,10 @@ abstract final class QimaTools {
         SheetGroup.loans => 'loans',
         SheetGroup.youOwe => 'you_owe',
       };
+
+  /// A ledger figure in whole minor units, as the major amount the tools
+  /// report.
+  static double _minor(int v, String currency) => MinorUnits.toMajor(v, currency);
 
   static double _round(double v, String currency) {
     final scale = MinorUnits.fromMajor(1, currency);

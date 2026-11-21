@@ -209,7 +209,7 @@ Map<_Field, String> _messageFields(List<String> lines) {
   return out;
 }
 
-extension _BankMessages on StatementReader {
+extension _BankMessages on _Rows {
   /// One message as a row, or null when it isn't money moving.
   StatementRow? _message(List<String> lines) {
     if (lines.isEmpty) return null;
@@ -223,7 +223,7 @@ extension _BankMessages on StatementReader {
     final fields = _messageFields(lines);
     _decideOrder([flat]);
     final (dates, dateSpans) = _dates(flat);
-    final times = [for (final m in StatementReader._time.allMatches(flat)) _Span(m.start, m.end)];
+    final times = [for (final m in _Dates._time.allMatches(flat)) _Span(m.start, m.end)];
     final taken = [...dateSpans, ...times];
     final amounts = _amounts(flat, taken);
     if (amounts.isEmpty) return null;
@@ -247,14 +247,14 @@ extension _BankMessages on StatementReader {
         amounts.where((a) => a.value.currency != null).firstOrNull ??
         amounts.first;
     final currency = main.value.currency ??
-        (labelled == null ? null : StatementReader._currencyIn(labelled)) ??
+        (labelled == null ? null : _Facts._currencyIn(labelled)) ??
         amounts.map((a) => a.value.currency).nonNulls.firstOrNull;
 
     // The direction: what happened, else the amount's own sign, else a guess.
     var sign = intent.direction != 0 ? intent.direction : main.value.sign;
     final guessed = sign == 0;
     if (guessed) {
-      sign = StatementReader._incomeWords.hasMatch(flat) && !StatementReader._spendWords.hasMatch(flat) ? 1 : -1;
+      sign = _Rows._incomeWords.hasMatch(flat) && !_Rows._spendWords.hasMatch(flat) ? 1 : -1;
     }
 
     // Who: the other side, never the person's own card or account.
@@ -269,17 +269,17 @@ extension _BankMessages on StatementReader {
       detail: flat,
       amount: main.value.major * sign,
       signGuessed: guessed &&
-          !StatementReader._spendWords.hasMatch(flat) &&
-          !StatementReader._incomeWords.hasMatch(flat),
+          !_Rows._spendWords.hasMatch(flat) &&
+          !_Rows._incomeWords.hasMatch(flat),
       currency: currency,
     );
   }
 
   String _counterparty(List<String> lines, String flat, Map<_Field, String> fields, int sign) {
     bool own(String s) =>
-        StatementReader._accountWords.hasMatch(s) || StatementReader._masked.hasMatch(s) || RegExp(r'^\W*\d{4,}').hasMatch(s);
+        StatementReader._accountWords.hasMatch(s) || _Facts._masked.hasMatch(s) || RegExp(r'^\W*\d{4,}').hasMatch(s);
     String named(String raw) {
-      final n = StatementReader._clean(raw.replaceAll(StatementReader._nameEnd, ''));
+      final n = _Text._clean(raw.replaceAll(StatementReader._nameEnd, ''));
       return n.length >= 2 && !own(raw) ? n : '';
     }
 
@@ -322,7 +322,7 @@ extension _BankMessages on StatementReader {
     final (_, spans) = _dates(first);
     final cut = [
       ...spans,
-      for (final m in StatementReader._time.allMatches(first)) _Span(m.start, m.end),
+      for (final m in _Dates._time.allMatches(first)) _Span(m.start, m.end),
       ..._amounts(first, spans).map((a) => a.span),
     ]..sort((a, b) => a.start - b.start);
     final b = StringBuffer();
@@ -333,8 +333,8 @@ extension _BankMessages on StatementReader {
       i = math.max(i, s.end);
     }
     if (i < first.length) b.write(first.substring(i));
-    return StatementReader._clean(
-        b.toString().split(' · ').firstWhere((p) => StatementReader._clean(p).length >= 2, orElse: () => ''));
+    return _Text._clean(
+        b.toString().split(' · ').firstWhere((p) => _Text._clean(p).length >= 2, orElse: () => ''));
   }
 }
 
@@ -367,7 +367,7 @@ extension MessageReading on StatementReader {
   List<MessageFigure> figuresIn(String text) {
     _decideOrder([text]);
     final (_, dateSpans) = _dates(text);
-    final times = [for (final m in StatementReader._time.allMatches(text)) _Span(m.start, m.end)];
+    final times = [for (final m in _Dates._time.allMatches(text)) _Span(m.start, m.end)];
     return [
       for (final a in _amounts(text, [...dateSpans, ...times]))
         MessageFigure(a.span.start, a.span.end, a.value.major.abs(), a.value.currency,
@@ -417,7 +417,7 @@ extension MessageReading on StatementReader {
     }
 
     final name = labels.name.isNotEmpty && t.toLowerCase().contains(labels.name.toLowerCase())
-        ? StatementReader._clean(labels.name)
+        ? _Text._clean(labels.name)
         : '';
     final direction = intent?.direction ?? 0;
 
@@ -441,9 +441,9 @@ extension MessageReading on StatementReader {
     }
 
     var r = rows.single;
-    if (amountFigure != null && !StatementReader._same(amountFigure.major, r.amount.abs())) {
-      final rulesTookLeft = figures.any((f) => f.left && StatementReader._same(f.major, r.amount.abs())) ||
-          (balanceFigure != null && StatementReader._same(balanceFigure.major, r.amount.abs()));
+    if (amountFigure != null && !_Reconcile._same(amountFigure.major, r.amount.abs())) {
+      final rulesTookLeft = figures.any((f) => f.left && _Reconcile._same(f.major, r.amount.abs())) ||
+          (balanceFigure != null && _Reconcile._same(balanceFigure.major, r.amount.abs()));
       if (rulesTookLeft && !amountFigure.left) {
         r = r.copyWith(amount: amountFigure.major * (r.amount < 0 ? -1 : 1), currency: amountFigure.currency ?? r.currency);
       }

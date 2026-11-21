@@ -183,10 +183,10 @@ class HomeScreen extends StatelessWidget {
               MoneyRow(
                 key: const ValueKey('leftToSpend'),
                 icon: Icons.donut_large,
-                title: moneyText(a.leftToSpend, ccy, hidden: hidden),
+                title: minorText(a.leftToSpend, ccy, hidden: hidden),
                 subtitle: [
-                  l10n.moneySpentOf(moneyText(a.spent, ccy, hidden: hidden), moneyText(a.budget, ccy, hidden: hidden)),
-                  if (a.planned > 0) l10n.plannedThisMonth(moneyText(a.planned, ccy, hidden: hidden)),
+                  l10n.moneySpentOf(minorText(a.spent, ccy, hidden: hidden), minorText(a.budget, ccy, hidden: hidden)),
+                  if (a.planned > 0) l10n.plannedThisMonth(minorText(a.planned, ccy, hidden: hidden)),
                 ].join(' · '),
               ),
             if (a.hasBudget && !a.complete) MissingRatesNote(a.missingRates),

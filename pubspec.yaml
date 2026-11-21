@@ -38,6 +38,7 @@ dependencies:
   cupertino_icons: ^1.0.8
   flutter_bloc: ^9.1.1
   http: ^1.6.0
+  drift: ^2.35.4
   shared_preferences: ^2.5.5
   path_provider: ^2.1.6
   crypto: ^3.0.7

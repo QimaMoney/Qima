@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:math';
 
@@ -42,6 +44,52 @@ class Record<T extends Syncable> {
   }
 }
 
+/// Callbacks waiting to run one after another.
+class _OperationQueue {
+  final Queue<void Function()> pending = Queue<void Function()>();
+  bool running = false;
+
+  void startNext() {
+    if (pending.isEmpty) {
+      running = false;
+      return;
+    }
+    running = true;
+    pending.removeFirst()();
+  }
+}
+
+/// Where a [SyncedStore] keeps its local copy of the records. The merge with
+/// the cloud lives in the store; a backend only reads and writes the whole
+/// set, so a collection can change where it is kept without touching the
+/// merge.
+abstract class LocalRecords<T extends Syncable> {
+  Future<List<Record<T>>> read();
+
+  Future<void> write(List<Record<T>> records);
+}
+
+/// The local copy as one JSON file holding every record, `{"records": [...]}`.
+class JsonFileRecords<T extends Syncable> implements LocalRecords<T> {
+  final String filePath;
+  final T Function(Map<String, dynamic>) itemFromJson;
+
+  const JsonFileRecords(this.filePath, this.itemFromJson);
+
+  @override
+  Future<List<Record<T>>> read() async {
+    final json = await LocalFileStore.readJson(filePath);
+    if (json == null) return [];
+    final raw = json['records'] as List<dynamic>? ?? [];
+    return raw.map((e) => Record.fromJson<T>(e as Map<String, dynamic>, itemFromJson)).toList();
+  }
+
+  @override
+  Future<void> write(List<Record<T>> records) {
+    return LocalFileStore.writeJson(filePath, {'records': records.map((r) => r.toJson()).toList()});
+  }
+}
+
 /// Conflict-free per-item merge engine on top of a local JSON mirror and a
 /// pluggable [CloudKVStore]. Mirrors `SyncedStore<Item: Syncable>.swift`
 /// (spec §2.10): last-write-wins per item, tombstoned deletes pruned after
@@ -52,16 +100,20 @@ class SyncedStore<T extends Syncable> {
   final CloudKVStore cloud;
   final T Function(Map<String, dynamic>) itemFromJson;
   final List<T> Function()? seed;
+  final LocalRecords<T> _local;
+  final Expando<_OperationQueue> _queues = Expando<_OperationQueue>();
 
   static const Duration tombstoneTTL = Duration(days: 365);
 
+  /// [local] defaults to the JSON file at [filePath].
   SyncedStore({
     required this.filePath,
     required this.cloudKey,
     required this.itemFromJson,
     required this.cloud,
     this.seed,
-  });
+    LocalRecords<T>? local,
+  }) : _local = local ?? JsonFileRecords<T>(filePath, itemFromJson);
 
   Map<String, Record<T>> keyed(List<Record<T>> records) {
     final byId = <String, Record<T>>{};
@@ -86,16 +138,38 @@ class SyncedStore<T extends Syncable> {
         .toList();
   }
 
-  Future<List<Record<T>>> _readLocal() async {
-    final json = await LocalFileStore.readJson(filePath);
-    if (json == null) return [];
-    final raw = json['records'] as List<dynamic>? ?? [];
-    return raw.map((e) => Record.fromJson<T>(e as Map<String, dynamic>, itemFromJson)).toList();
+  /// Runs [body] after every operation started before it has finished, so a
+  /// read-modify-write never works from records another operation is about to
+  /// change. A failed operation reports to its own caller and does not hold
+  /// up the next.
+  ///
+  /// Operations are ordered per zone, and each body runs in the zone it was
+  /// called from. The app has one zone, so there it is one queue. A zone made
+  /// by a test under fake async only advances when the test pumps it, so an
+  /// operation from the real zone waiting behind one from the fake zone would
+  /// wait for a pump that never comes.
+  Future<R> _serialized<R>(Future<R> Function() body) {
+    final result = Completer<R>();
+    final zone = Zone.current;
+    final queue = _queues[zone] ??= _OperationQueue();
+    queue.pending.add(() {
+      zone.run(() async {
+        try {
+          result.complete(await body());
+        } catch (error, stack) {
+          result.completeError(error, stack);
+        } finally {
+          queue.startNext();
+        }
+      });
+    });
+    if (!queue.running) queue.startNext();
+    return result.future;
   }
 
-  Future<void> _writeLocal(List<Record<T>> records) {
-    return LocalFileStore.writeJson(filePath, {'records': records.map((r) => r.toJson()).toList()});
-  }
+  Future<List<Record<T>>> _readLocal() => _local.read();
+
+  Future<void> _writeLocal(List<Record<T>> records) => _local.write(records);
 
   Future<List<Record<T>>> _readCloud() async {
     final raw = await cloud.getString(cloudKey);
@@ -125,7 +199,9 @@ class SyncedStore<T extends Syncable> {
   /// Loads the merged local+cloud state (seeding if both are empty),
   /// persists the merge result, and returns the live items in display
   /// order.
-  Future<List<T>> load() async {
+  Future<List<T>> load() => _serialized(() => _load());
+
+  Future<List<T>> _load() async {
     final local = await _readLocal();
     final cloudRecords = await _readCloud();
 
@@ -168,7 +244,9 @@ class SyncedStore<T extends Syncable> {
     await _writeCloud(merged);
   }
 
-  Future<List<T>> upsert(T item) async {
+  Future<List<T>> upsert(T item) => _serialized(() => _upsert(item));
+
+  Future<List<T>> _upsert(T item) async {
     final local = await _readLocal();
     final now = DateTime.now();
     final existingIndex = local.indexWhere((r) => r.item.id == item.id);
@@ -186,7 +264,9 @@ class SyncedStore<T extends Syncable> {
   }
 
   /// Adds or replaces every item in [items] in one commit.
-  Future<List<T>> upsertAll(List<T> items) async {
+  Future<List<T>> upsertAll(List<T> items) => _serialized(() => _upsertAll(items));
+
+  Future<List<T>> _upsertAll(List<T> items) async {
     if (items.isEmpty) return _liveSorted(await _readLocal());
     final local = List<Record<T>>.of(await _readLocal());
     final now = DateTime.now();
@@ -206,7 +286,9 @@ class SyncedStore<T extends Syncable> {
     return _liveSorted(await _readLocal());
   }
 
-  Future<List<T>> delete(String id) async {
+  Future<List<T>> delete(String id) => _serialized(() => _delete(id));
+
+  Future<List<T>> _delete(String id) async {
     final local = await _readLocal();
     final index = local.indexWhere((r) => r.item.id == id);
     if (index < 0) return _liveSorted(local);
@@ -222,7 +304,9 @@ class SyncedStore<T extends Syncable> {
   ///
   /// For migrations: two devices migrating the same source produce the
   /// same records, and a record the user already deleted is never revived.
-  Future<int> insertMissing(List<Record<T>> records) async {
+  Future<int> insertMissing(List<Record<T>> records) => _serialized(() => _insertMissing(records));
+
+  Future<int> _insertMissing(List<Record<T>> records) async {
     if (records.isEmpty) return 0;
     final merged = merge(await _readLocal(), await _readCloud());
     final known = {for (final r in merged) r.item.id};
@@ -233,7 +317,9 @@ class SyncedStore<T extends Syncable> {
   }
 
   /// Tombstones every item in [ids] in one commit.
-  Future<List<T>> deleteAll(Iterable<String> ids) async {
+  Future<List<T>> deleteAll(Iterable<String> ids) => _serialized(() => _deleteAll(ids));
+
+  Future<List<T>> _deleteAll(Iterable<String> ids) async {
     final targets = ids.toSet();
     final local = await _readLocal();
     if (!local.any((r) => targets.contains(r.item.id) && !r.deleted)) return _liveSorted(local);
@@ -248,7 +334,9 @@ class SyncedStore<T extends Syncable> {
 
   /// Reassigns order for each id in [orderedIds]; only bumps `updatedAt` for
   /// items whose order actually changed.
-  Future<List<T>> setOrder(List<String> orderedIds) async {
+  Future<List<T>> setOrder(List<String> orderedIds) => _serialized(() => _setOrder(orderedIds));
+
+  Future<List<T>> _setOrder(List<String> orderedIds) async {
     final local = await _readLocal();
     final now = DateTime.now();
     final updatedLocal = List<Record<T>>.of(local);
@@ -266,7 +354,9 @@ class SyncedStore<T extends Syncable> {
 
   /// Raw records (including metadata and tombstones) for export/backup
   /// purposes — the merged local+cloud state, unfiltered by [_liveSorted].
-  Future<List<Record<T>>> exportRecords() async {
+  Future<List<Record<T>>> exportRecords() => _serialized(() => _exportRecords());
+
+  Future<List<Record<T>>> _exportRecords() async {
     final local = await _readLocal();
     final cloudRecords = await _readCloud();
     return prune(merge(local, cloudRecords));
@@ -284,7 +374,9 @@ class SyncedStore<T extends Syncable> {
   /// and every imported item is written, all re-stamped with [now]
   /// (defaulting to the current time) so this restore beats any older edit
   /// already sitting on another device once sync catches up.
-  Future<List<T>> importRecords(List<Record<T>> records, {required bool replace, DateTime? now}) async {
+  Future<List<T>> importRecords(List<Record<T>> records, {required bool replace, DateTime? now}) => _serialized(() => _importRecords(records, replace: replace, now: now));
+
+  Future<List<T>> _importRecords(List<Record<T>> records, {required bool replace, DateTime? now}) async {
     final local = await _readLocal();
     if (!replace) {
       final updatedLocal = merge(local, records);
@@ -313,9 +405,11 @@ class SyncedStore<T extends Syncable> {
 
   /// Re-runs the merge+persist against fresh cloud data; returns null if the
   /// cloud has nothing stored for this key yet.
-  Future<List<T>?> adoptCloudChanges() async {
+  Future<List<T>?> adoptCloudChanges() => _serialized(() => _adoptCloudChanges());
+
+  Future<List<T>?> _adoptCloudChanges() async {
     final raw = await cloud.getString(cloudKey);
     if (raw == null) return null;
-    return load();
+    return _load();
   }
 }

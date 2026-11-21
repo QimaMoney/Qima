@@ -2,8 +2,15 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # Version branches build on every push too, so a platform that only a
+    # pull request used to build (Windows above all) can't break unseen.
+    branches: [main, "v[0-9]*/**"]
   pull_request:
+
+# A newer push to the same branch or pull request replaces the run in flight.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 # Pinned so a new Flutter stable release cannot turn a green branch red on its
 # own: `flutter analyze` fails the build on info-level issues, and every stable

@@ -69,10 +69,10 @@ class BudgetScreen extends StatelessWidget {
             const SizedBox(height: DS.spaceMD),
             if (a.hasBudget)
               MoneySection(children: [
-                MoneyRow(title: l10n.budgetTotal, bold: true, trailing: moneyText(a.budget, ccy, hidden: app.hideBalances)),
-                MoneyRow(title: l10n.moneySpent, trailing: moneyText(a.spent, ccy, hidden: app.hideBalances)),
-                if (a.planned > 0) MoneyRow(title: l10n.plannedThisMonth(moneyText(a.planned, ccy, hidden: app.hideBalances))),
-                MoneyRow(title: l10n.cardLeftToSpend, trailing: moneyText(a.leftToSpend, ccy, hidden: app.hideBalances), trailingColor: a.leftToSpend < 0 ? colors.down : colors.up),
+                MoneyRow(title: l10n.budgetTotal, bold: true, trailing: minorText(a.budget, ccy, hidden: app.hideBalances)),
+                MoneyRow(title: l10n.moneySpent, trailing: minorText(a.spent, ccy, hidden: app.hideBalances)),
+                if (a.planned > 0) MoneyRow(title: l10n.plannedThisMonth(minorText(a.planned, ccy, hidden: app.hideBalances))),
+                MoneyRow(title: l10n.cardLeftToSpend, trailing: minorText(a.leftToSpend, ccy, hidden: app.hideBalances), trailingColor: a.leftToSpend < 0 ? colors.down : colors.up),
                 if (!a.complete) MissingRatesNote(a.missingRates),
               ]),
             MoneySection(
@@ -81,8 +81,8 @@ class BudgetScreen extends StatelessWidget {
                   MoneyRow(
                     icon: MoneyIcons.account(c),
                     title: l10n.accountName(c),
-                    subtitle: l10n.moneySpentSoFar(moneyText(a.spentIn(c.id), ccy, hidden: app.hideBalances)),
-                    trailing: a.budgets[c.id] == null ? l10n.budgetNone : moneyText(a.budgets[c.id]!, ccy, hidden: app.hideBalances),
+                    subtitle: l10n.moneySpentSoFar(minorText(a.spentIn(c.id), ccy, hidden: app.hideBalances)),
+                    trailing: a.budgets[c.id] == null ? l10n.budgetNone : minorText(a.budgets[c.id]!, ccy, hidden: app.hideBalances),
                     onTap: () => edit(c),
                   ),
               ],

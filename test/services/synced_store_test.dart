@@ -4,6 +4,8 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:qima/models/syncable.dart';
+import 'package:qima/services/book_db/book_database.dart';
+import 'package:qima/services/book_db/db_records.dart';
 import 'package:qima/services/cloud_kv_store.dart';
 import 'package:qima/services/local_file_store.dart';
 import 'package:qima/services/synced_store.dart';
@@ -31,8 +33,21 @@ class _FakeCloudKVStore implements CloudKVStore {
   final Map<String, String> _values = {};
   final _controller = StreamController<CloudKVChangeEvent>.broadcast();
 
+  /// Makes the next read fail, once.
+  bool failNextRead = false;
+
+  /// Makes reads take a moment, so operations that overlap really interleave.
+  bool slowReads = false;
+
   @override
-  Future<String?> getString(String key) async => _values[key];
+  Future<String?> getString(String key) async {
+    if (failNextRead) {
+      failNextRead = false;
+      throw StateError('cloud read failed');
+    }
+    if (slowReads) await Future<void>.delayed(const Duration(milliseconds: 1));
+    return _values[key];
+  }
 
   @override
   Future<void> setString(String key, String value) async {
@@ -50,7 +65,36 @@ class _FakeCloudKVStore implements CloudKVStore {
   Stream<CloudKVChangeEvent> get didChangeExternally => _controller.stream;
 }
 
+/// A local backend for the store under test, with a way to overwrite what it
+/// holds behind the store's back.
+class _Backend {
+  final String name;
+  final LocalRecords<_Item>? Function(String filePath) local;
+  final Future<void> Function(String filePath, List<Record<_Item>> records) overwrite;
+
+  const _Backend(this.name, this.local, this.overwrite);
+}
+
+final _backends = [
+  _Backend(
+    'the JSON file',
+    (_) => null,
+    (filePath, records) => LocalFileStore.writeJson(filePath, {'records': records.map((r) => r.toJson()).toList()}),
+  ),
+  _Backend(
+    'the database',
+    (filePath) => DocumentRecords<_Item>(collection: filePath, filePath: filePath, itemFromJson: _Item.fromJson),
+    (filePath, records) => DocumentRecords<_Item>(collection: filePath, filePath: filePath, itemFromJson: _Item.fromJson).write(records),
+  ),
+];
+
 void main() {
+  for (final backend in _backends) {
+    group('SyncedStore over ${backend.name}', () => _suite(backend));
+  }
+}
+
+void _suite(_Backend backend) {
   late Directory tempDir;
   late _FakeCloudKVStore cloud;
 
@@ -61,6 +105,7 @@ void main() {
   });
 
   tearDown(() async {
+    await BookDatabase.closeAll();
     if (await tempDir.exists()) {
       await tempDir.delete(recursive: true);
     }
@@ -71,12 +116,14 @@ void main() {
   (SyncedStore<_Item>, SyncedStore<_Item>) devices({String cloudKey = 'items'}) {
     final deviceA = SyncedStore<_Item>(
       filePath: 'deviceA.items.json',
+      local: backend.local('deviceA.items.json'),
       cloudKey: cloudKey,
       itemFromJson: _Item.fromJson,
       cloud: cloud,
     );
     final deviceB = SyncedStore<_Item>(
       filePath: 'deviceB.items.json',
+      local: backend.local('deviceB.items.json'),
       cloudKey: cloudKey,
       itemFromJson: _Item.fromJson,
       cloud: cloud,
@@ -144,6 +191,7 @@ void main() {
     test('setOrder only bumps updatedAt for items whose order actually changed', () async {
       final store = SyncedStore<_Item>(
         filePath: 'single.items.json',
+        local: backend.local('single.items.json'),
         cloudKey: 'single',
         itemFromJson: _Item.fromJson,
         cloud: cloud,
@@ -168,6 +216,7 @@ void main() {
     test('a tombstone older than 365 days is pruned on the next load', () async {
       final store = SyncedStore<_Item>(
         filePath: 'prune.items.json',
+        local: backend.local('prune.items.json'),
         cloudKey: 'prune',
         itemFromJson: _Item.fromJson,
         cloud: cloud,
@@ -183,9 +232,8 @@ void main() {
       final aged = [
         for (final r in records) r.copyWith(updatedAt: DateTime.now().subtract(const Duration(days: 400))),
       ];
-      final agedJson = aged.map((r) => r.toJson()).toList();
-      await LocalFileStore.writeJson('prune.items.json', {'records': agedJson});
-      await cloud.setString('prune', jsonEncode(agedJson));
+      await backend.overwrite('prune.items.json', aged);
+      await cloud.setString('prune', jsonEncode(aged.map((r) => r.toJson()).toList()));
 
       final result = await store.load();
       expect(result, isEmpty);
@@ -196,6 +244,7 @@ void main() {
     test('a tombstone within the 365-day TTL survives a load', () async {
       final store = SyncedStore<_Item>(
         filePath: 'keep.items.json',
+        local: backend.local('keep.items.json'),
         cloudKey: 'keep',
         itemFromJson: _Item.fromJson,
         cloud: cloud,
@@ -213,6 +262,7 @@ void main() {
     test('merge folds imported records in using last-write-wins, keeping newer local edits', () async {
       final store = SyncedStore<_Item>(
         filePath: 'merge.items.json',
+        local: backend.local('merge.items.json'),
         cloudKey: 'merge',
         itemFromJson: _Item.fromJson,
         cloud: cloud,
@@ -232,6 +282,7 @@ void main() {
     test('merge adds items present only in the import', () async {
       final store = SyncedStore<_Item>(
         filePath: 'merge2.items.json',
+        local: backend.local('merge2.items.json'),
         cloudKey: 'merge2',
         itemFromJson: _Item.fromJson,
         cloud: cloud,
@@ -247,6 +298,7 @@ void main() {
     test('replace tombstones every local live item and keeps only the imported items', () async {
       final store = SyncedStore<_Item>(
         filePath: 'replace.items.json',
+        local: backend.local('replace.items.json'),
         cloudKey: 'replace',
         itemFromJson: _Item.fromJson,
         cloud: cloud,
@@ -292,6 +344,64 @@ void main() {
       final resultA = await deviceA.load();
       expect(resultA.map((i) => i.id), isNot(contains('1')));
       expect(resultA.map((i) => i.id), contains('9'));
+    });
+  });
+
+  group('operations on one store', () {
+    SyncedStore<_Item> store(String name) =>
+        SyncedStore<_Item>(filePath: '$name.items.json', local: backend.local('$name.items.json'), cloudKey: name, itemFromJson: _Item.fromJson, cloud: cloud);
+
+    test('a load that overlaps a save does not drop the saved item', () async {
+      final s = store('race');
+      cloud.slowReads = true;
+      await s.upsert(_Item(id: 'seed', label: 'seed'));
+      for (var i = 0; i < 30; i++) {
+        await Future.wait(i.isEven ? [s.load(), s.upsert(_Item(id: 'n$i', label: 'saved'))] : [s.upsert(_Item(id: 'n$i', label: 'saved')), s.load()]);
+      }
+      // Read back through a store with no cloud copy, so only the local
+      // records can answer; the cloud would put a dropped item back.
+      final localOnly = SyncedStore<_Item>(
+        filePath: 'race.items.json',
+        local: backend.local('race.items.json'),
+        cloudKey: 'other',
+        itemFromJson: _Item.fromJson,
+        cloud: _FakeCloudKVStore(),
+      );
+      final ids = (await localOnly.load()).map((i) => i.id).toSet();
+      expect(ids, {'seed', for (var i = 0; i < 30; i++) 'n$i'});
+    });
+
+    test('saves that overlap all land', () async {
+      final s = store('overlap');
+      await Future.wait([for (var i = 0; i < 20; i++) s.upsert(_Item(id: 'n$i', label: 'v$i'))]);
+      await Future.wait([s.delete('n0'), s.upsertAll([_Item(id: 'm', label: 'm')]), s.setOrder(['n3', 'n2'])]);
+      final ids = (await s.load()).map((i) => i.id).toSet();
+      expect(ids, {for (var i = 1; i < 20; i++) 'n$i', 'm'});
+    });
+
+    test('operations run in the order they were called', () async {
+      final s = store('order');
+      final results = await Future.wait([
+        s.upsert(_Item(id: '1', label: 'one')),
+        s.upsert(_Item(id: '2', label: 'two')),
+        s.delete('1'),
+        s.load(),
+      ]);
+      expect(results[0].map((i) => i.id), ['1']);
+      expect(results[1].map((i) => i.id), ['1', '2']);
+      expect(results[2].map((i) => i.id), ['2']);
+      expect(results[3].map((i) => i.id), ['2']);
+    });
+
+    test('an operation that throws reaches its caller and does not stall the ones after it', () async {
+      final s = store('fails');
+      await s.upsert(_Item(id: '1', label: 'one'));
+      cloud.failNextRead = true;
+      final failing = s.upsert(_Item(id: '2', label: 'two'));
+      final next = s.upsert(_Item(id: '3', label: 'three'));
+      await expectLater(failing, throwsA(isA<StateError>()));
+      expect((await next).map((i) => i.id), ['1', '3']);
+      expect((await s.load()).map((i) => i.id), ['1', '3']);
     });
   });
 }

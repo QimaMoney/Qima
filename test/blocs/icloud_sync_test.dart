@@ -177,6 +177,16 @@ void main() {
     return cubit;
   }
 
+  /// Waits for the work a cloud change started on each device. A store runs
+  /// its operations in call order, so a load queued now finishes after the
+  /// ones already waiting, and the directory is not deleted under them.
+  Future<void> settle(List<AppCubit> devices) async {
+    for (final d in devices) {
+      await d.watchlistStore.load();
+      await d.transactionsStore.load();
+    }
+  }
+
   group('two devices sharing a fake cloud', () {
     test('a card added on device A appears on device B after B enables sync', () async {
       final dirA = await Directory.systemTemp.createTemp('qima_icloud_a');
@@ -220,6 +230,7 @@ void main() {
       final reloadedA = await deviceA.watchlistStore.load();
       expect(reloadedA.map((c) => c.id).toSet(), {...defaultIds, 'c1'});
 
+      await settle([deviceA, deviceB]);
       await deviceA.disposeCloudSync();
       await deviceB.disposeCloudSync();
       await dirA.delete(recursive: true);
@@ -388,6 +399,7 @@ void main() {
 
       expect(deviceB.state.cards, same(cardsIdentityBefore));
 
+      await settle([deviceA, deviceB]);
       await deviceA.disposeCloudSync();
       await deviceB.disposeCloudSync();
       await dirA.delete(recursive: true);
