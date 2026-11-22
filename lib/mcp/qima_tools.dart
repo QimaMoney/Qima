@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import '../models/ai_snapshot.dart';
 import '../models/book.dart';
 import '../models/book_account.dart';
@@ -17,34 +19,47 @@ class ToolInputError implements Exception {
   String toString() => message;
 }
 
-/// One read-only tool: its MCP description and the function that answers it.
+/// Hands one file of transactions to Qima for the person to review; see
+/// `AiInbox.leave`.
+typedef LeaveFile = void Function(String name, String contents);
+
+/// One tool: its MCP description and the function that answers it. A tool
+/// reads the snapshot ([run]) or, for the one that adds, leaves a file for
+/// Qima to read ([add]).
 class QimaTool {
   final String name;
   final String title;
   final String description;
   final Map<String, dynamic> inputSchema;
   final Map<String, dynamic> Function(AiSnapshot snapshot, Map<String, dynamic> args, DateTime now) run;
+  final Map<String, dynamic> Function(LeaveFile leave, Map<String, dynamic> args, DateTime now)? add;
 
   const QimaTool({
     required this.name,
     required this.title,
     required this.description,
     required this.inputSchema,
-    required this.run,
+    this.run = _readsNothing,
+    this.add,
   });
+
+  bool get readOnly => add == null;
+
+  static Map<String, dynamic> _readsNothing(AiSnapshot snapshot, Map<String, dynamic> args, DateTime now) => const {};
 
   Map<String, dynamic> toJson() => {
         'name': name,
         'title': title,
         'description': description,
         'inputSchema': inputSchema,
-        'annotations': {'readOnlyHint': true, 'destructiveHint': false, 'idempotentHint': true, 'openWorldHint': false},
+        'annotations': {'readOnlyHint': readOnly, 'destructiveHint': false, 'idempotentHint': readOnly, 'openWorldHint': false},
       };
 }
 
 /// The tools `qima-mcp` offers. Every figure comes from the same models the
 /// app uses ([Book], [NetWorthSummary], [MonthAnalysis], [Person]), so an
-/// AI app sees exactly what Qima shows. None of them write.
+/// AI app sees exactly what Qima shows. None of them change the books:
+/// `add_transactions` only leaves rows for the person to review in Qima.
 abstract final class QimaTools {
   static const String _dateHelp = 'A date as YYYY-MM-DD.';
 
@@ -119,7 +134,43 @@ abstract final class QimaTools {
       inputSchema: _object({}),
       run: _holdings,
     ),
+    QimaTool(
+      name: addTransactions,
+      title: 'Add transactions',
+      description: 'Hands transactions to Qima for the person to review. Nothing is saved until they open Qima, '
+          'choose the account and confirm, so tell them the transactions are waiting there. Send the transactions '
+          'of one account per call, at most $maxRows. Copy each date, amount and description from what the person '
+          'gave you; never guess or compute one. Sending the same list twice is shown to the person as already added.',
+      inputSchema: {
+        'type': 'object',
+        'properties': {
+          'title': _string('A short name for this list, shown to the person, such as the account it belongs to.'),
+          'currency': _string('The three-letter currency of every amount, such as SAR, when known.'),
+          'transactions': {
+            'type': 'array',
+            'minItems': 1,
+            'maxItems': maxRows,
+            'items': {
+              'type': 'object',
+              'properties': {
+                'date': _string(_dateHelp),
+                'amount': {'type': 'number', 'description': 'Negative for money out, positive for money in. Never zero.'},
+                'description': _string('The merchant, person or purpose.'),
+              },
+              'required': ['date', 'amount', 'description'],
+              'additionalProperties': false,
+            },
+          },
+        },
+        'required': ['transactions'],
+        'additionalProperties': false,
+      },
+      add: _add,
+    ),
   ];
+
+  static const String addTransactions = 'add_transactions';
+  static const int maxRows = 200;
 
   static QimaTool? named(String name) {
     for (final t in all) {
@@ -391,6 +442,65 @@ abstract final class QimaTools {
 
   static final RegExp _dayPattern = RegExp(r'^\d{4}-\d{2}-\d{2}$');
   static final RegExp _monthPattern = RegExp(r'^(\d{4})-(\d{2})$');
+
+  static Map<String, dynamic> _add(LeaveFile leave, Map<String, dynamic> args, DateTime now) {
+    final list = args['transactions'];
+    if (list is! List || list.isEmpty) throw const ToolInputError('"transactions" must be a list with at least one transaction.');
+    if (list.length > maxRows) throw ToolInputError('At most $maxRows transactions per call; send the rest in another call.');
+    final currency = _string_(args, 'currency')?.toUpperCase();
+    if (currency != null && !RegExp(r'^[A-Z]{3}$').hasMatch(currency)) {
+      throw ToolInputError('"currency" must be a three-letter code such as SAR, not "$currency".');
+    }
+    final digits = currency == null ? 2 : MinorUnits.digits(currency);
+    final csv = StringBuffer('Date,Description,Amount\r\n');
+    for (var i = 0; i < list.length; i++) {
+      final row = list[i];
+      final at = 'Transaction ${i + 1}';
+      if (row is! Map<String, dynamic>) throw ToolInputError('$at must be an object.');
+      final ToolInputError wrong;
+      try {
+        final day = _date(row, 'date');
+        final text = _oneLine(_string_(row, 'description'));
+        final amount = row['amount'];
+        if (day == null) throw const ToolInputError('"date" is missing.');
+        if (text == null) throw const ToolInputError('"description" is missing.');
+        if (amount is! num || !amount.isFinite || amount == 0 || amount.abs() >= 1e12) {
+          throw const ToolInputError('"amount" must be a number other than zero.');
+        }
+        // Written with the currency's own decimals, so the reader can't
+        // take a third decimal for a thousands separator.
+        final scaled = amount.abs() * pow(10, digits);
+        if (scaled.round() == 0 || (scaled - scaled.round()).abs() > 1e-6) {
+          throw ToolInputError('"amount" can have at most $digits decimals${currency == null ? '; give "currency" if it has more' : ' in $currency'}.');
+        }
+        final figure = amount.abs().toStringAsFixed(digits);
+        csv.write('${dayToJson(day)},${_cell(text)},${amount < 0 ? '-' : '+'}$figure${currency == null ? '' : ' $currency'}\r\n');
+        continue;
+      } on ToolInputError catch (e) {
+        wrong = e;
+      }
+      throw ToolInputError('$at: ${wrong.message}');
+    }
+    final title = _oneLine(_string_(args, 'title'))?.replaceAll(RegExp(r'[/\\:*?"<>|.]'), ' ').trim();
+    final label = title == null || title.isEmpty ? 'AI app' : (title.length > 60 ? title.substring(0, 60).trim() : title);
+    leave('$label ${dayToJson(now)}.csv', csv.toString());
+    return {
+      'handed_to_qima': list.length,
+      'saved': false,
+      'next': 'Nothing is in the books yet. Ask the person to open Qima and review the import; if Qima is closed, '
+          'the transactions wait until it is opened.',
+    };
+  }
+
+  /// A description on one line and of a sane length.
+  static String? _oneLine(String? text) {
+    if (text == null) return null;
+    final flat = text.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (flat.isEmpty) return null;
+    return flat.length > 200 ? flat.substring(0, 200).trim() : flat;
+  }
+
+  static String _cell(String text) => '"${text.replaceAll('"', '""')}"';
 
   static DateTime? _date(Map<String, dynamic> args, String key) {
     final v = _string_(args, key);

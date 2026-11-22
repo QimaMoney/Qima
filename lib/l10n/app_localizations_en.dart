@@ -5090,6 +5090,13 @@ class AppLocalizationsEn extends AppLocalizations {
       'The connector isn\'t in this copy of Qima. Install Qima from the store or the website to use it.';
 
   @override
+  String get aiAppsAddToggle => 'Let AI apps add transactions';
+
+  @override
+  String get aiAppsAddFooter =>
+      'An AI app can hand transactions to Qima. They wait in the import review, and nothing is saved until you check them and choose the account. Turning this off keeps what is already waiting.';
+
+  @override
   String get setupWelcomeTitle => 'Let’s set Qima up for you';
 
   @override

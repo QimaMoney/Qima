@@ -5124,6 +5124,14 @@ class AppLocalizationsEs extends AppLocalizations {
       'El conector no está en esta copia de Qima. Instala Qima desde la tienda o la web para usarlo.';
 
   @override
+  String get aiAppsAddToggle =>
+      'Permitir que las apps de IA añadan movimientos';
+
+  @override
+  String get aiAppsAddFooter =>
+      'Una app de IA puede entregar movimientos a Qima. Esperan en la revisión de la importación, y no se guarda nada hasta que los revises y elijas la cuenta. Al desactivarlo se conserva lo que ya está esperando.';
+
+  @override
   String get setupWelcomeTitle => 'Vamos a preparar Qima para ti';
 
   @override

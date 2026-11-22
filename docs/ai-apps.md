@@ -3,6 +3,8 @@
 Qima's desktop apps (macOS, Windows, Linux) can let AI apps that support the
 Model Context Protocol read the person's books: Claude Desktop, Claude Code,
 VS Code, Cursor, LM Studio and others. It is off by default and read-only.
+A second switch lets them hand over transactions for the person to review;
+they still never change the books.
 
 ## How it works
 
@@ -41,9 +43,35 @@ says so.
 | `list_holdings` | Holdings value and cost at the last prices |
 
 Every figure comes from the app's own models (`Book`, `NetWorthSummary`,
-`MonthAnalysis`, `Person`), so answers match the screens. No tool writes.
-Each result carries `saved_by_qima_at`, because the copy only updates while
-Qima is open.
+`MonthAnalysis`, `Person`), so answers match the screens. Each result
+carries `saved_by_qima_at`, because the copy only updates while Qima is open.
+
+## Adding transactions
+
+Settings › AI apps › **Let AI apps add transactions** (shown once reading is
+on, off by default, never synced) allows one more tool:
+
+| Tool | Does |
+|---|---|
+| `add_transactions` | Hands up to 200 transactions of one account (date, signed amount, description, optional currency and title) to Qima |
+
+The helper never writes to the books. It writes the list as a CSV into
+`qima-ai-inbox`, the folder beside the snapshot (`AiInbox`,
+`lib/mcp/ai_inbox.dart`), in the import inbox's own layout. Qima reads that
+folder with its other inbox folders, so the list shows in the import review
+like a shared statement: the person chooses the account, unticks what they
+don't want and confirms. The same list sent twice is flagged as already
+imported, as any file is.
+
+- While the switch is on the app keeps a `.accepting` file in the folder;
+  without it the helper refuses and tells the AI app which setting to turn
+  on. Turning the switch (or reading) off removes it and keeps what already
+  waits for review.
+- The app watches the folder while the switch is on, so a list shows without
+  waiting for Qima to come back to the front. If Qima is closed, the list
+  waits until it opens.
+- Amounts are written with the currency's own decimals; one with more is
+  refused rather than rounded.
 
 ## Where things live
 
