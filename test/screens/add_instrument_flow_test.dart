@@ -356,9 +356,12 @@ void main() {
     const instrumentID = 'stock.ZD';
 
     // The button spins while the question is up, so frames never settle.
+    expect(tester.testTextInput.isVisible, isTrue);
     await tester.tap(find.text('Add ticker'));
     await _settle(tester);
     expect(find.byKey(const ValueKey('customTickerConfirm')), findsOneWidget);
+    // The keyboard is put away, or it would stay up over the asset's page.
+    expect(tester.testTextInput.isVisible, isFalse);
     expect(find.text('Zed Utilities Inc.'), findsOneWidget);
     expect(find.text('ZD · Northport · USD'), findsOneWidget);
 

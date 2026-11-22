@@ -120,6 +120,9 @@ class _CustomTickerScreenState extends State<CustomTickerScreen> {
       setState(() => _error = l10n.addCustomTickerSymbolRequired);
       return;
     }
+    // The keyboard goes with the form: the fields keep focus through the
+    // navigation that follows, and it would stay up over the asset's page.
+    FocusManager.instance.primaryFocus?.unfocus();
     setState(() {
       _isSubmitting = true;
       _error = null;
