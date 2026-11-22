@@ -30,6 +30,10 @@ mixin _Rows on _ReaderCore, _Dates, _Amounts, _Layout, _Reconcile {
     caseSensitive: false,
   );
 
+  /// The lines of rows that begin or end with their own date, or give it a
+  /// cell of its own, as a statement's rows do. Filled by [_readPages].
+  final _edgeDated = <int>{};
+
   // ---------------------------------------------------------- reading
 
   /// Rows from positioned pages: statement PDFs, screenshots, tables.
@@ -39,6 +43,7 @@ mixin _Rows on _ReaderCore, _Dates, _Amounts, _Layout, _Reconcile {
   /// message bubble.
   (List<StatementRow>, Set<int>) _readPages(List<List<_Line>> allLines) {
     final bubbleLines = <int>{};
+    _edgeDated.clear();
     final texts = [for (final ls in allLines) for (final l in ls) _Text.normalize(l.text)];
     _decideOrder(texts);
     _decideTrailingMinus(texts);
@@ -70,6 +75,9 @@ mixin _Rows on _ReaderCore, _Dates, _Amounts, _Layout, _Reconcile {
     var datesUnder = 0;
     String pendingText = '';
     double? pendingBottom;
+    // A name whose date line came between it and its amount.
+    String? stackedName;
+    double? stackedBottom;
     // Tables whose cells centre their lines on the dated one: a row's
     // reference sits on the line above its date, so a line between two
     // rows belongs to the nearer one. Decided by the table's first row.
@@ -99,7 +107,7 @@ mixin _Rows on _ReaderCore, _Dates, _Amounts, _Layout, _Reconcile {
         final bubble = messages[lines.indexOf(line)];
         if (bubble != null) {
           skip.addAll(bubble);
-          final row = _message([for (final l in bubble) _Text.normalize(l.text)]);
+          final row = _message([for (final l in bubble) _Layout._logical(_Text.normalize(l.text))], visual: true, day: sectionDate);
           bubbleLines.add(base + lines.indexOf(line));
           if (row != null) rows.add(row.copyWithLine(base + lines.indexOf(line)));
           pendingText = '';
@@ -121,6 +129,7 @@ mixin _Rows on _ReaderCore, _Dates, _Amounts, _Layout, _Reconcile {
         final amounts = <(_Found<_Money>, _Column?)>[];
         final words = <String>[];
         String? lineCurrency;
+        var lineSign = 0;
         for (final cell in line.cells) {
           final text = _Text.normalize(cell.text);
           final column = header == null ? null : _columnAt(header, cell.x + cell.w / 2);
@@ -148,7 +157,11 @@ mixin _Rows on _ReaderCore, _Dates, _Amounts, _Layout, _Reconcile {
           if (i < text.length) rest.write(text.substring(i));
           final cleaned = _Text._clean(rest.toString());
           final asCurrency = _Amounts._currencyOf(cleaned);
-          if (asCurrency != null) {
+          final marker = _Amounts._markerCell.firstMatch(cleaned)?[0]?.toLowerCase();
+          if (marker != null) {
+            // "CR" or "DR" beside the amount, read as a piece of its own.
+            lineSign = marker == 'cr' || marker == 'دائن' ? 1 : -1;
+          } else if (asCurrency != null) {
             lineCurrency = asCurrency;
           } else if (cleaned.isNotEmpty && column != _Column.balance) {
             words.add(cleaned);
@@ -175,7 +188,32 @@ mixin _Rows on _ReaderCore, _Dates, _Amounts, _Layout, _Reconcile {
           continue;
         }
 
+        // A line that only says what is left (a balance, a limit) gives
+        // the balance after the row above it, and is never a transaction.
+        if (header == null && amounts.isNotEmpty) {
+          final whole = _Layout._logical(_Text.normalize(line.text));
+          final figures = _amounts(whole, [..._dates(whole).$2, for (final m in _Dates._time.allMatches(whole)) _Span(m.start, m.end)]);
+          if (figures.isNotEmpty) {
+            final label = whole.substring(0, figures.first.span.start);
+            // Up to the first digit too: a misread figure still follows its label.
+            final digit = whole.indexOf(RegExp(r'\d'));
+            final sure = _leftSure.hasMatch(label) || (digit > 0 && _leftSure.hasMatch(whole.substring(0, digit)));
+            final above = rows.isEmpty ? null : rows.last;
+            final takes = above != null && pendingText.isEmpty && above.balance == null && above.line != null && above.line! >= base;
+            if (sure || (takes && _leftLabel.hasMatch(label))) {
+              if (takes) {
+                final f = figures.first.value;
+                rows.last = above.copyWith(balance: f.major * (f.sign < 0 ? -1 : 1));
+              }
+              pendingText = '';
+              continue;
+            }
+          }
+        }
+
         if (amounts.isEmpty) {
+          // A chevron or an icon read as a character is nothing.
+          if (dates.isEmpty && description.isNotEmpty && !_Text._letterOrDigit.hasMatch(description)) continue;
           if (dates.isNotEmpty && description.length < 3) {
             final prev = rowLines.isEmpty ? null : rowLines.last;
             final close = prev != null && rows.isNotEmpty && line.top - prev.bottom < prev.height * 1.5;
@@ -196,7 +234,12 @@ mixin _Rows on _ReaderCore, _Dates, _Amounts, _Layout, _Reconcile {
               datesUnder++;
               rowLines.last = line;
             } else {
-              // A date on its own heads a group of rows (banking apps).
+              // A date on its own heads a group of rows (banking apps). Right
+              // under a name it is that name's: a record stacked on lines
+              // of its own (name, date, amount), read when the amount comes.
+              final underName = pendingText.isNotEmpty && pendingBottom != null && line.top - pendingBottom < line.height * 1.5;
+              stackedName = underName ? pendingText : null;
+              stackedBottom = line.bottom;
               sectionDate = heading(dates) ?? sectionDate;
             }
             pendingText = '';
@@ -277,6 +320,7 @@ mixin _Rows on _ReaderCore, _Dates, _Amounts, _Layout, _Reconcile {
             if (xOf(list[1]) case final x?) flipX[at] = x;
           }
         }
+        if (sign == 0 && lineSign != 0 && !(lineSign < 0 && _trailingMinusIsCredit)) sign = lineSign;
         final balanceOnly = money == null && balance != null && byColumn;
         if (money == null && !balanceOnly) continue;
 
@@ -323,13 +367,18 @@ mixin _Rows on _ReaderCore, _Dates, _Amounts, _Layout, _Reconcile {
           text = '$pendingText $text';
         } else if (text.isEmpty && pendingText.isNotEmpty) {
           text = pendingText;
+        } else if (text.isEmpty && stackedName != null && stackedBottom != null && line.top - stackedBottom < line.height * 1.5) {
+          text = stackedName;
         }
+        stackedName = null;
         pendingText = '';
 
         // The statement's summary (limit, minimum payment, what is still
         // owed) is not a transaction, nor an undated line of bare figures.
         // A dated row stays even when its name came out unreadable.
-        if (_summaryWords.hasMatch(text) || (ownDates.isEmpty && text.isEmpty)) continue;
+        // Nor is a figure under its own label of what is left ("Available
+        // balance" over the figure).
+        if (_summaryWords.hasMatch(text) || (ownDates.isEmpty && text.isEmpty) || (header == null && _leftSure.hasMatch('$text '))) continue;
 
         var signGuessed = false;
         if (sign == 0) {
@@ -348,6 +397,18 @@ mixin _Rows on _ReaderCore, _Dates, _Amounts, _Layout, _Reconcile {
         if (flip != null) balanceFirst[rows.length] = flip;
         if (balanceOnly) fromBalance.add(rows.length);
         if (date != null && paired.length < 2 && ownDates.isEmpty) datedBySection.add(rows.length);
+        if (ownDates.isNotEmpty) {
+          final whole = _Text.normalize(line.text);
+          // The date begins or ends the line, or has a cell to itself.
+          final apart = line.cells.any((c) {
+            final t = _Text.normalize(c.text);
+            final spans = _dates(t).$2;
+            if (spans.isEmpty) return false;
+            final rest = spans.fold(t, (r, d) => r.replaceRange(d.start, d.end, ' '.padRight(d.end - d.start)));
+            return !_Text._letterOrDigit.hasMatch(rest);
+          });
+          if (apart || _dates(whole).$2.any((d) => d.start <= 3 || d.end >= whole.length - 3)) _edgeDated.add(base + lines.indexOf(line));
+        }
         rows.add(StatementRow(
           date: date ?? DateTime(received.year, received.month, received.day),
           dateGuessed: date == null,
@@ -409,10 +470,50 @@ mixin _Rows on _ReaderCore, _Dates, _Amounts, _Layout, _Reconcile {
     void close(int end) {
       final block = lines.sublist(start, end);
       final words = block.fold(0, (n, l) => n + l.text.trim().split(RegExp(r'\s+')).length);
-      if (block.length < 2 || words < 12) return;
+      if (block.length < 2) return;
+      // A block set apart that says what happened and holds one figure
+      // that moved is a message however briefly it is written ("Purchase /
+      // SAR 41.00 / from X / remaining 350.00"), and so is a one-time code
+      // that quotes the amount it is for.
+      // A list sets the amount apart, across the row from the name; a
+      // message is one column of text.
+      // (A gap between words is only a piece the recognition missed.)
+      bool figureOnly(DocToken c) {
+        final t = _Text.normalize(c.text);
+        final found = _amounts(t, const []);
+        if (found.isEmpty) return false;
+        final rest = found.fold(t, (r, a) => r.replaceRange(a.span.start, a.span.end, ' '.padRight(a.span.end - a.span.start)));
+        return !_Facts._hasWord.hasMatch(rest);
+      }
+
+      final oneColumn = block.every((l) {
+        var right = l.cells.first.right;
+        var before = l.cells.first;
+        for (final c in l.cells.skip(1)) {
+          if (c.x - right > 0.12 && (figureOnly(c) || figureOnly(before))) return false;
+          if (c.right > right) {
+            right = c.right;
+            before = c;
+          }
+        }
+        return true;
+      });
+      final flat = [for (final l in block) _Layout._logical(_Text.normalize(l.text))].join(' ');
+      if (oneColumn && messageIntent(flat) != MessageIntent.unknown) {
+        final figures = _amounts(flat, [..._dates(flat).$2, for (final m in _Dates._time.allMatches(flat)) _Span(m.start, m.end)]);
+        final moved = figures.where((a) => !_leftLabel.hasMatch(flat.substring(math.max(0, a.span.start - 40), a.span.start))).length;
+        if (moved == 1) {
+          out[start] = block;
+          return;
+        }
+      }
+      if (words < 12) return;
       var inSentence = false;
-      for (final cell in block.expand((l) => l.cells)) {
-        final text = _Text.normalize(cell.text);
+      // In one column of text a line is read whole: text recognition cuts
+      // a line of two scripts into pieces wherever the script changes.
+      final pieces = oneColumn ? [for (final l in block) l.text] : [for (final c in block.expand((l) => l.cells)) c.text];
+      for (final piece in pieces) {
+        final text = _Text.normalize(piece);
         final found = _amounts(text, _dates(text).$2);
         if (found.isEmpty) continue;
         final rest = found.fold(text, (t, a) => t.replaceRange(a.span.start, a.span.end, ' '.padRight(a.span.end - a.span.start)));

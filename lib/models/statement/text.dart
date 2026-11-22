@@ -44,6 +44,8 @@ abstract final class _Text {
     };
   }();
 
+  static final _letterOrDigit = RegExp(r'[\p{L}\d]', unicode: true);
+
   static String _clean(String s) => s
       .replaceAll(RegExp(r'\*{2,}\d*|x{4,}\d*|#\d+', caseSensitive: false), ' ')
       // Card networks separate the merchant, city and country with tildes;

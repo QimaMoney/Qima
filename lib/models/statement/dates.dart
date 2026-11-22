@@ -140,6 +140,7 @@ mixin _Dates on _ReaderCore {
     var text = text0;
     final out = <_Found<DateTime>>[];
     final taken = <_Span>[];
+    final eitherWay = <(RegExpMatch, DateTime?, DateTime)>[];
     bool free(int s, int e) => !taken.any((t) => s < t.end && e > t.start);
     void take(RegExpMatch m, DateTime? d, {bool hijri = false, bool loose = false}) {
       if (!free(m.start, m.end)) return;
@@ -160,7 +161,21 @@ mixin _Dates on _ReaderCore {
       final month = _months[m[2]!.toLowerCase()];
       if (month == null) continue;
       final day = int.parse(m[1]!);
-      take(m, _day(_year(m[3], month, day), month, day));
+      var date = _day(_year(m[3], month, day), month, day);
+      // Right to left, "19-أكتوبر-26" comes out of a picture as
+      // "26-أكتوبر-19": when only the other reading is a recent day, it is
+      // the one written.
+      final year = m[3];
+      if (year != null && year.length == 2 && m[1]!.length == 2 && RegExp(r'[ء-ي]').hasMatch(m[2]!)) {
+        final other = int.parse(year);
+        final swapped = _day(_year(m[1], month, other), month, other);
+        if (swapped != null && swapped != date) {
+          // Decided once the line's other dates are read.
+          if (free(m.start, m.end)) eitherWay.add((m, date, swapped));
+          continue;
+        }
+      }
+      take(m, date);
     }
     for (final m in _monthDay.allMatches(text)) {
       final month = _months[m[1]!.toLowerCase()];
@@ -187,6 +202,13 @@ mixin _Dates on _ReaderCore {
       final today = DateTime(received.year, received.month, received.day);
       final isToday = const {'today', 'اليوم', "aujourd'hui", 'aujourd’hui', 'hoy'}.contains(w);
       take(m, isToday ? today : today.subtract(const Duration(days: 1)));
+    }
+    // The same day written beside it in Latin letters settles it; else
+    // the reading that is a recent day.
+    bool recent(DateTime? d) => d != null && !d.isAfter(received.add(const Duration(days: 1))) && d.isAfter(received.subtract(const Duration(days: 800)));
+    for (final (m, written, swapped) in eitherWay) {
+      final beside = out.any((f) => f.value == swapped) && !out.any((f) => f.value == written);
+      take(m, beside || (!recent(written) && recent(swapped)) ? swapped : written);
     }
     out.sort((a, b) => a.span.start - b.span.start);
     return (out, taken);

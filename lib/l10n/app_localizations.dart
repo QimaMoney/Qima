@@ -8645,6 +8645,18 @@ abstract class AppLocalizations {
   /// **'The connector isn\'t in this copy of Qima. Install Qima from the store or the website to use it.'**
   String get aiAppsNoHelper;
 
+  /// No description provided for @aiAppsAddToggle.
+  ///
+  /// In en, this message translates to:
+  /// **'Let AI apps add transactions'**
+  String get aiAppsAddToggle;
+
+  /// No description provided for @aiAppsAddFooter.
+  ///
+  /// In en, this message translates to:
+  /// **'An AI app can hand transactions to Qima. They wait in the import review, and nothing is saved until you check them and choose the account. Turning this off keeps what is already waiting.'**
+  String get aiAppsAddFooter;
+
   /// No description provided for @setupWelcomeTitle.
   ///
   /// In en, this message translates to:

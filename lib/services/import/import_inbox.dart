@@ -47,4 +47,6 @@ abstract class ImportInbox {
 
 /// The inbox on this device: Share › Qima's folder in the app group (iOS)
 /// and Qima's own folder for files picked in the app. None on the web.
-ImportInbox createImportInbox() => impl.createImportInbox();
+/// [extra] names one more folder of the same layout, or null when there is
+/// none: where AI apps leave transactions on the desktop (`AiInbox`).
+ImportInbox createImportInbox({Future<String?> Function()? extra}) => impl.createImportInbox(extra: extra);

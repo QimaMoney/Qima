@@ -14,6 +14,16 @@ mixin _Layout on _ReaderCore {
 
   // ---------------------------------------------------------- lines
 
+  static final _latinThenArabic = RegExp(r'^([^ء-ي]+?)\s+([ء-ي][ء-يـ\s:]*)$');
+
+  /// A picture's line in reading order: text recognition gives a
+  /// right-to-left line left to right, so a label that ends the line
+  /// ("35510.39 الرصيد المتبقي") is put back before what it names.
+  static String _logical(String line) {
+    final m = _latinThenArabic.firstMatch(line.trim());
+    return m == null ? line : '${m[2]!.trim()} ${m[1]}';
+  }
+
   /// Tokens grouped into lines: a token joins a line when its middle is
   /// within half a line's height of the line's middle.
   static List<_Line> _lines(List<DocToken> tokens) {
