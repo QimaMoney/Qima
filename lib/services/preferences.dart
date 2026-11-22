@@ -428,7 +428,7 @@ class Preferences {
   /// Local-only, NOT synced through the cloud store itself — this is the
   /// on/off switch FOR cloud sync, so it can never be read from the thing it
   /// controls (spec Phase 7). Whether this device even offers the setting is
-  /// a separate concern (`AppCubit`/`SettingsScreen` gate on platform +
+  /// a separate concern (`SyncCubit`/`SettingsScreen` gate on platform +
   /// account availability); this getter just answers "did the user turn it
   /// on", defaulting to on so a first launch on a device with an iCloud
   /// account already signed in starts syncing without an extra step.

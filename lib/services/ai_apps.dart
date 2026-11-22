@@ -7,7 +7,10 @@ import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../blocs/app_cubit.dart';
+import '../blocs/holdings_cubit.dart';
+import '../blocs/market_cubit.dart';
 import '../blocs/money_cubit.dart';
+import '../blocs/settings_cubit.dart';
 import '../mcp/snapshot_location.dart';
 import '../models/ai_snapshot.dart';
 
@@ -25,13 +28,15 @@ class AiApps {
   static const MethodChannel _macBridge = MethodChannel('com.devlabtechnologies.qima/widgets');
 
   final AppCubit app;
+  final SettingsCubit settings;
+  final MarketCubit market;
+  final HoldingsCubit holdings;
   final MoneyCubit money;
 
   /// Whether sharing is on; the settings section listens to it.
   final ValueNotifier<bool> enabled = ValueNotifier(false);
 
-  StreamSubscription<Object?>? _appSub;
-  StreamSubscription<Object?>? _moneySub;
+  final List<StreamSubscription<Object?>> _subscriptions = [];
   Timer? _pending;
   String? _lastWritten;
 
@@ -40,7 +45,7 @@ class AiApps {
   Future<void> _queue = Future.value();
   Future<String?>? _path;
 
-  AiApps({required this.app, required this.money});
+  AiApps({required this.app, required this.settings, required this.market, required this.holdings, required this.money});
 
   /// Desktop systems with a helper build: macOS, Windows and Linux.
   static bool get supported =>
@@ -53,22 +58,26 @@ class AiApps {
   /// app has loaded its preferences.
   void start() {
     if (!supported) return;
-    enabled.value = app.preferences.local.getBool(_enabledKey) ?? false;
-    _appSub = app.stream.listen((_) => _schedule());
-    _moneySub = money.stream.listen((_) => _schedule());
+    enabled.value = settings.preferences.local.getBool(_enabledKey) ?? false;
+    // What the copy holds: the base currency, the rates and prices, what is
+    // held and the books; nothing else needs a rewrite.
+    for (final source in [settings.stream, market.stream, holdings.stream, money.stream]) {
+      _subscriptions.add(source.listen((_) => _schedule()));
+    }
     if (enabled.value) _schedule();
   }
 
   Future<void> dispose() async {
     _pending?.cancel();
-    await _appSub?.cancel();
-    await _moneySub?.cancel();
+    for (final subscription in _subscriptions) {
+      await subscription.cancel();
+    }
     enabled.dispose();
   }
 
   Future<void> setEnabled(bool value) async {
     if (!supported) return;
-    await app.preferences.local.setBool(_enabledKey, value);
+    await settings.preferences.local.setBool(_enabledKey, value);
     enabled.value = value;
     _pending?.cancel();
     if (value) {
@@ -187,19 +196,19 @@ class AiApps {
   }
 
   AiSnapshot _build() {
-    final s = app.state;
+    final rates = market.state.rates;
     final m = money.state;
-    final held = app.heldInstruments;
+    final held = holdings.heldInstruments;
     return AiSnapshot.build(
       now: DateTime.now(),
-      baseCurrency: s.baseCurrency,
-      rates: s.rates,
+      baseCurrency: settings.state.baseCurrency,
+      rates: rates,
       accounts: m.accounts,
       entries: m.entries,
       planned: m.recurring,
       settings: m.settings,
       // No lots is a real zero; lots without prices yet are unknown.
-      holdingsValue: s.lots.isEmpty ? 0 : app.portfolioValuation?.value.amount,
+      holdingsValue: holdings.state.lots.isEmpty ? 0 : holdings.portfolioValuation?.value.amount,
       holdings: [
         for (final h in held)
           AiHolding(

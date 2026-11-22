@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:uuid/uuid.dart';
 
-import '../blocs/app_cubit.dart';
+import '../blocs/market_cubit.dart';
+import '../blocs/settings_cubit.dart';
+import '../blocs/watchlist_cubit.dart';
 import '../l10n/app_localizations.dart';
 import '../models/asset.dart';
 import '../models/custom_instrument.dart';
@@ -47,8 +49,7 @@ class _CustomTickerScreenState extends State<CustomTickerScreen> {
   @override
   void initState() {
     super.initState();
-    final cubit = context.read<AppCubit>();
-    _currency = cubit.state.baseCurrency;
+    _currency = context.read<SettingsCubit>().state.baseCurrency;
     _assetClass = widget.initialAssetClass;
     if (widget.initialSymbol != null) {
       _symbolController.text = widget.initialSymbol!.toUpperCase();
@@ -66,7 +67,7 @@ class _CustomTickerScreenState extends State<CustomTickerScreen> {
       _isSubmitting = true;
       _error = null;
     });
-    final cubit = context.read<AppCubit>();
+    final cubit = context.read<WatchlistCubit>();
     try {
       await cubit.validateCustomTicker(symbol, _nameController.text.trim(), assetClass: _assetClass);
       // Checked BEFORE addCustomTicker (which would make it true
@@ -104,7 +105,6 @@ class _CustomTickerScreenState extends State<CustomTickerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final cubit = context.read<AppCubit>();
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
 
@@ -177,7 +177,7 @@ class _CustomTickerScreenState extends State<CustomTickerScreen> {
                       final selected = await CurrencyPicker.show(
                         context,
                         selected: _currency,
-                        currencies: cubit.state.rates.availableCurrencies,
+                        currencies: context.read<MarketCubit>().state.rates.availableCurrencies,
                       );
                       if (selected != null) setState(() => _currency = selected);
                     },

@@ -7,9 +7,15 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:intl/intl.dart' hide TextDirection;
 import 'package:package_info_plus/package_info_plus.dart';
 
-import '../blocs/app_cubit.dart';
-import '../blocs/app_state.dart';
+import '../blocs/alerts_cubit.dart';
+import '../blocs/alerts_state.dart';
+import '../blocs/holdings_cubit.dart';
+import '../blocs/market_cubit.dart';
 import '../blocs/money_cubit.dart';
+import '../blocs/settings_cubit.dart';
+import '../blocs/settings_state.dart';
+import '../blocs/sync_cubit.dart';
+import '../blocs/sync_state.dart';
 import '../l10n/app_localizations.dart';
 import '../models/chart_range.dart';
 import '../services/app_lock_service.dart';
@@ -51,7 +57,7 @@ class SettingsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cubit = context.read<AppCubit>();
+    final cubit = context.read<SettingsCubit>();
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
 
@@ -65,9 +71,9 @@ class SettingsScreen extends StatelessWidget {
           title: Text(l10n.settingsTitle),
           actions: const [HelpButton(topic: HelpTopicId.settings)],
         ),
-        body: BlocBuilder<AppCubit, AppState>(
-          builder: (context, _) {
-            final state = cubit.state;
+        body: BlocBuilder<SettingsCubit, SettingsState>(
+          builder: (context, state) {
+            final bookHealth = context.select<SyncCubit, BookHealth>((c) => c.state.bookHealth);
             return ListView(
               controller: scrollController,
               padding: const EdgeInsets.all(DS.spaceMD),
@@ -97,9 +103,9 @@ class SettingsScreen extends StatelessWidget {
                   const _ICloudSyncSection(),
                   const SizedBox(height: DS.spaceLG),
                 ],
-                if (state.bookHealth.hasProblem) ...[
+                if (bookHealth.hasProblem) ...[
                   SectionHeader(l10n.settingsNeedsAttention),
-                  _BookHealthSection(health: state.bookHealth),
+                  _BookHealthSection(health: bookHealth),
                   const SizedBox(height: DS.spaceLG),
                 ],
                 SectionHeader(l10n.settingsSummaries),
@@ -158,7 +164,7 @@ class SettingsScreen extends StatelessWidget {
                       final selected = await CurrencyPicker.show(
                         context,
                         selected: state.baseCurrency,
-                        currencies: state.rates.availableCurrencies,
+                        currencies: context.read<MarketCubit>().state.rates.availableCurrencies,
                       );
                       if (selected != null) await cubit.setBaseCurrency(selected);
                     },
@@ -310,11 +316,11 @@ class _AlertsSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cubit = context.read<AppCubit>();
+    final cubit = context.read<AlertsCubit>();
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
 
-    return BlocBuilder<AppCubit, AppState>(
+    return BlocBuilder<AlertsCubit, AlertsState>(
       bloc: cubit,
       builder: (context, state) {
         return DSCard(
@@ -380,7 +386,7 @@ class _PrivacySecuritySectionState extends State<_PrivacySecuritySection> {
   @override
   void initState() {
     super.initState();
-    _supported = context.read<AppCubit>().appLockService.isSupported;
+    _supported = context.read<SettingsCubit>().appLockService.isSupported;
   }
 
   /// `local_auth` ships no web or Linux implementation at all — rather than
@@ -396,7 +402,7 @@ class _PrivacySecuritySectionState extends State<_PrivacySecuritySection> {
 
   @override
   Widget build(BuildContext context) {
-    final cubit = context.read<AppCubit>();
+    final cubit = context.read<SettingsCubit>();
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
 
@@ -405,8 +411,8 @@ class _PrivacySecuritySectionState extends State<_PrivacySecuritySection> {
     // this whole subtree when the parent rebuilds but the const widget
     // instance is unchanged — its own BlocBuilder subscription is what
     // actually keeps the hide-balances/app-lock switches and the "Lock
-    // after" row in sync with AppCubit, independent of the parent.
-    return BlocBuilder<AppCubit, AppState>(
+    // after" row in sync with SettingsCubit, independent of the parent.
+    return BlocBuilder<SettingsCubit, SettingsState>(
       bloc: cubit,
       builder: (context, state) {
         return FutureBuilder<bool>(
@@ -474,7 +480,7 @@ class _PrivacySecuritySectionState extends State<_PrivacySecuritySection> {
     );
   }
 
-  Future<void> _showLockAfterSheet(BuildContext context, AppCubit cubit) async {
+  Future<void> _showLockAfterSheet(BuildContext context, SettingsCubit cubit) async {
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
     await showModalBottomSheet<void>(
@@ -500,7 +506,7 @@ class _PrivacySecuritySectionState extends State<_PrivacySecuritySection> {
                     ),
                   ),
                 ),
-                BlocBuilder<AppCubit, AppState>(
+                BlocBuilder<SettingsCubit, SettingsState>(
                   bloc: cubit,
                   builder: (context, state) {
                     return RadioGroup<LockGrace>(
@@ -534,14 +540,14 @@ class _PrivacySecuritySectionState extends State<_PrivacySecuritySection> {
 
 /// "iCloud sync" settings card (spec Phase 7, iOS only — [SettingsScreen]
 /// only builds this section on iOS): a "Sync with iCloud" switch plus a
-/// status line reflecting [AppState.cloudSyncStatus]. Turning the switch on
+/// status line reflecting [SyncState.cloudSyncStatus]. Turning the switch on
 /// merges — never wipes — this device's local data with whatever's already
-/// in iCloud (see `AppCubit.setICloudSyncEnabled`); turning it off just
+/// in iCloud (see `SyncCubit.setICloudSyncEnabled`); turning it off just
 /// stops listening for changes, it never deletes anything.
 class _ICloudSyncSection extends StatelessWidget {
   const _ICloudSyncSection();
 
-  String _statusText(BuildContext context, AppState state, AppLocalizations l10n) {
+  String _statusText(BuildContext context, SyncState state, AppLocalizations l10n) {
     switch (state.cloudSyncStatus) {
       case CloudSyncStatus.disabled:
         return '';
@@ -562,11 +568,11 @@ class _ICloudSyncSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cubit = context.read<AppCubit>();
+    final cubit = context.read<SyncCubit>();
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
 
-    return BlocBuilder<AppCubit, AppState>(
+    return BlocBuilder<SyncCubit, SyncState>(
       bloc: cubit,
       builder: (context, state) {
         final statusText = _statusText(context, state, l10n);
@@ -650,21 +656,25 @@ class _BackupSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cubit = context.read<AppCubit>();
+    final cubit = context.read<SyncCubit>();
+    final holdings = context.read<HoldingsCubit>();
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
 
-    return BlocBuilder<AppCubit, AppState>(
+    return BlocBuilder<SyncCubit, SyncState>(
       bloc: cubit,
       builder: (context, state) {
+        // The held count follows the trades and the prices.
+        final transactions = context.watch<HoldingsCubit>().state.transactions;
+        context.watch<MarketCubit>();
         final lastBackupAt = cubit.backupServiceOrNull?.lastBackupAt;
-        final instrumentCount = cubit.heldInstruments.length;
+        final instrumentCount = holdings.heldInstruments.length;
         final subtitle = lastBackupAt == null
             ? l10n.settingsBackupSubtitleNever
             : l10n.settingsBackupSubtitle(
                 MaterialLocalizations.of(context).formatMediumDate(lastBackupAt),
                 instrumentCount,
-                state.transactions.length,
+                transactions.length,
               );
         return DSCard(
           padding: EdgeInsets.zero,
@@ -890,7 +900,7 @@ class _OnDeviceModelSectionState extends State<_OnDeviceModelSection> {
   /// for the switch too.
   static bool get _waitsForSwitch => _android || usesDownloadedModel;
 
-  Future<ModelStatus>? _statusFor(AppCubit cubit, String tag) {
+  Future<ModelStatus>? _statusFor(SettingsCubit cubit, String tag) {
     if (_waitsForSwitch && !cubit.state.onDeviceModel) return null;
     if (tag != _asked) {
       _asked = tag;
@@ -914,7 +924,7 @@ class _OnDeviceModelSectionState extends State<_OnDeviceModelSection> {
 
   @override
   Widget build(BuildContext context) {
-    final cubit = context.read<AppCubit>();
+    final cubit = context.read<SettingsCubit>();
     final status = _statusFor(cubit, Localizations.localeOf(context).toLanguageTag());
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;

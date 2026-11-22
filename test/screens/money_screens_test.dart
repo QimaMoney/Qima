@@ -7,7 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:qima/blocs/app_cubit.dart';
+import 'package:qima/blocs/app_blocs.dart';
 import 'package:qima/blocs/import_cubit.dart';
 import 'package:qima/blocs/money_cubit.dart';
 import 'package:qima/l10n/app_localizations.dart';
@@ -56,6 +56,7 @@ import 'package:qima/widgets/money_widgets.dart';
 import 'package:qima/theme/help_topics.dart';
 import 'package:qima/widgets/help_button.dart';
 import 'package:qima/services/preferences.dart';
+import '../helpers/app_blocs.dart';
 import '../helpers/old_trade_entry.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -134,7 +135,7 @@ class _AccountScreen implements TextRecognitionService {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   late Directory dir;
-  late AppCubit app;
+  late AppBlocs app;
   late MoneyCubit money;
   late ImportCubit importer;
   final rates = FXRates(base: 'SAR', rates: const {'SAR': 1, 'EGP': 13}, updatedAt: DateTime(2026, 11, 7));
@@ -142,9 +143,9 @@ void main() {
   setUp(() async {
     dir = await Directory.systemTemp.createTemp('qima_money_screens');
     LocalFileStore.overrideDirectoryForTesting(dir);
-    app = AppCubit(repository: _OfflineRepository());
-    app.emit(app.state.copyWith(initialized: true, rates: rates, fxHistory: FXHistory.empty, baseCurrency: 'SAR'));
-    money = MoneyCubit(store: app.bookStore, baseCurrency: () => 'SAR', rates: () => app.state.rates);
+    app = AppBlocs(repository: _OfflineRepository());
+    app.seed(initialized: true, rates: rates, fxHistory: FXHistory.empty, baseCurrency: 'SAR');
+    money = MoneyCubit(store: app.sync.bookStore, baseCurrency: () => 'SAR', rates: () => app.market.state.rates);
     app.onBookChanged = (key) => key == null ? money.load() : money.adoptCloudChanges(key);
     final inboxDir = Directory('${dir.path}/inbox')..createSync();
     importer = ImportCubit(
@@ -207,7 +208,7 @@ void main() {
 
   Widget wrap(Widget screen, Locale locale) => MultiBlocProvider(
         providers: [
-          BlocProvider<AppCubit>.value(value: app),
+          ...app.providers,
           BlocProvider<MoneyCubit>.value(value: money),
           BlocProvider<ImportCubit>.value(value: importer),
         ],
@@ -349,7 +350,7 @@ void main() {
     // One entry: the trade, with the cash it moved.
     final trade = money.state.entries.singleWhere((e) => e.template.isHoldingEntry);
     expect(money.state.entries.where((e) => e.template == EntryTemplate.holdingTrade), isEmpty);
-    expect(app.state.transactions.single.id, trade.id);
+    expect(app.holdings.state.transactions.single.id, trade.id);
     await tester.pumpWidget(wrap(EntryDetailScreen(entryId: holdingCashId(trade.id)), const Locale('en')));
     await tester.pump();
     expect(find.byKey(const ValueKey('entryFromHoldings')), findsOneWidget);
@@ -365,7 +366,7 @@ void main() {
 
   Future<void> saveTrade(WidgetTester tester, HoldingTransaction t, String? accountId) async {
     await tester.runAsync(() async {
-      expect(await app.saveTransaction(t, cash: money.cashLegFor(t, accountId), label: accountId == null ? '' : 'Gold'), isNull);
+      expect(await app.holdings.saveTransaction(t, cash: money.cashLegFor(t, accountId), label: accountId == null ? '' : 'Gold'), isNull);
     });
   }
 
@@ -377,7 +378,7 @@ void main() {
     // The same cash, as an earlier build stored it.
     final rajhi = money.state.book.accounts['rajhi']!;
     final old = oldHoldingTrade(money.builder, rajhi, sar(3000), DateTime.now(), incoming: false, id: 'old-cash', merchant: 'Gold');
-    await tester.runAsync(() => app.bookStore.entries.upsert(old).then((_) => money.load()));
+    await tester.runAsync(() => app.sync.bookStore.entries.upsert(old).then((_) => money.load()));
 
     await tester.pumpWidget(wrap(EntryDetailScreen(entryId: 'old-cash'), const Locale('en')));
     await tester.pump();
@@ -444,8 +445,8 @@ void main() {
       expect(find.text(l10n.tradeRejectedNothing), findsOneWidget);
       expect(find.textContaining('holding.metal'), findsNothing, reason: 'no developer text');
       expect(find.byType(TransactionEditorScreen), findsOneWidget);
-      expect(app.state.transactions, isEmpty);
-      expect((await tester.runAsync(() => app.bookStore.entries.load()))!.length, entriesBefore);
+      expect(app.holdings.state.transactions, isEmpty);
+      expect((await tester.runAsync(() => app.sync.bookStore.entries.load()))!.length, entriesBefore);
     });
 
     testWidgets('any other failure is one general sentence, and nothing is changed', (tester) async {
@@ -455,7 +456,7 @@ void main() {
       final spend = money.state.entries.firstWhere((e) => e.merchant == 'Panda');
       final taken = gold(spend.id, TransactionKind.buy, 1, 300);
       await openFee(tester, existing: taken);
-      final before = (await tester.runAsync(() => app.bookStore.entries.load()))!;
+      final before = (await tester.runAsync(() => app.sync.bookStore.entries.load()))!;
       await tester.runAsync(() async {
         await tester.tap(find.text(l10n.holdingsSave));
         await Future<void>.delayed(const Duration(milliseconds: 300));
@@ -463,8 +464,8 @@ void main() {
       await tester.pump();
       expect(find.text(l10n.tradeSaveFailed), findsOneWidget);
       expect(find.byType(TransactionEditorScreen), findsOneWidget);
-      expect(app.state.transactions, isEmpty);
-      expect((await tester.runAsync(() => app.bookStore.entries.load()))!, before);
+      expect(app.holdings.state.transactions, isEmpty);
+      expect((await tester.runAsync(() => app.sync.bookStore.entries.load()))!, before);
     });
   });
 
@@ -474,7 +475,7 @@ void main() {
     final l10n = await AppLocalizations.delegate.load(const Locale('en'));
     final rajhi = money.state.book.accounts['rajhi']!;
     final orphan = oldHoldingTrade(money.builder, rajhi, sar(500), DateTime.now(), incoming: false, id: 'old-cash', merchant: 'Gold');
-    await tester.runAsync(() => app.bookStore.entries.upsert(orphan).then((_) => money.load()));
+    await tester.runAsync(() => app.sync.bookStore.entries.upsert(orphan).then((_) => money.load()));
     await tester.pumpWidget(wrap(const EntryDetailScreen(entryId: 'old-cash'), const Locale('en')));
     await tester.pump();
     expect(find.byKey(const ValueKey('entryFromHoldings')), findsNothing);
@@ -1060,9 +1061,15 @@ void main() {
     Future<void> withVoice() async {
       voice = _SpokenWords();
       final old = app;
-      app = AppCubit(repository: _OfflineRepository(), bookStore: old.bookStore, dictation: voice);
-      app.emit(old.state);
-      await old.close();
+      app = AppBlocs(repository: _OfflineRepository(), bookStore: old.sync.bookStore, dictation: voice);
+      app.seed(
+        initialized: old.app.state.initialized,
+        rates: old.market.state.rates,
+        fxHistory: old.market.state.fxHistory,
+        baseCurrency: old.settings.state.baseCurrency,
+      );
+      // Only the cubit: the new blocs share the book store, which a full close would pull the cloud store from under.
+      await old.app.close();
     }
 
     Future<void> say(WidgetTester tester, String words, AppLocalizations l10n) async {
@@ -1082,7 +1089,7 @@ void main() {
       await tester.runAsync(seed);
       await withVoice();
       SharedPreferences.setMockInitialValues({});
-      app.preferences = await Preferences.create();
+      app.settings.preferences = await Preferences.create();
       size(tester, const Size(390, 1400));
       final l10n = await AppLocalizations.delegate.load(const Locale('en'));
       await tester.pumpWidget(wrap(const EntryEditorScreen(kind: EntryKind.spend), const Locale('en')));
@@ -1093,8 +1100,8 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('speechLanguage-ar')));
       await tester.pumpAndSettle();
-      expect(app.state.speechLanguage, 'ar');
-      expect(app.preferences.speechLanguage, 'ar');
+      expect(app.settings.state.speechLanguage, 'ar');
+      expect(app.settings.preferences.speechLanguage, 'ar');
       expect(find.descendant(of: find.byKey(const ValueKey('speechLanguage')), matching: find.text('AR')), findsOneWidget);
 
       await say(tester, 'صرفت ٤٥ في بنده', l10n);
@@ -1222,11 +1229,11 @@ void main() {
   testWidgets('Home draws net worth over time with the ranges, and holdings with their split', (tester) async {
     await tester.runAsync(seed);
     SharedPreferences.setMockInitialValues({});
-    app.preferences = (await tester.runAsync(Preferences.create))!;
+    app.settings.preferences = (await tester.runAsync(Preferences.create))!;
     final gold = InstrumentCatalog.instrument('metal.XAU')!;
     final silver = InstrumentCatalog.instrument('metal.XAG')!;
     final now = DateTime.now();
-    app.emit(app.state.copyWith(
+    app.seed(
       rates: FXRates(base: 'SAR', rates: const {'SAR': 1, 'EGP': 13, 'USD': 0.2667}, updatedAt: now),
       lots: [
         HoldingLot(id: 'l1', instrumentID: gold.id, quantity: 2, unit: PriceUnit.troyOunce, unitCost: 1900, costCurrency: 'USD', date: DateTime(now.year, now.month - 1)),
@@ -1237,7 +1244,7 @@ void main() {
         silver.id: QuoteSeries(instrumentID: silver.id, quotes: [Quote(instrumentID: silver.id, timestamp: now, canonicalUSD: 25)]),
       },
       lastRefresh: DateTime(now.year, now.month, now.day, 9, 38),
-    ));
+    );
     size(tester, const Size(390, 3000));
     final l10n = await AppLocalizations.delegate.load(const Locale('en'));
     await tester.pumpWidget(wrap(const HomeScreen(), const Locale('en')));
@@ -1247,7 +1254,7 @@ void main() {
     expect(find.descendant(of: find.byKey(const ValueKey('netWorthChart')), matching: find.byType(PriceChartView)), findsOneWidget);
     await tester.tap(find.text(displayLabelFor(l10n, ChartRange.year1.labelKey)).first);
     await tester.pump(const Duration(milliseconds: 300));
-    expect(app.state.preferredPortfolioRange, ChartRange.year1);
+    expect(app.settings.state.preferredPortfolioRange, ChartRange.year1);
     expect(find.byType(BalanceSheetScreen), findsNothing);
 
     // Holdings: count and price time, then each holding's share.

@@ -4,8 +4,9 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:qima/blocs/app_cubit.dart';
-import 'package:qima/blocs/app_state.dart';
+import 'package:qima/blocs/app_blocs.dart';
+import '../helpers/app_blocs.dart';
+import 'package:qima/blocs/market_state.dart';
 import 'package:qima/l10n/app_localizations.dart';
 import 'package:qima/models/asset.dart';
 import 'package:qima/models/fx_history.dart';
@@ -57,7 +58,7 @@ class _FakeRepository extends PriceRepository {
 /// long enough. Used to await the ACTUAL completion of `addCard`/
 /// `undoAdd`'s real on-disk file IO (and everything chained after it —
 /// `CardConfigScreen`'s `onPressed` doesn't return, and doesn't call
-/// `completeAdd`'s navigation, until the whole `await cubit.addCard(...)`
+/// `completeAdd`'s navigation, until the whole `await cubit.watchlist.addCard(...)`
 /// chain resolves). A fixed delay that's too short leaves this work still
 /// in flight when the test (and `tearDown`'s `cubit.close()`) completes,
 /// which then throws "Cannot emit new states after calling close" during a
@@ -81,10 +82,10 @@ Future<void> _pollUntil(bool Function() condition, {Duration timeout = const Dur
 /// async work that must be fully drained before a test (and `tearDown`'s
 /// `cubit.close()`) completes, or either can throw "Cannot emit new states
 /// after calling close" into a LATER test.
-Future<void> _awaitAddCardSettled(AppCubit cubit, String instrumentID) async {
-  await _pollUntil(() => cubit.state.seriesByID.containsKey(instrumentID));
-  if (cubit.state.phase == RefreshPhase.refreshing) {
-    await cubit.stream.firstWhere((s) => s.phase != RefreshPhase.refreshing).timeout(const Duration(seconds: 5));
+Future<void> _awaitAddCardSettled(AppBlocs cubit, String instrumentID) async {
+  await _pollUntil(() => cubit.market.state.seriesByID.containsKey(instrumentID));
+  if (cubit.market.state.phase == RefreshPhase.refreshing) {
+    await cubit.market.stream.firstWhere((s) => s.phase != RefreshPhase.refreshing).timeout(const Duration(seconds: 5));
   }
 }
 
@@ -142,9 +143,9 @@ Future<void> _openWatch(WidgetTester tester, {AddStart start = AddStart.watchlis
   await tester.pumpAndSettle();
 }
 
-Widget _app(AppCubit cubit, {Locale locale = const Locale('en')}) {
+Widget _app(AppBlocs cubit, {Locale locale = const Locale('en')}) {
   return MultiBlocProvider(
-    providers: [BlocProvider<AppCubit>.value(value: cubit), testMoneyProvider(cubit)],
+    providers: [...cubit.providers, testMoneyProvider(cubit)],
     child: MaterialApp(
       locale: locale,
       localizationsDelegates: AppLocalizations.localizationsDelegates,
@@ -158,13 +159,13 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   late Directory tempDir;
-  late AppCubit cubit;
+  late AppBlocs cubit;
 
   setUp(() async {
     tempDir = await Directory.systemTemp.createTemp('qima_add_flow_test');
     LocalFileStore.overrideDirectoryForTesting(tempDir);
-    cubit = AppCubit(repository: _FakeRepository());
-    cubit.emit(cubit.state.copyWith(initialized: true));
+    cubit = AppBlocs(repository: _FakeRepository());
+    cubit.seed(initialized: true);
   });
 
   tearDown(() async {
@@ -245,7 +246,7 @@ void main() {
     expect(find.byType(InstrumentDetailScreen), findsOneWidget);
     expect(find.byType(CardConfigScreen), findsNothing);
     expect(find.byType(AddInstrumentScreen), findsNothing);
-    expect(cubit.state.cards.any((c) => c.instrumentID == gold.id), isTrue);
+    expect(cubit.watchlist.state.cards.any((c) => c.instrumentID == gold.id), isTrue);
 
     final navigator = tester.state<NavigatorState>(find.byType(Navigator).first);
     expect(navigator.canPop(), isTrue);
@@ -267,12 +268,12 @@ void main() {
     await _settle(tester);
 
     expect(find.byType(InstrumentDetailScreen), findsOneWidget);
-    expect(cubit.state.cards, isNotEmpty);
+    expect(cubit.watchlist.state.cards, isNotEmpty);
 
-    await _tapUndo(tester, () => _pollUntil(() => cubit.state.cards.isEmpty));
+    await _tapUndo(tester, () => _pollUntil(() => cubit.watchlist.state.cards.isEmpty));
     await _settle(tester);
 
-    expect(cubit.state.cards, isEmpty);
+    expect(cubit.watchlist.state.cards, isEmpty);
     expect(find.byType(WatchlistScreen), findsOneWidget);
   });
 
@@ -287,10 +288,10 @@ void main() {
     // flight when `tearDown` closes the cubit.
     late Instrument preExisting;
     await tester.runAsync(() async {
-      preExisting = await cubit.addCustomTicker('PREV', 'Previous Co', assetClass: AssetClass.stock);
-      await cubit.addCard(WatchCard(id: 'pre', instrumentID: preExisting.id, currency: 'EUR', unit: PriceUnit.each));
-      if (cubit.state.phase == RefreshPhase.refreshing) {
-        await cubit.stream.firstWhere((s) => s.phase != RefreshPhase.refreshing).timeout(const Duration(seconds: 5));
+      preExisting = await cubit.watchlist.addCustomTicker('PREV', 'Previous Co', assetClass: AssetClass.stock);
+      await cubit.watchlist.addCard(WatchCard(id: 'pre', instrumentID: preExisting.id, currency: 'EUR', unit: PriceUnit.each));
+      if (cubit.market.state.phase == RefreshPhase.refreshing) {
+        await cubit.market.stream.firstWhere((s) => s.phase != RefreshPhase.refreshing).timeout(const Duration(seconds: 5));
       }
     });
 
@@ -313,8 +314,8 @@ void main() {
     await _settle(tester);
 
     expect(find.byType(InstrumentDetailScreen), findsOneWidget);
-    expect(cubit.isCustom(newInstrumentID), isTrue);
-    expect(cubit.state.cards.any((c) => c.instrumentID == newInstrumentID), isTrue);
+    expect(cubit.watchlist.isCustom(newInstrumentID), isTrue);
+    expect(cubit.watchlist.state.cards.any((c) => c.instrumentID == newInstrumentID), isTrue);
 
     // `undoAdd` (with a `customInstrumentID`) ends with
     // `removeCustomInstrument`, which reloads the catalog BEFORE removing
@@ -323,16 +324,16 @@ void main() {
     await _tapUndo(
       tester,
       () => _pollUntil(
-        () => !cubit.isCustom(newInstrumentID) && !cubit.state.cards.any((c) => c.instrumentID == newInstrumentID),
+        () => !cubit.watchlist.isCustom(newInstrumentID) && !cubit.watchlist.state.cards.any((c) => c.instrumentID == newInstrumentID),
       ),
     );
     await _settle(tester);
 
-    expect(cubit.state.cards.any((c) => c.instrumentID == newInstrumentID), isFalse);
-    expect(cubit.isCustom(newInstrumentID), isFalse);
+    expect(cubit.watchlist.state.cards.any((c) => c.instrumentID == newInstrumentID), isFalse);
+    expect(cubit.watchlist.isCustom(newInstrumentID), isFalse);
     // The pre-existing ticker (and its card) must survive.
-    expect(cubit.isCustom(preExisting.id), isTrue);
-    expect(cubit.state.cards.any((c) => c.instrumentID == preExisting.id), isTrue);
+    expect(cubit.watchlist.isCustom(preExisting.id), isTrue);
+    expect(cubit.watchlist.state.cards.any((c) => c.instrumentID == preExisting.id), isTrue);
   });
 
   testWidgets('adding a duplicate opens the existing card with no Undo action', (tester) async {
@@ -346,9 +347,9 @@ void main() {
     // in flight when `tearDown` closes the cubit and throws "Cannot emit
     // new states after calling close" into a LATER test.
     await tester.runAsync(() async {
-      await cubit.addCard(existing);
-      if (cubit.state.phase == RefreshPhase.refreshing) {
-        await cubit.stream.firstWhere((s) => s.phase != RefreshPhase.refreshing).timeout(const Duration(seconds: 5));
+      await cubit.watchlist.addCard(existing);
+      if (cubit.market.state.phase == RefreshPhase.refreshing) {
+        await cubit.market.stream.firstWhere((s) => s.phase != RefreshPhase.refreshing).timeout(const Duration(seconds: 5));
       }
     });
 
@@ -367,7 +368,7 @@ void main() {
     await _settle(tester);
 
     expect(find.byType(InstrumentDetailScreen), findsOneWidget);
-    expect(cubit.state.cards.length, 1); // no duplicate card was created.
+    expect(cubit.watchlist.state.cards.length, 1); // no duplicate card was created.
     expect(find.text('Undo'), findsNothing);
     expect(find.textContaining('already in your watchlist'), findsOneWidget);
   });

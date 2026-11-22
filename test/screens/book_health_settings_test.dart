@@ -4,8 +4,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:qima/blocs/app_cubit.dart';
-import 'package:qima/blocs/app_state.dart';
+import 'package:qima/blocs/app_blocs.dart';
+import '../helpers/app_blocs.dart';
+import 'package:qima/blocs/sync_state.dart';
 import 'package:qima/blocs/money_cubit.dart';
 import 'package:qima/l10n/app_localizations.dart';
 import 'package:qima/screens/settings_screen.dart';
@@ -18,18 +19,18 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// What Settings says about the book: one row for each kind of problem, with
 /// what to do, and a sync status that is not "up to date" while one stands.
 void main() {
-  Future<AppCubit> show(WidgetTester tester, {required BookHealth health, CloudSyncStatus status = CloudSyncStatus.upToDate}) async {
+  Future<AppBlocs> show(WidgetTester tester, {required BookHealth health, CloudSyncStatus status = CloudSyncStatus.upToDate}) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
     final dir = await tester.runAsync(() => Directory.systemTemp.createTemp('qima_book_health_settings'));
     addTearDown(() => dir!.deleteSync(recursive: true));
     LocalFileStore.overrideDirectoryForTesting(dir!);
     SharedPreferences.setMockInitialValues({});
-    final app = AppCubit();
-    app.preferences = await Preferences.create();
-    app.emit(app.state.copyWith(initialized: true, iCloudSyncEnabled: true, cloudSyncStatus: status, lastCloudSyncAt: DateTime(2026, 11, 5, 14, 32), bookHealth: health));
-    final money = MoneyCubit(store: app.bookStore, baseCurrency: () => app.state.baseCurrency, rates: () => app.state.rates);
+    final app = AppBlocs();
+    app.settings.preferences = await Preferences.create();
+    app.seed(initialized: true, iCloudSyncEnabled: true, cloudSyncStatus: status, lastCloudSyncAt: DateTime(2026, 11, 5, 14, 32), bookHealth: health);
+    final money = MoneyCubit(store: app.sync.bookStore, baseCurrency: () => app.settings.state.baseCurrency, rates: () => app.market.state.rates);
     await tester.runAsync(money.load);
-    final ai = (await tester.runAsync(() async => AiApps(app: app, money: money)))!;
+    final ai = (await tester.runAsync(() async => AiApps(app: app.app, settings: app.settings, market: app.market, holdings: app.holdings, money: money)))!;
     tester.view.physicalSize = const Size(390, 3600);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -37,7 +38,7 @@ void main() {
     await tester.pumpWidget(MultiBlocProvider(
       providers: [
         RepositoryProvider<AiApps>.value(value: ai),
-        BlocProvider<AppCubit>.value(value: app),
+        ...app.providers,
         BlocProvider<MoneyCubit>.value(value: money),
       ],
       child: MaterialApp(
@@ -89,11 +90,11 @@ void main() {
       expect(find.textContaining(strings.settingsICloudSyncStatusUpToDate('14:32')), findsNothing);
 
       // One kind alone shows only its row, and the row goes when the problem does.
-      app.emit(app.state.copyWith(bookHealth: const BookHealth(newerVersion: true)));
+      app.sync.emit(app.sync.state.copyWith(bookHealth: const BookHealth(newerVersion: true)));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('bookHealthNewerBuild')), findsOneWidget);
       expect(find.byKey(const ValueKey('bookHealthMigration')), findsNothing);
-      app.emit(app.state.copyWith(bookHealth: BookHealth.fine, cloudSyncStatus: CloudSyncStatus.upToDate));
+      app.sync.emit(app.sync.state.copyWith(bookHealth: BookHealth.fine, cloudSyncStatus: CloudSyncStatus.upToDate));
       await tester.pumpAndSettle();
       expect(find.text(strings.settingsNeedsAttention.toUpperCase()), findsNothing);
     } finally {

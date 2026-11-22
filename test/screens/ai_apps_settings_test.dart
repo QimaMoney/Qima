@@ -6,7 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:qima/blocs/app_cubit.dart';
+import 'package:qima/blocs/app_blocs.dart';
+import '../helpers/app_blocs.dart';
 import 'package:qima/blocs/money_cubit.dart';
 import 'package:qima/l10n/app_localizations.dart';
 import 'package:qima/mcp/snapshot_location.dart';
@@ -33,13 +34,13 @@ void main() {
       );
       SharedPreferences.setMockInitialValues({});
 
-      final app = AppCubit();
-      app.preferences = await Preferences.create();
-      app.emit(app.state.copyWith(initialized: true));
-      final money = MoneyCubit(store: app.bookStore, baseCurrency: () => app.state.baseCurrency, rates: () => app.state.rates);
+      final app = AppBlocs();
+      app.settings.preferences = await Preferences.create();
+      app.seed(initialized: true);
+      final money = MoneyCubit(store: app.sync.bookStore, baseCurrency: () => app.settings.state.baseCurrency, rates: () => app.market.state.rates);
       await tester.runAsync(() async {
-        await app.bookStore.settings.upsert(const MoneySettings(seenWhatsNew: true, categoryRules: {'panda': 'groceries'}));
-        await app.bookStore.accounts.upsert(const BookAccount(
+        await app.sync.bookStore.settings.upsert(const MoneySettings(seenWhatsNew: true, categoryRules: {'panda': 'groceries'}));
+        await app.sync.bookStore.accounts.upsert(const BookAccount(
           id: 'rajhi',
           name: 'Al Rajhi',
           side: AccountSide.own,
@@ -51,13 +52,13 @@ void main() {
         await money.load();
       });
       // Made on the real clock: its write queue chains real file work.
-      final ai = (await tester.runAsync(() async => AiApps(app: app, money: money)))!;
+      final ai = (await tester.runAsync(() async => AiApps(app: app.app, settings: app.settings, market: app.market, holdings: app.holdings, money: money)))!;
       final l10n = await AppLocalizations.delegate.load(const Locale('en'));
 
       await tester.pumpWidget(MultiBlocProvider(
         providers: [
           RepositoryProvider<AiApps>.value(value: ai),
-          BlocProvider<AppCubit>.value(value: app),
+          ...app.providers,
           BlocProvider<MoneyCubit>.value(value: money),
         ],
         child: MaterialApp(
@@ -77,7 +78,7 @@ void main() {
       await tester.runAsync(() => ai.setEnabled(true));
       await tester.pumpAndSettle();
       expect(tester.widget<SwitchListTile>(toggle).value, isTrue);
-      expect(app.preferences.local.getBool('aiAppsEnabled'), isTrue);
+      expect(app.settings.preferences.local.getBool('aiAppsEnabled'), isTrue);
       // A test run has no helper beside it, so the section says so instead
       // of showing a config that points nowhere.
       expect(find.text(l10n.aiAppsNoHelper), findsOneWidget);
@@ -94,7 +95,7 @@ void main() {
       await tester.runAsync(() => ai.setEnabled(false));
       await tester.pumpAndSettle();
       expect(await tester.runAsync(() => file.exists()), isFalse);
-      expect(app.preferences.local.getBool('aiAppsEnabled'), isFalse);
+      expect(app.settings.preferences.local.getBool('aiAppsEnabled'), isFalse);
     } finally {
       debugDefaultTargetPlatformOverride = null;
     }

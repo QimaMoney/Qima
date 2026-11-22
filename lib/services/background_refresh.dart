@@ -33,7 +33,7 @@ import 'watchlist_store.dart';
 ///   (`workmanager`'s macOS backend only runs while the app process is
 ///   alive via `NSBackgroundActivityScheduler`, and there's no equivalent
 ///   on Windows/Linux/Web) — those platforms evaluate alerts only while
-///   the app is actually open and refreshing, via `AppCubit.refreshAll`.
+///   the app is actually open and refreshing, via `MarketCubit.refreshAll`.
 class BackgroundRefresh {
   BackgroundRefresh._();
 

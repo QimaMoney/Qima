@@ -4,7 +4,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:qima/blocs/app_cubit.dart';
+import 'package:qima/blocs/app_blocs.dart';
+import '../helpers/app_blocs.dart';
 import 'package:qima/l10n/app_localizations.dart';
 import 'package:qima/l10n/app_localizations_ar.dart';
 import 'package:qima/l10n/app_localizations_en.dart';
@@ -106,21 +107,21 @@ void main() {
     addTearDown(tester.view.reset);
   }
 
-  Future<(AppCubit, _MemoryHoldings)> cubit({DictationService? dictation}) async {
+  Future<(AppBlocs, _MemoryHoldings)> cubit({DictationService? dictation}) async {
     final store = _MemoryHoldings();
-    final cubit = AppCubit(repository: _OfflineRepository(), holdings: store, dictation: dictation);
-    cubit.preferences = await Preferences.create();
-    cubit.emit(cubit.state.copyWith(
+    final cubit = AppBlocs(repository: _OfflineRepository(), holdings: store, dictation: dictation);
+    cubit.settings.preferences = await Preferences.create();
+    cubit.seed(
       initialized: true,
       baseCurrency: 'EGP',
       rates: FXRates(base: 'USD', rates: const {'USD': 1, 'EGP': 50}, updatedAt: DateTime(2026)),
       fxHistory: FXHistory.empty,
-    ));
+    );
     return (cubit, store);
   }
 
-  Widget harness(AppCubit cubit, Widget home, {Locale locale = const Locale('en')}) => MultiBlocProvider(
-        providers: [BlocProvider<AppCubit>.value(value: cubit), testMoneyProvider(cubit)],
+  Widget harness(AppBlocs cubit, Widget home, {Locale locale = const Locale('en')}) => MultiBlocProvider(
+        providers: [...cubit.providers, testMoneyProvider(cubit)],
         child: MaterialApp(
           locale: locale,
           localizationsDelegates: AppLocalizations.localizationsDelegates,
@@ -140,7 +141,7 @@ void main() {
         ),
       );
 
-  Future<void> openAdd(WidgetTester tester, AppCubit cubit, {Locale locale = const Locale('en')}) async {
+  Future<void> openAdd(WidgetTester tester, AppBlocs cubit, {Locale locale = const Locale('en')}) async {
     await tester.pumpWidget(harness(cubit, const AddInstrumentScreen(), locale: locale));
     await tester.tap(find.text('open'));
     await tester.pumpAndSettle();

@@ -3,10 +3,10 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:qima/blocs/app_cubit.dart';
+import 'package:qima/blocs/app_blocs.dart';
+import '../helpers/app_blocs.dart';
 import 'package:qima/l10n/app_localizations.dart';
 import 'package:qima/screens/export_backup_sheet.dart';
-import 'package:qima/services/backup/backup_service.dart';
 import 'package:qima/services/book_store.dart';
 import 'package:qima/services/local_file_store.dart';
 import 'package:qima/services/preferences.dart';
@@ -36,23 +36,18 @@ void main() {
     }
   });
 
-  Future<AppCubit> populatedCubit({BookStore? book}) async {
-    final cubit = AppCubit(bookStore: book);
-    cubit.preferences = await Preferences.create();
-    cubit.backupService = BackupService(
-      watchlistStore: cubit.watchlistStore,
-      bookStore: cubit.bookStore,
-      customInstrumentStore: cubit.customInstrumentStore,
-      alertsStore: cubit.alertsStore,
-      preferences: cubit.preferences,
-    );
-    cubit.emit(cubit.state.copyWith(initialized: true));
+  Future<AppBlocs> populatedCubit({BookStore? book}) async {
+    final cubit = AppBlocs(bookStore: book);
+    final preferences = await Preferences.create();
+    cubit.settings.preferences = preferences;
+    await cubit.sync.start(preferences);
+    cubit.seed(initialized: true);
     return cubit;
   }
 
-  Widget harness(AppCubit cubit) {
-    return BlocProvider<AppCubit>.value(
-      value: cubit,
+  Widget harness(AppBlocs cubit) {
+    return MultiBlocProvider(
+      providers: cubit.providers,
       child: MaterialApp(
         localizationsDelegates: AppLocalizations.localizationsDelegates,
         supportedLocales: AppLocalizations.supportedLocales,
@@ -102,7 +97,7 @@ void main() {
     expect(find.text(strings.backupErrorHoldingsUnreadable), findsOneWidget);
     expect(find.text(strings.backupExportSheetFailed), findsNothing);
     expect(find.text(strings.backupExportSheetAction), findsOneWidget, reason: 'the sheet stays open');
-    expect(cubit.backupService.lastBackupAt, isNull);
+    expect(cubit.sync.backupService.lastBackupAt, isNull);
   });
 
   testWidgets('unprotected warning note is shown when password protection is off', (tester) async {
