@@ -65,6 +65,15 @@ class BookStore {
         recurring = _store(recurringKey, LedgerNames.recurringFile, LedgerNames.legacyRecurringFile, RecurringPayment.fromJson, cloud),
         settings = _store(settingsKey, LedgerNames.settingsFile, LedgerNames.legacySettingsFile, MoneySettings.fromJson, cloud);
 
+  /// Told after every change made through the four stores, see
+  /// [SyncedStore.onSaved].
+  set onSaved(void Function()? listener) {
+    accounts.onSaved = listener;
+    entries.onSaved = listener;
+    recurring.onSaved = listener;
+    settings.onSaved = listener;
+  }
+
   /// A collection kept as documents. [legacyFile] is the JSON file earlier
   /// versions used, and is what the database imports from.
   ///

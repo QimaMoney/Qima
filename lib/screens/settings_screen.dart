@@ -9,6 +9,8 @@ import 'package:package_info_plus/package_info_plus.dart';
 
 import '../blocs/alerts_cubit.dart';
 import '../blocs/alerts_state.dart';
+import '../blocs/cloud_log_sync.dart';
+import '../blocs/cloud_log_sync_state.dart';
 import '../blocs/holdings_cubit.dart';
 import '../blocs/market_cubit.dart';
 import '../blocs/money_cubit.dart';
@@ -600,8 +602,88 @@ class _ICloudSyncSection extends StatelessWidget {
                   child: Text(statusText, style: TextStyle(color: statusColor, fontSize: 12)),
                 ),
               ],
+              if (state.iCloudSyncEnabled) const _CloudLogSyncRow(),
             ],
           ),
+        );
+      },
+    );
+  }
+}
+
+/// The switch for the CloudKit change log sync, under the iCloud switch and
+/// shown only where CloudKit can be used (not on web, not in a build without
+/// it). It rebuilds on [CloudLogSync]'s own state, so nothing else on the
+/// screen does when a round starts or ends.
+class _CloudLogSyncRow extends StatelessWidget {
+  const _CloudLogSyncRow();
+
+  /// The one line under the switch: what the sync is doing, or why it is not.
+  (IconData, String, bool) _status(BuildContext context, CloudLogSyncState state, AppLocalizations l10n) {
+    switch (state.phase) {
+      case CloudLogPhase.unavailable:
+      case CloudLogPhase.off:
+        return (Icons.cloud_off_outlined, '', false);
+      case CloudLogPhase.syncing:
+        return (Icons.sync, l10n.settingsCloudLogSyncStatusSyncing, false);
+      case CloudLogPhase.upToDate:
+        final at = state.at;
+        if (at == null) return (Icons.sync, l10n.settingsCloudLogSyncStatusSyncing, false);
+        return (Icons.check_circle_outline, l10n.settingsCloudLogSyncStatusUpToDate(DateFormat.Hm(Localizations.localeOf(context).toString()).format(at.toLocal())), false);
+      case CloudLogPhase.waiting:
+        return (Icons.hourglass_empty, l10n.settingsCloudLogSyncStatusWaiting, false);
+      case CloudLogPhase.problem:
+        return switch (state.problem) {
+          CloudLogProblem.quota => (Icons.warning_amber_rounded, l10n.settingsCloudLogSyncStatusQuota, true),
+          CloudLogProblem.notSignedIn => (Icons.warning_amber_rounded, l10n.settingsCloudLogSyncStatusNotSignedIn, true),
+          CloudLogProblem.unavailable => (Icons.warning_amber_rounded, l10n.settingsCloudLogSyncStatusUnavailable, true),
+          CloudLogProblem.zoneMissing => (Icons.warning_amber_rounded, l10n.settingsCloudLogSyncStatusZoneMissing, true),
+          CloudLogProblem.newerVersion => (Icons.system_update_alt, l10n.settingsCloudLogSyncStatusNewerVersion, true),
+          CloudLogProblem.offline => (Icons.cloud_off_outlined, l10n.settingsCloudLogSyncStatusOffline, false),
+          CloudLogProblem.other || null => (Icons.warning_amber_rounded, l10n.settingsCloudLogSyncStatusOther, true),
+        };
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cubit = context.read<CloudLogSync>();
+    final l10n = AppLocalizations.of(context)!;
+    final colors = context.colors;
+
+    return BlocBuilder<CloudLogSync, CloudLogSyncState>(
+      bloc: cubit,
+      builder: (context, state) {
+        if (!state.offered) return const SizedBox.shrink();
+        final (icon, text, isProblem) = _status(context, state, l10n);
+        final color = isProblem ? colors.down : colors.textTertiary;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Divider(color: colors.hairline, height: DS.spaceLG),
+            SwitchListTile.adaptive(
+              key: const ValueKey('cloudLogSyncSwitch'),
+              contentPadding: EdgeInsets.zero,
+              secondary: Icon(Icons.science_outlined, color: colors.textTertiary),
+              title: Text(l10n.settingsCloudLogSyncSwitch, style: TextStyle(color: colors.textPrimary)),
+              subtitle: Text(l10n.settingsCloudLogSyncFooter, style: TextStyle(color: colors.textTertiary, fontSize: 12)),
+              value: state.enabled,
+              onChanged: (value) => cubit.setEnabled(value),
+            ),
+            if (text.isNotEmpty)
+              Padding(
+                key: const ValueKey('cloudLogSyncStatus'),
+                padding: const EdgeInsets.symmetric(vertical: DS.spaceXS),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(icon, size: 16, color: color),
+                    const SizedBox(width: DS.spaceSM),
+                    Expanded(child: Text(text, style: TextStyle(color: color, fontSize: 12))),
+                  ],
+                ),
+              ),
+          ],
         );
       },
     );

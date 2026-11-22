@@ -56,6 +56,9 @@ class CloudSyncException implements Exception {
 /// The plugin stores text under names and no more:
 /// - `available()` answers whether the build may use the container and an
 ///   iCloud account is signed in.
+/// - `account()` answers a stable name of the iCloud account signed in now,
+///   for this container: the record name of the user, which is the same on
+///   every device of the account and differs between accounts.
 /// - `store({kind, name, body})` answers true when the name now holds
 ///   `body`, false when it held other text, which is left as it is.
 /// - `read({kind, name})` answers the body, or null when there is no such
@@ -99,6 +102,14 @@ class CloudKitSyncTransport implements SyncTransport {
     } on CloudSyncException {
       return false;
     }
+  }
+
+  /// A stable name of the signed-in iCloud account for this container, which
+  /// the caller can tell accounts apart by. Throws like every other call.
+  Future<String> account() async {
+    final name = await _invoke<String>('account');
+    if (name == null || name.isEmpty) throw const CloudSyncException(CloudSyncFailure.other, 'The CloudKit plugin gave no account name.');
+    return name;
   }
 
   Future<T?> _invoke<T>(String method, [Map<String, Object?>? arguments]) async {

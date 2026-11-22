@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui' show Locale;
 
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -15,11 +16,14 @@ import '../services/notification_service.dart';
 import '../services/platform_ai.dart';
 import '../services/price_repository.dart';
 import '../services/refresh_pipeline.dart';
+import '../services/cloud_kv_store.dart' show platformSupportsICloud;
 import '../services/switchable_cloud_kv_store.dart';
+import '../services/sync/cloudkit_sync_transport.dart';
 import '../services/text_recognition_service.dart';
 import '../services/watchlist_store.dart';
 import 'alerts_cubit.dart';
 import 'app_cubit.dart';
+import 'cloud_log_sync.dart';
 import 'holdings_cubit.dart';
 import 'market_cubit.dart';
 import 'settings_cubit.dart';
@@ -53,6 +57,7 @@ class AppBlocs {
   late final AlertsCubit alerts;
   late final ZakatCubit zakat;
   late final SyncCubit sync;
+  late final CloudLogSync cloudLog;
   late final WidgetPublisher _widgets;
 
   AppBlocs({
@@ -67,6 +72,7 @@ class AppBlocs {
     NotificationService? notificationService,
     SwitchableCloudKVStore? cloudStore,
     BookStore? bookStore,
+    CloudLogSync? cloudLog,
     AiAssistProvider? aiAssist,
     DictationService? dictation,
     TextRecognitionService? textRecognition,
@@ -150,6 +156,8 @@ class AppBlocs {
       market: market,
       batch: holdWidgets,
     );
+    this.cloudLog = cloudLog ?? _cloudKitLog(book);
+    sync.onICloudSyncChanged = (on) => unawaited(this.cloudLog.setICloudSyncOn(on));
     app = AppCubit(
       settings: settings,
       market: market,
@@ -174,6 +182,21 @@ class AppBlocs {
     _widgets = WidgetPublisher(app: app, settings: settings, market: market, watchlist: watchlist, holdings: this.holdings);
   }
 
+  /// The change log sync through CloudKit, off until the person turns it on,
+  /// and used only where the build and the platform have CloudKit. A change
+  /// it takes in reaches the rest of the app by the path cloud changes take.
+  CloudLogSync _cloudKitLog(BookStore book) {
+    final transport = CloudKitSyncTransport();
+    return CloudLogSync(
+      store: book,
+      transport: transport,
+      available: () async => platformSupportsICloud && await transport.available(),
+      account: transport.account,
+      reload: () => sync.reloadAfterLogSync(),
+      iCloudSyncOn: false,
+    );
+  }
+
   /// One provider per cubit, for `MultiBlocProvider`.
   List<BlocProvider<StateStreamableSource<Object?>>> get providers => [
         BlocProvider<AppCubit>.value(value: app),
@@ -184,6 +207,7 @@ class AppBlocs {
         BlocProvider<AlertsCubit>.value(value: alerts),
         BlocProvider<ZakatCubit>.value(value: zakat),
         BlocProvider<SyncCubit>.value(value: sync),
+        BlocProvider<CloudLogSync>.value(value: cloudLog),
       ];
 
   /// Set by the owner of `MoneyCubit`: reloads the money ledger after the
@@ -200,11 +224,17 @@ class AppBlocs {
   Future<void> holdWidgets(Future<void> Function() body) => _widgets.batch(body);
 
   /// Start-up; see [AppCubit.init].
-  Future<void> init() => app.init();
+  Future<void> init() async {
+    await app.init();
+    // Not awaited: asking CloudKit is a call to the system, and nothing
+    // waits for the answer. The first round waits for it, and for the book.
+    unawaited(cloudLog.start(settings.preferences));
+  }
 
   /// Stops listening to the cloud and closes every cubit.
   Future<void> close() async {
     await _widgets.close();
+    await cloudLog.close();
     await sync.disposeCloudSync();
     for (final cubit in [app, settings, market, watchlist, holdings, alerts, zakat, sync]) {
       await cubit.close();

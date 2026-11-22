@@ -825,6 +825,51 @@ class AppLocalizationsAr extends AppLocalizations {
       'مساحة تخزين iCloud الخاصة بـQima ممتلئة';
 
   @override
+  String get settingsCloudLogSyncSwitch => 'مزامنة أسرع (نسخة تجريبية)';
+
+  @override
+  String get settingsCloudLogSyncFooter =>
+      'طريقة جديدة لمزامنة دفترك عبر iCloud، ما زالت قيد التجربة. تعمل بجانب المزامنة أعلاه ولا تحذف شيئًا عند إيقافها.';
+
+  @override
+  String settingsCloudLogSyncStatusUpToDate(String time) {
+    return 'محدّثة · $time';
+  }
+
+  @override
+  String get settingsCloudLogSyncStatusSyncing => 'جارٍ المزامنة…';
+
+  @override
+  String get settingsCloudLogSyncStatusWaiting =>
+      'بانتظار أن يُكمل جهاز آخر الإرسال';
+
+  @override
+  String get settingsCloudLogSyncStatusOffline =>
+      'تعذّر الوصول إلى iCloud. ستتم المحاولة قريبًا.';
+
+  @override
+  String get settingsCloudLogSyncStatusQuota => 'مساحة تخزين iCloud ممتلئة';
+
+  @override
+  String get settingsCloudLogSyncStatusNotSignedIn =>
+      'لم يتم تسجيل الدخول إلى iCloud';
+
+  @override
+  String get settingsCloudLogSyncStatusUnavailable => 'غير متاحة في هذه النسخة';
+
+  @override
+  String get settingsCloudLogSyncStatusZoneMissing =>
+      'بيانات المزامنة مفقودة في iCloud وتعذّرت إعادة إنشائها';
+
+  @override
+  String get settingsCloudLogSyncStatusNewerVersion =>
+      'جهاز آخر يستخدم إصدارًا أحدث. حدّث Qima.';
+
+  @override
+  String get settingsCloudLogSyncStatusOther =>
+      'توقفت المزامنة. ستتم المحاولة قريبًا.';
+
+  @override
   String get backupTitle => 'النسخ الاحتياطي والاستعادة';
 
   @override

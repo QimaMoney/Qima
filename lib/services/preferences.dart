@@ -152,6 +152,8 @@ class Preferences {
   static const String _deliverAlertsOnThisDeviceKey = 'deliverAlertsOnThisDevice';
   static const String _lastAlertEvaluationAtKey = 'lastAlertEvaluationAt';
   static const String _iCloudSyncEnabledKey = 'iCloudSyncEnabled';
+  static const String _cloudLogSyncEnabledKey = 'cloudLogSyncEnabled';
+  static const String _cloudLogCompactedAtKey = 'cloudLogCompactedAt';
   static const String _onboardingCompletedKey = 'onboardingCompleted';
   static const String _setupAnswersKey = 'setupAnswers';
   static const String _getStartedDismissedKey = 'getStartedDismissed';
@@ -438,6 +440,26 @@ class Preferences {
 
   Future<void> setICloudSyncEnabled(bool value) async {
     await local.setBool(_iCloudSyncEnabledKey, value);
+  }
+
+  /// Local-only, NOT synced: whether this device also syncs the book through
+  /// CloudKit (the change log), beside the iCloud key-value sync above. Off
+  /// until the person turns it on, on each device on its own.
+  bool get cloudLogSyncEnabled => local.getBool(_cloudLogSyncEnabledKey) ?? false;
+
+  Future<void> setCloudLogSyncEnabled(bool value) async {
+    await local.setBool(_cloudLogSyncEnabledKey, value);
+  }
+
+  /// Local-only: when this device last compacted its CloudKit change log, so
+  /// that it does so at most once a day.
+  DateTime? get cloudLogCompactedAt {
+    final raw = local.getString(_cloudLogCompactedAtKey);
+    return raw == null ? null : DateTime.tryParse(raw);
+  }
+
+  Future<void> setCloudLogCompactedAt(DateTime value) async {
+    await local.setString(_cloudLogCompactedAtKey, value.toUtc().toIso8601String());
   }
 
   /// Local-only, NOT synced — whether the first-launch onboarding tour has

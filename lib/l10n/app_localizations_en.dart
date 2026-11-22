@@ -822,6 +822,51 @@ class AppLocalizationsEn extends AppLocalizations {
       'iCloud storage for Qima is full';
 
   @override
+  String get settingsCloudLogSyncSwitch => 'Faster sync (early version)';
+
+  @override
+  String get settingsCloudLogSyncFooter =>
+      'A new way to sync your book through iCloud, still being tested. It runs beside the sync above and deletes nothing when you turn it off.';
+
+  @override
+  String settingsCloudLogSyncStatusUpToDate(String time) {
+    return 'Up to date · $time';
+  }
+
+  @override
+  String get settingsCloudLogSyncStatusSyncing => 'Syncing…';
+
+  @override
+  String get settingsCloudLogSyncStatusWaiting =>
+      'Waiting for another device to finish sending';
+
+  @override
+  String get settingsCloudLogSyncStatusOffline =>
+      'Can\'t reach iCloud. Trying again soon.';
+
+  @override
+  String get settingsCloudLogSyncStatusQuota => 'iCloud storage is full';
+
+  @override
+  String get settingsCloudLogSyncStatusNotSignedIn => 'Not signed in to iCloud';
+
+  @override
+  String get settingsCloudLogSyncStatusUnavailable =>
+      'Not available in this build';
+
+  @override
+  String get settingsCloudLogSyncStatusZoneMissing =>
+      'The synced data is missing in iCloud and could not be made again';
+
+  @override
+  String get settingsCloudLogSyncStatusNewerVersion =>
+      'Another device uses a newer version. Update Qima.';
+
+  @override
+  String get settingsCloudLogSyncStatusOther =>
+      'Sync stopped. Trying again soon.';
+
+  @override
   String get backupTitle => 'Backup & restore';
 
   @override

@@ -830,6 +830,54 @@ class AppLocalizationsEs extends AppLocalizations {
       'El almacenamiento de iCloud para Qima está lleno';
 
   @override
+  String get settingsCloudLogSyncSwitch =>
+      'Sincronización más rápida (versión preliminar)';
+
+  @override
+  String get settingsCloudLogSyncFooter =>
+      'Una nueva forma de sincronizar tu libro con iCloud, aún en pruebas. Funciona junto a la sincronización de arriba y no borra nada al desactivarla.';
+
+  @override
+  String settingsCloudLogSyncStatusUpToDate(String time) {
+    return 'Actualizado · $time';
+  }
+
+  @override
+  String get settingsCloudLogSyncStatusSyncing => 'Sincronizando…';
+
+  @override
+  String get settingsCloudLogSyncStatusWaiting =>
+      'Esperando a que otro dispositivo termine de enviar';
+
+  @override
+  String get settingsCloudLogSyncStatusOffline =>
+      'No se puede conectar con iCloud. Se volverá a intentar pronto.';
+
+  @override
+  String get settingsCloudLogSyncStatusQuota =>
+      'El almacenamiento de iCloud está lleno';
+
+  @override
+  String get settingsCloudLogSyncStatusNotSignedIn =>
+      'No has iniciado sesión en iCloud';
+
+  @override
+  String get settingsCloudLogSyncStatusUnavailable =>
+      'No disponible en esta versión';
+
+  @override
+  String get settingsCloudLogSyncStatusZoneMissing =>
+      'Faltan los datos sincronizados en iCloud y no se pudieron crear de nuevo';
+
+  @override
+  String get settingsCloudLogSyncStatusNewerVersion =>
+      'Otro dispositivo usa una versión más reciente. Actualiza Qima.';
+
+  @override
+  String get settingsCloudLogSyncStatusOther =>
+      'La sincronización se detuvo. Se volverá a intentar pronto.';
+
+  @override
   String get backupTitle => 'Copia de seguridad y restauración';
 
   @override

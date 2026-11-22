@@ -1,4 +1,5 @@
 import 'package:qima/blocs/app_blocs.dart';
+import 'package:qima/blocs/cloud_log_sync_state.dart';
 import 'package:qima/blocs/market_state.dart';
 import 'package:qima/blocs/sync_state.dart';
 import 'package:qima/models/fx_history.dart';
@@ -61,6 +62,7 @@ extension AppBlocsSeed on AppBlocs {
     CloudSyncStatus? cloudSyncStatus,
     DateTime? lastCloudSyncAt,
     bool? backupReminderDue,
+    CloudLogSyncState? cloudLogSync,
   }) {
     if ([initialized, shouldShowOnboarding, setup, getStartedDismissed, tourRequested].any((v) => v != null)) {
       app.emit(app.state.copyWith(
@@ -117,5 +119,6 @@ extension AppBlocsSeed on AppBlocs {
         backupReminderDue: backupReminderDue,
       ));
     }
+    if (cloudLogSync != null) cloudLog.emit(cloudLogSync);
   }
 }

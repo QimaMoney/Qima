@@ -71,7 +71,7 @@ class QimaApp extends StatefulWidget {
   State<QimaApp> createState() => _QimaAppState();
 }
 
-class _QimaAppState extends State<QimaApp> {
+class _QimaAppState extends State<QimaApp> with WidgetsBindingObserver {
   /// Lets notification-tap navigation reach the `Navigator` without a
   /// `BuildContext` from inside the tap-payload stream listener (spec Phase
   /// 5 "notification-tap navigation"). Pushing through this key still lands
@@ -89,6 +89,7 @@ class _QimaAppState extends State<QimaApp> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _blocs = AppBlocs();
     _money = MoneyCubit(
       store: _blocs.sync.bookStore,
@@ -129,6 +130,8 @@ class _QimaAppState extends State<QimaApp> {
     }
     try {
       await _money.load();
+      // The CloudKit change log sync, if it is on, starts with the book.
+      _blocs.cloudLog.bookLoaded();
     } catch (error, stack) {
       debugPrint('Reading the money ledger failed: $error\n$stack');
       await _blocs.sync.noteLoadFailed();
@@ -139,8 +142,22 @@ class _QimaAppState extends State<QimaApp> {
     await _consumeColdLaunchPayload();
   }
 
+  /// The CloudKit change log sync runs while the app is in the foreground.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    switch (state) {
+      case AppLifecycleState.resumed:
+        unawaited(_blocs.cloudLog.resumed());
+      case AppLifecycleState.paused || AppLifecycleState.hidden || AppLifecycleState.detached:
+        _blocs.cloudLog.paused();
+      case AppLifecycleState.inactive:
+        break;
+    }
+  }
+
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _tapSubscription?.cancel();
     unawaited(_blocs.close());
     unawaited(_money.close());

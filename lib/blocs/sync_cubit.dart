@@ -63,6 +63,16 @@ class SyncCubit extends Cubit<SyncState> with GuardedEmit<SyncState> {
   /// restore).
   Future<void> Function(String? key)? onBookChanged;
 
+  /// Told whenever [SyncState.iCloudSyncEnabled] changes, so that what else
+  /// goes to iCloud (the CloudKit change log sync) follows the same switch.
+  void Function(bool enabled)? onICloudSyncChanged;
+
+  @override
+  void onChange(Change<SyncState> change) {
+    super.onChange(change);
+    if (change.currentState.iCloudSyncEnabled != change.nextState.iCloudSyncEnabled) onICloudSyncChanged?.call(change.nextState.iCloudSyncEnabled);
+  }
+
   StreamSubscription<CloudKVChangeEvent>? _cloudChangesSubscription;
 
   /// Cloud-change events being handled. A change this device makes itself
@@ -407,6 +417,21 @@ class SyncCubit extends Cubit<SyncState> with GuardedEmit<SyncState> {
     await _refreshHealth();
     if (isClosed) return;
     emit(state.copyWith(cloudSyncStatus: _syncedStatus, lastCloudSyncAt: DateTime.now()));
+  }
+
+  /// Shows what the CloudKit change log sync took into the book: the trades
+  /// and the whole money ledger are read again, the way a cloud change of
+  /// every key would. It runs on the same queue as the other reloads, so it
+  /// never interleaves with one, and does nothing once this cubit is closed
+  /// or the cloud is released.
+  Future<void> reloadAfterLogSync() async {
+    if (isClosed || _cloudDisposed) return;
+    await _batch(() => _serialized(() async {
+          if (isClosed || _cloudDisposed) return;
+          await _applyTrades();
+          await onBookChanged?.call(null);
+        }));
+    await _refreshHealth();
   }
 
   /// Cancels the cloud-change subscription — called from tests/teardown or
