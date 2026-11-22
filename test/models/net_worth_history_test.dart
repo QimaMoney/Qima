@@ -30,6 +30,30 @@ void main() {
     expect(points.last.value, closeTo(today.netWorth, 0.001));
   });
 
+  test('over one day: a point every quarter of an hour, a spend showing from the moment it was made', () {
+    final x = builder();
+    final book = Book(allAccounts, [
+      x.opening(rajhi, sar(10000), ago(10)),
+      x.spend(rajhi, groceries, sar(400), DateTime(2026, 11, 17, 11, 40)),
+    ]);
+    // Holdings worked out a moment earlier, on the same quarters.
+    final holdings = [
+      for (final (at, _) in PortfolioHistory.steps(ChartRange.day1, DateTime(2026, 11, 16), now.subtract(const Duration(seconds: 20))))
+        PortfolioHistoryPoint(date: at, value: at.isBefore(DateTime(2026, 11, 17, 9)) ? 1000 : 1500, cost: 0, realised: 0),
+    ];
+    final points = NetWorthHistory.build(book: book, holdings: holdings, currency: 'SAR', rates: rates, fxHistory: FXHistory.empty, range: ChartRange.day1, now: now);
+    expect(points.length, 24 * 4 + 1);
+    expect(points.first.date, DateTime(2026, 11, 16, 15));
+    expect(points.first.value, 11000);
+    double at(DateTime t) => points.firstWhere((p) => p.date == t).value;
+    expect(at(DateTime(2026, 11, 17, 8, 45)), 11000);
+    expect(at(DateTime(2026, 11, 17, 9)), 11500);
+    expect(at(DateTime(2026, 11, 17, 11, 30)), 11500);
+    expect(at(DateTime(2026, 11, 17, 11, 45)), 11100);
+    expect(points.last.date, now);
+    expect(points.last.value, 11100);
+  });
+
   test('an asset keeps its last value until the next one; never a value in between', () {
     final x = builder();
     final book = Book(allAccounts, [
