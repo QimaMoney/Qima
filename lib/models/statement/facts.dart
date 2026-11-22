@@ -6,13 +6,15 @@ mixin _Facts on _ReaderCore, _Dates, _Amounts, _Layout, _Reconcile, _Rows {
   // ---------------------------------------------------------- facts
 
   static final _openingLabel = RegExp(
-    r'opening balance|beginning balance|starting balance|previous balance|balance brought forward|brought forward|'
-    r'الرصيد الافتتاحي|رصيد افتتاحي|الرصيد السابق|رصيد أول المدة|رصيد اول المدة|الرصيد المرحل|'
-    r'solde initial|solde précédent|solde precedent|ancien solde|saldo inicial|saldo anterior',
+    r'opening balance|beginning balance|starting balance|previous balance|balance brought forward|brought forward|\bb/f\b|'
+    // What a card owed when its last statement closed is where this one starts.
+    r'previous statement (?:balance|due)|'
+    r'الرصيد الافتتاحي|رصيد افتتاحي|الرصيد السابق|رصيد أول المدة|رصيد اول المدة|الرصيد المرحل|المستحقات من الكشف السابق|رصيد الكشف السابق|'
+    r'solde initial|solde précédent|solde precedent|ancien solde|solde du relevé précédent|saldo inicial|saldo anterior|saldo del extracto anterior',
     caseSensitive: false,
   );
   static final _closingLabel = RegExp(
-    r'closing balance|ending balance|end balance|new balance|current balance|balance carried forward|carried forward|statement balance|available balance|'
+    r'closing balance|ending balance|end balance|new balance|current balance|balance carried forward|carried forward|statement balance|available balance|total balance|'
     r'الرصيد الختامي|رصيد ختامي|الرصيد الحالي|رصيد آخر المدة|رصيد اخر المدة|الرصيد المتاح|الرصيد المتوفر|الرصيد الجديد|'
     r'solde final|nouveau solde|solde actuel|saldo final|saldo actual|saldo disponible',
     caseSensitive: false,
@@ -24,8 +26,8 @@ mixin _Facts on _ReaderCore, _Dates, _Amounts, _Layout, _Reconcile, _Rows {
     r'المبلغ المتبقي|الرصيد المتبقي|المبلغ المستحق المتبقي|montant restant|solde restant|saldo pendiente',
     caseSensitive: false,
   );
-  // Miles and points have balances of their own.
-  static final _rewards = RegExp(r'\bmiles\b|\bpoints\b|\brewards\b|أميال|نقاط|مكافآت|\bpuntos\b', caseSensitive: false);
+  // Miles, points and cashback earned have balances of their own.
+  static final _rewards = RegExp(r'\bmiles\b|\bpoints\b|\brewards\b|cash ?back|أميال|اميال|نقاط|مكافآت|الاسترداد النقدي|\bpuntos\b|\bmillas\b', caseSensitive: false);
   static final _available = RegExp(r'available|المتاح|المتوفر|disponible', caseSensitive: false);
   static final _from = RegExp(r'^(?:.*\s)?(?:from|du|desde|من)(?:\s|$)', caseSensitive: false);
   static final _to = RegExp(r'^(?:.*\s)?(?:to|au|hasta|إلى|الى)(?:\s|$)', caseSensitive: false);
@@ -180,8 +182,15 @@ mixin _Facts on _ReaderCore, _Dates, _Amounts, _Layout, _Reconcile, _Rows {
     // that figure is the balance its labels give, not a transaction, and
     // the screen is no receipt.
     final hasTable = pageLines.any((ls) => ls.any((l) => _header(l) != null));
-    final shown = hasTable ? null : this.facts(pages, const []).closing;
-    final headline = shown == null ? const <StatementRow>[] : rows.where((r) => r.dateGuessed && _Reconcile._same(r.amount.abs(), shown.abs())).toList();
+    // Where no label names it (a bare "Balance" over the figure), it is
+    // still the balance when the newest row's running balance is that
+    // very figure.
+    final labelled = hasTable ? null : this.facts(pages, const []).closing;
+    final running = hasTable || labelled != null ? null : _withWorkedOut(const StatementFacts(), rows).closing;
+    final shown = labelled ?? running;
+    final headline = shown == null
+        ? const <StatementRow>[]
+        : rows.where((r) => r.dateGuessed && (labelled != null || r.balance == null) && _Reconcile._same(r.amount.abs(), shown.abs())).toList();
     if (headline.isNotEmpty) rows = [for (final r in rows) if (!headline.contains(r)) r];
     // A receipt, a bill or a transfer confirmation: one transaction.
     final single = headline.isEmpty && rows.length <= 2 && rows.map((r) => _dayKey(r.date)).toSet().length <= 1 ? _receipt(pages) : null;

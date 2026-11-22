@@ -114,13 +114,13 @@ class StatementRow extends Equatable {
       );
 
   StatementRow copyWith(
-          {DateTime? date, bool? dateGuessed, String? description, double? amount, bool? signGuessed, String? currency, double? balance, bool? doubtful}) =>
+          {DateTime? date, bool? dateGuessed, String? description, String? detail, double? amount, bool? signGuessed, String? currency, double? balance, bool? doubtful}) =>
       StatementRow(
         date: date ?? this.date,
         description: description ?? this.description,
         amount: amount ?? this.amount,
         dateGuessed: dateGuessed ?? this.dateGuessed,
-        detail: detail,
+        detail: detail ?? this.detail,
         signGuessed: signGuessed ?? this.signGuessed,
         currency: currency ?? this.currency,
         balance: balance ?? this.balance,
@@ -166,7 +166,10 @@ class _Money {
   /// A whole number with no grouping, decimals or currency, only taken
   /// because it sits under an amount column.
   final bool bare;
-  const _Money(this.major, this.sign, this.currency, {this.bare = false});
+
+  /// Written with no decimals.
+  final bool whole;
+  const _Money(this.major, this.sign, this.currency, {this.bare = false, this.whole = false});
 }
 
 class _Line {
@@ -202,6 +205,11 @@ class StatementReader extends _ReaderCore with _Dates, _Amounts, _Layout, _Recon
   static String normalize(String s) => _Text.normalize(s);
   static double? parseNumber(String raw, {String? currency}) => _Amounts.parseNumber(raw, currency: currency);
   static DateTime hijriToGregorian(int y, int m, int d) => _Dates.hijriToGregorian(y, m, d);
+
+  /// How many neighbouring pairs of [rows] the running balance links, read
+  /// oldest first and newest first. For measuring a reading (the reader
+  /// bench), not for making one.
+  static (int, int) balanceLinks(List<StatementRow> rows) => _Reconcile._balanceFits(rows);
 
   /// One row per message: shared text such as a bank SMS. Messages are
   /// separated by blank lines.
