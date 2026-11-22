@@ -1,3 +1,4 @@
+import '../models/feed_symbol.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:uuid/uuid.dart';
@@ -56,10 +57,27 @@ class _CustomTickerScreenState extends State<CustomTickerScreen> {
     }
   }
 
+  /// The symbol the feed knows [typed] by: the first of the ways it could be
+  /// written there that the feed answers for. A ticker copied with its
+  /// exchange in front ("TADAWUL:2222") or typed without one ("2222", in
+  /// SAR) is found this way. Throws what the last check threw when none is.
+  Future<String> _feedSymbol(WatchlistCubit cubit, String typed) async {
+    Object? failure;
+    for (final candidate in FeedSymbol.candidates(typed, currency: _currency)) {
+      try {
+        await cubit.validateCustomTicker(candidate, _nameController.text.trim(), assetClass: _assetClass);
+        return candidate;
+      } catch (error) {
+        failure = error;
+      }
+    }
+    throw failure ?? StateError('no symbol');
+  }
+
   Future<void> _submit() async {
     final l10n = AppLocalizations.of(context)!;
-    final symbol = _symbolController.text.trim();
-    if (symbol.isEmpty) {
+    final typed = _symbolController.text.trim();
+    if (typed.isEmpty) {
       setState(() => _error = l10n.addCustomTickerSymbolRequired);
       return;
     }
@@ -69,7 +87,7 @@ class _CustomTickerScreenState extends State<CustomTickerScreen> {
     });
     final cubit = context.read<WatchlistCubit>();
     try {
-      await cubit.validateCustomTicker(symbol, _nameController.text.trim(), assetClass: _assetClass);
+      final symbol = await _feedSymbol(cubit, typed);
       // Checked BEFORE addCustomTicker (which would make it true
       // unconditionally) so we can tell "this ticker already existed" apart
       // from "this flow just created it" — only the latter should be undone
