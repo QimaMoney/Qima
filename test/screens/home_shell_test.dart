@@ -24,6 +24,7 @@ import 'package:qima/screens/settings_screen.dart';
 import 'package:qima/screens/watchlist_screen.dart';
 import 'package:qima/services/local_file_store.dart';
 import 'package:qima/services/price_repository.dart';
+import 'package:qima/services/quote_provider.dart';
 import 'package:qima/theme/app_theme.dart';
 import 'package:qima/widgets/guided_tour.dart';
 import 'package:qima/widgets/portfolio_hero.dart';
@@ -38,7 +39,7 @@ class _FakeRepository extends PriceRepository {
   int refreshAllCallCount = 0;
 
   @override
-  Future<double> probePrice(Instrument instrument) async => 100;
+  Future<Listing> probeListing(Instrument instrument) async => const Listing(canonicalUSD: 100);
 
   @override
   Future<QuoteSeries> refresh(Instrument instrument, {DateTime? now}) async => QuoteSeries.empty(instrument.id);

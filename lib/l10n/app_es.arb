@@ -59,6 +59,8 @@
   "addCustomTickerSymbolRequired": "Introduce un símbolo bursátil.",
   "addCustomTickerError": "No se pudo verificar este símbolo. Comprueba el símbolo e inténtalo de nuevo.",
   "addCustomTickerSubmit": "Añadir símbolo",
+  "addCustomTickerConfirmBody": "Esto es lo que la fuente de precios tiene con este símbolo. Añádelo solo si es el que buscas.",
+  "addCustomTickerConfirmNo": "No es este",
   "cardConfigAddToWatchlist": "Añadir a la lista de seguimiento",
   "commonCurrency": "Moneda",
   "currencyPickerSearchHint": "Buscar moneda",

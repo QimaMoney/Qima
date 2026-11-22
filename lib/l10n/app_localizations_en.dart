@@ -97,6 +97,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String get addCustomTickerSubmit => 'Add ticker';
 
   @override
+  String get addCustomTickerConfirmBody =>
+      'This is what the price feed has under this symbol. Add it only if it is the one you mean.';
+
+  @override
+  String get addCustomTickerConfirmNo => 'Not this one';
+
+  @override
   String get cardConfigAddToWatchlist => 'Add to watchlist';
 
   @override

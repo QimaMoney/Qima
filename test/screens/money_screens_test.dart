@@ -51,6 +51,7 @@ import 'package:qima/screens/money/more_money_screens.dart';
 import 'package:qima/theme/money_labels.dart';
 import 'package:qima/services/local_file_store.dart';
 import 'package:qima/services/price_repository.dart';
+import 'package:qima/services/quote_provider.dart';
 import 'package:qima/theme/app_theme.dart';
 import 'package:qima/widgets/money_widgets.dart';
 import 'package:qima/theme/help_topics.dart';
@@ -82,7 +83,7 @@ class _SpokenWords implements DictationService {
 
 class _OfflineRepository extends PriceRepository {
   @override
-  Future<double> probePrice(Instrument instrument) async => 100;
+  Future<Listing> probeListing(Instrument instrument) async => const Listing(canonicalUSD: 100);
   @override
   Future<QuoteSeries> refresh(Instrument instrument, {DateTime? now}) async => QuoteSeries.empty(instrument.id);
   @override

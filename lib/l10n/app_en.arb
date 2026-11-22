@@ -73,6 +73,8 @@
   "addCustomTickerSymbolRequired": "Enter a ticker symbol.",
   "addCustomTickerError": "Could not verify this ticker. Check the symbol and try again.",
   "addCustomTickerSubmit": "Add ticker",
+  "addCustomTickerConfirmBody": "This is what the price feed has under this symbol. Add it only if it is the one you mean.",
+  "addCustomTickerConfirmNo": "Not this one",
   "cardConfigAddToWatchlist": "Add to watchlist",
   "commonCurrency": "Currency",
   "currencyPickerSearchHint": "Search currency",

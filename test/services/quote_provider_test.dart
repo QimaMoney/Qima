@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:qima/models/asset.dart';
+import 'package:qima/models/money.dart';
 import 'package:qima/services/quote_provider.dart';
 
 void main() {
@@ -29,6 +30,39 @@ void main() {
         GoldAPIProvider(client: client).canonicalUSDPrice(gold),
         throwsA(isA<PriceError>().having((e) => e.kind, 'kind', 'invalidResponse')),
       );
+    });
+  });
+
+  group('YahooQuoteProvider.listing', () {
+    const share = Instrument(id: 'stock.ZD', symbol: 'ZD', assetClass: AssetClass.stock, nameKey: 'ZD', sourceSymbol: 'ZD');
+
+    Future<Listing> read(String meta) {
+      final client = MockClient((request) async => http.Response('{"chart":{"result":[{"meta":$meta}]}}', 200));
+      return YahooQuoteProvider(FXRates(base: 'USD', rates: const {'SAR': 4.0}, updatedAt: DateTime.utc(2026)), client: client).listing(share);
+    }
+
+    test('says what the feed has under a symbol: its name, exchange and currency', () async {
+      final listing = await read(
+        '{"regularMarketPrice":50.0,"currency":"USD","shortName":"Zed Utilities Inc.","longName":"Zed Utilities Incorporated","fullExchangeName":"Northport","exchangeName":"NPT"}',
+      );
+      expect(listing.canonicalUSD, 50.0);
+      expect(listing.name, 'Zed Utilities Inc.');
+      expect(listing.exchange, 'Northport');
+      expect(listing.currency, 'USD');
+      expect(listing.isDescribed, isTrue);
+    });
+
+    test('prices a share in another currency in dollars and still names that currency', () async {
+      final listing = await read('{"regularMarketPrice":20.0,"currency":"SAR","longName":"Dune Oil Company","exchangeName":"DNE"}');
+      expect(listing.canonicalUSD, 5.0);
+      expect(listing.name, 'Dune Oil Company');
+      expect(listing.exchange, 'DNE');
+      expect(listing.currency, 'SAR');
+    });
+
+    test('a feed that names nothing gives a price alone', () async {
+      final listing = await read('{"regularMarketPrice":50.0,"currency":"USD","shortName":" "}');
+      expect(listing.isDescribed, isFalse);
     });
   });
 

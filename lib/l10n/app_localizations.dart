@@ -246,6 +246,18 @@ abstract class AppLocalizations {
   /// **'Add ticker'**
   String get addCustomTickerSubmit;
 
+  /// No description provided for @addCustomTickerConfirmBody.
+  ///
+  /// In en, this message translates to:
+  /// **'This is what the price feed has under this symbol. Add it only if it is the one you mean.'**
+  String get addCustomTickerConfirmBody;
+
+  /// No description provided for @addCustomTickerConfirmNo.
+  ///
+  /// In en, this message translates to:
+  /// **'Not this one'**
+  String get addCustomTickerConfirmNo;
+
   /// No description provided for @cardConfigAddToWatchlist.
   ///
   /// In en, this message translates to:

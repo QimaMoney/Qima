@@ -117,9 +117,13 @@ class PriceRepository {
 
   // ---- Live spot ----
 
-  Future<double> probePrice(Instrument instrument) async {
+  /// What the feed has under [instrument]'s symbol; throws when it has
+  /// nothing.
+  Future<Listing> probeListing(Instrument instrument) async {
     final rates = await cachedRates();
-    return provider(instrument, rates).canonicalUSDPrice(instrument);
+    final source = provider(instrument, rates);
+    if (source is YahooQuoteProvider) return source.listing(instrument);
+    return Listing(canonicalUSD: await source.canonicalUSDPrice(instrument));
   }
 
   Future<QuoteSeries> refresh(Instrument instrument, {DateTime? now}) async {

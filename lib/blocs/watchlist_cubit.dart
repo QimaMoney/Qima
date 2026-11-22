@@ -9,6 +9,7 @@ import '../models/instrument_catalog.dart';
 import '../models/watch_card.dart';
 import '../models/watchlist_sort.dart';
 import '../services/custom_instrument_store.dart';
+import '../services/quote_provider.dart';
 import '../services/watchlist_store.dart';
 import 'guarded_emit.dart';
 import 'market_cubit.dart';
@@ -211,11 +212,10 @@ class WatchlistCubit extends Cubit<WatchlistState> with GuardedEmit<WatchlistSta
     return resolved && !builtInIds.contains(instrumentID);
   }
 
-  Future<Instrument> validateCustomTicker(String symbol, String? name, {AssetClass assetClass = AssetClass.stock}) async {
-    final candidate = CustomInstrument(symbol: symbol, name: name, assetClass: assetClass);
-    await _market.probePrice(candidate.instrument);
-    return candidate.instrument;
-  }
+  /// What the feed has under [symbol]; throws when it has nothing, so a
+  /// ticker is only ever added once the feed has answered for it.
+  Future<Listing> lookUpCustomTicker(String symbol, {AssetClass assetClass = AssetClass.stock}) =>
+      _market.probeListing(CustomInstrument(symbol: symbol, assetClass: assetClass).instrument);
 
   Future<Instrument> addCustomTicker(String symbol, String? name, {AssetClass assetClass = AssetClass.stock}) async {
     final candidate = CustomInstrument(symbol: symbol, name: name, assetClass: assetClass);

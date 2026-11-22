@@ -12,6 +12,7 @@ import '../models/watch_card.dart';
 import '../models/zakat.dart';
 import '../services/price_converter.dart';
 import '../services/price_repository.dart';
+import '../services/quote_provider.dart';
 import 'guarded_emit.dart';
 import 'market_state.dart';
 
@@ -96,7 +97,7 @@ class MarketCubit extends Cubit<MarketState> with GuardedEmit<MarketState> {
 
   /// A live price for [instrument], throwing when none can be had; used to
   /// check a custom ticker before it is kept.
-  Future<double> probePrice(Instrument instrument) => repository.probePrice(instrument);
+  Future<Listing> probeListing(Instrument instrument) => repository.probeListing(instrument);
 
   /// [series] stands in for a price that is not in the state: setup's
   /// suggestions are not on the watchlist yet, so nothing has fetched them.

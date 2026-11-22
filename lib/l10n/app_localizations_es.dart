@@ -97,6 +97,13 @@ class AppLocalizationsEs extends AppLocalizations {
   String get addCustomTickerSubmit => 'Añadir símbolo';
 
   @override
+  String get addCustomTickerConfirmBody =>
+      'Esto es lo que la fuente de precios tiene con este símbolo. Añádelo solo si es el que buscas.';
+
+  @override
+  String get addCustomTickerConfirmNo => 'No es este';
+
+  @override
   String get cardConfigAddToWatchlist => 'Añadir a la lista de seguimiento';
 
   @override

@@ -97,6 +97,13 @@ class AppLocalizationsAr extends AppLocalizations {
   String get addCustomTickerSubmit => 'إضافة الرمز';
 
   @override
+  String get addCustomTickerConfirmBody =>
+      'هذا ما لدى مصدر الأسعار تحت هذا الرمز. أضِفه فقط إذا كان هو المقصود.';
+
+  @override
+  String get addCustomTickerConfirmNo => 'ليس هذا';
+
+  @override
   String get cardConfigAddToWatchlist => 'إضافة إلى قائمة المتابعة';
 
   @override

@@ -59,6 +59,8 @@
   "addCustomTickerSymbolRequired": "Saisissez un symbole boursier.",
   "addCustomTickerError": "Impossible de vérifier ce symbole. Vérifiez-le et réessayez.",
   "addCustomTickerSubmit": "Ajouter le symbole",
+  "addCustomTickerConfirmBody": "Voici ce que la source des cours a sous ce symbole. Ajoutez-le seulement si c’est bien celui que vous cherchez.",
+  "addCustomTickerConfirmNo": "Ce n’est pas celui-ci",
   "cardConfigAddToWatchlist": "Ajouter à la liste de suivi",
   "commonCurrency": "Devise",
   "currencyPickerSearchHint": "Rechercher une devise",

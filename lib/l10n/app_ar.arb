@@ -59,6 +59,8 @@
   "addCustomTickerSymbolRequired": "أدخل رمز تداول.",
   "addCustomTickerError": "تعذّر التحقق من هذا الرمز. تحقق منه وحاول مرة أخرى.",
   "addCustomTickerSubmit": "إضافة الرمز",
+  "addCustomTickerConfirmBody": "هذا ما لدى مصدر الأسعار تحت هذا الرمز. أضِفه فقط إذا كان هو المقصود.",
+  "addCustomTickerConfirmNo": "ليس هذا",
   "cardConfigAddToWatchlist": "إضافة إلى قائمة المتابعة",
   "commonCurrency": "العملة",
   "currencyPickerSearchHint": "البحث عن عملة",

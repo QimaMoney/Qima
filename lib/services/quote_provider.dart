@@ -118,7 +118,11 @@ class YahooQuoteProvider implements QuoteProvider {
   bool supports(AssetClass assetClass) => assetClass == AssetClass.stock || assetClass == AssetClass.indices;
 
   @override
-  Future<double> canonicalUSDPrice(Instrument instrument) async {
+  Future<double> canonicalUSDPrice(Instrument instrument) async => (await listing(instrument)).canonicalUSD;
+
+  /// What the feed has under [instrument]'s symbol: its price, and the
+  /// name, exchange and currency the feed itself gives it.
+  Future<Listing> listing(Instrument instrument) async {
     final uri = Uri.parse('$baseUrl/${Uri.encodeComponent(instrument.sourceSymbol)}');
     final response = await client.get(uri, headers: _userAgentHeader);
     if (response.statusCode != 200) throw const PriceError.invalidResponse();
@@ -129,13 +133,36 @@ class YahooQuoteProvider implements QuoteProvider {
       final meta = (result.first as Map<String, dynamic>)['meta'] as Map<String, dynamic>;
       final price = (meta['regularMarketPrice'] as num).toDouble();
       final currency = meta['currency'] as String;
-      return _toUSD(price, currency, rates);
+      String? text(String key) => switch (meta[key]) { final String s when s.trim().isNotEmpty => s.trim(), _ => null };
+      return Listing(
+        canonicalUSD: _toUSD(price, currency, rates),
+        name: text('shortName') ?? text('longName'),
+        exchange: text('fullExchangeName') ?? text('exchangeName'),
+        currency: _normalizeCurrency(currency).code,
+      );
     } on PriceError {
       rethrow;
     } catch (_) {
       throw const PriceError.decodingFailed();
     }
   }
+}
+
+/// What a price feed says a symbol is. A symbol alone does not say: "SR"
+/// is a company in New York, and the Saudi exchange's own suffix is ".SR".
+class Listing {
+  final double canonicalUSD;
+
+  /// The feed's own name for it, its exchange and the currency it trades
+  /// in; null when the feed does not say.
+  final String? name;
+  final String? exchange;
+  final String? currency;
+
+  const Listing({required this.canonicalUSD, this.name, this.exchange, this.currency});
+
+  /// Whether the feed said enough to show the person what they are adding.
+  bool get isDescribed => name != null || exchange != null;
 }
 
 /// A single historical price bar.
