@@ -59,6 +59,9 @@ abstract final class FeedSymbol {
       final suffix = _suffixOf[exchange];
       // An exchange this does not know: the code alone is the best guess,
       // then whatever the currency suggests.
+      // Written both ways at once ("TADAWUL:2222.SR"): the code already
+      // carries the feed's suffix.
+      if (code.contains('.')) return [code];
       if (suffix != null) return ['${_code(code, suffix)}$suffix'];
       return _bare(code, currency);
     }

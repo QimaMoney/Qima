@@ -11,6 +11,11 @@ void main() {
       expect(FeedSymbol.candidates('LSE:VOD'), ['VOD.L']);
     });
 
+    test('an exchange in front of a code that already has the suffix adds no second one', () {
+      expect(FeedSymbol.candidates('TADAWUL:2222.SR'), ['2222.SR']);
+      expect(FeedSymbol.candidates('2222.sr', currency: 'SAR'), ['2222.SR']);
+    });
+
     test('exchanges of the United States have no suffix', () {
       expect(FeedSymbol.candidates('NASDAQ:AAPL'), ['AAPL']);
       expect(FeedSymbol.candidates('NYSE:KO'), ['KO']);
