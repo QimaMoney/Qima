@@ -651,6 +651,56 @@ void main() {
     expect(money.state.entries.last.template, EntryTemplate.transfer);
   });
 
+  testWidgets('an imported row: a move between accounts can be taken back, and the row put on another card', (tester) async {
+    await tester.runAsync(seed);
+    size(tester, const Size(390, 2400));
+    final l10n = await AppLocalizations.delegate.load(const Locale('en'));
+    await tester.pumpWidget(wrap(const ImportReviewScreen(), const Locale('en')));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.text('SALARY NOVEMBER'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('importPick-wallet')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining(l10n.importTransferWith('Wallet')), findsOneWidget);
+
+    // Tapping the ticked account again unticks it and keeps the sheet open.
+    await tester.tap(find.text('SALARY NOVEMBER'));
+    await tester.pumpAndSettle();
+    final wallet = find.byKey(const ValueKey('importPick-wallet'));
+    expect(find.descendant(of: wallet, matching: find.byIcon(Icons.check)), findsOneWidget);
+    await tester.tap(wallet);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('importRowDone')), findsOneWidget);
+    expect(find.descendant(of: wallet, matching: find.byIcon(Icons.check)), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('importRowDone')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining(l10n.importTransferWith('Wallet')), findsNothing);
+
+    // The card or account it was on can be changed from the same sheet.
+    await tester.tap(find.text('SALARY NOVEMBER'));
+    await tester.pumpAndSettle();
+    final account = find.byKey(const ValueKey('importRowAccount'));
+    expect(find.descendant(of: account, matching: find.text('Al Rajhi current account')), findsOneWidget);
+    // The file holds more rows, and they go with it.
+    expect(find.text(l10n.importRowAccountWholeFile), findsOneWidget);
+    await tester.tap(account);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('importMoveTo-visa')));
+    await tester.pumpAndSettle();
+    expect(find.descendant(of: account, matching: find.text('Visa Signature')), findsOneWidget);
+    // The account it is now on is no longer offered as the other side.
+    expect(find.byKey(const ValueKey('importPick-visa')), findsNothing);
+    expect(find.byKey(const ValueKey('importPick-rajhi')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('importRowDone')));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    // The rows now sit under the card.
+    expect(find.byKey(const ValueKey('importPick-visa')), findsNothing);
+    await tester.tap(find.text('SALARY NOVEMBER'));
+    await tester.pumpAndSettle();
+    expect(find.descendant(of: find.byKey(const ValueKey('importRowAccount')), matching: find.text('Visa Signature')), findsOneWidget);
+  });
+
   testWidgets('the import review in Arabic on a narrow phone: the balance offer fits', (tester) async {
     await tester.runAsync(seed);
     size(tester, const Size(320, 2400));

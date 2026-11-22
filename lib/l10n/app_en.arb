@@ -2927,6 +2927,8 @@
   "importMessageFrom": "Message from {sender}",
   "@importMessageFrom": {"placeholders": {"sender": {"type": "String"}}},
   "importMoveMessage": "Move to another account",
+  "importRowAccount": "Card or account",
+  "importRowAccountWholeFile": "Moves every row from this file",
   "bankMessagesNotifyTitle": "Bank messages to check",
   "bankMessagesNotifyBody": "Open Qima to check them before they’re added.",
   "bankMessagesAutoAdded": "{count, plural, =1{Added 1 transaction from a bank message} other{Added {count} transactions from bank messages}}",

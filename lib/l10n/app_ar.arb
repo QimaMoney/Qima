@@ -1329,6 +1329,8 @@
   "importMessagesInto": "رسائل إلى",
   "importMessageFrom": "رسالة من {sender}",
   "importMoveMessage": "نقل إلى حساب آخر",
+  "importRowAccount": "البطاقة أو الحساب",
+  "importRowAccountWholeFile": "ينقل كل معاملات هذا الملف",
   "bankMessagesNotifyTitle": "رسائل بنكية للمراجعة",
   "bankMessagesNotifyBody": "افتح قيمة لمراجعتها قبل إضافتها.",
   "bankMessagesAutoAdded": "{count, plural, =1{أُضيفت معاملة واحدة من رسالة بنكية} other{أُضيفت {count} معاملات من رسائل بنكية}}",

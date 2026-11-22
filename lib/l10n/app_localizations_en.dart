@@ -4584,6 +4584,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get importMoveMessage => 'Move to another account';
 
   @override
+  String get importRowAccount => 'Card or account';
+
+  @override
+  String get importRowAccountWholeFile => 'Moves every row from this file';
+
+  @override
   String get bankMessagesNotifyTitle => 'Bank messages to check';
 
   @override

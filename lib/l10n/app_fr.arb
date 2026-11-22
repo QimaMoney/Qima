@@ -1329,6 +1329,8 @@
   "importMessagesInto": "Messages vers",
   "importMessageFrom": "Message de {sender}",
   "importMoveMessage": "Déplacer vers un autre compte",
+  "importRowAccount": "Carte ou compte",
+  "importRowAccountWholeFile": "Déplace toutes les lignes de ce fichier",
   "bankMessagesNotifyTitle": "Messages bancaires à vérifier",
   "bankMessagesNotifyBody": "Ouvrez Qima pour les vérifier avant leur ajout.",
   "bankMessagesAutoAdded": "{count, plural, =1{1 transaction ajoutée depuis un message bancaire} other{{count} transactions ajoutées depuis des messages bancaires}}",

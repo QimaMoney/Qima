@@ -437,7 +437,7 @@ class _ImportReviewScreenState extends State<ImportReviewScreen> {
                 isIn: _isIn[c.key] ?? c.row.isIn,
                 categoryName: _categoryName(l10n, money.book.accounts[_category[c.key] ?? c.categoryId] ?? money.book.accounts.values.first),
                 onTicked: (v) => setState(() => _ticked[c.key] = v),
-                onTap: () => _edit(c, money, account),
+                onTap: () => _edit(c, money, account, item, accounts),
                 onAdd: _saving ? null : () => _addOne(c),
                 onSkip: _saving ? null : () => _skipOne(c),
               ),
@@ -496,8 +496,16 @@ class _ImportReviewScreenState extends State<ImportReviewScreen> {
 
   /// Puts one message in another account.
   Future<void> _move(ImportItem item, BookAccount current, List<BookAccount> accounts) async {
+    final picked = await _pickAccount(context, current, accounts);
+    if (picked == null || picked == current.id || !mounted) return;
+    setState(() => _accountOf[item.id] = picked);
+  }
+
+  /// Asks which of [accounts] a message or a row belongs to; null when the
+  /// person backs out.
+  Future<String?> _pickAccount(BuildContext context, BookAccount current, List<BookAccount> accounts) {
     final l10n = AppLocalizations.of(context)!;
-    final picked = await showModalBottomSheet<String>(
+    return showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
       useSafeArea: true,
@@ -518,8 +526,6 @@ class _ImportReviewScreenState extends State<ImportReviewScreen> {
         ]),
       ),
     );
-    if (picked == null || picked == current.id || !mounted) return;
-    setState(() => _accountOf[item.id] = picked);
   }
 
   /// A file's rows with the person's corrections in.
@@ -531,9 +537,11 @@ class _ImportReviewScreenState extends State<ImportReviewScreen> {
       a.side.onBalanceSheet ? l10n.importTransferWith(l10n.accountName(a)) : l10n.accountName(a);
 
   /// Lets the person correct a row before it is added: its name, amount,
-  /// date and direction, and what it is (a category, or a move to or from
-  /// another of their accounts).
-  Future<void> _edit(ImportCandidate c, MoneyState money, BookAccount account) async {
+  /// date and direction, the card or account it was on, and what it is (a
+  /// category, or a move to or from another of their accounts). The account
+  /// is the whole file's: a message is one row, and a statement's rows all
+  /// came from the one account, so changing it moves them together.
+  Future<void> _edit(ImportCandidate c, MoneyState money, BookAccount account, ImportItem item, List<BookAccount> accounts) async {
     final l10n = AppLocalizations.of(context)!;
     final currency = account.currency ?? 'SAR';
     var isIn = _isIn[c.key] ?? c.row.isIn;
@@ -541,8 +549,11 @@ class _ImportReviewScreenState extends State<ImportReviewScreen> {
     var date = c.row.date;
     final nameText = c.row.description.isEmpty ? c.row.detail : c.row.description;
     final amountText = minorFieldText(MinorUnits.fromMajor(c.row.amount.abs(), currency), currency);
-    final others = ImportPlanner.counterparts(money.balanceAccounts, account);
-    final result = await showModalBottomSheet<(bool, String, StatementRow)>(
+    var paidWith = account;
+    String guessed() => ImportPlanner.guessCategory(c.row.description,
+            detail: c.row.detail, isIn: isIn, categorizer: Categorizer(money.book, rules: money.settings.categoryRules))
+        .categoryId;
+    final result = await showModalBottomSheet<(bool, String, StatementRow, String)>(
       context: context,
       showDragHandle: true,
       isScrollControlled: true,
@@ -550,6 +561,7 @@ class _ImportReviewScreenState extends State<ImportReviewScreen> {
       builder: (_) => _SheetFields(name: nameText, amount: amountText, builder: (sheet, name, amount) => StatefulBuilder(builder: (sheet, setSheet) {
         final side = isIn ? AccountSide.income : AccountSide.spending;
         final cats = money.categories(side);
+        final others = ImportPlanner.counterparts(money.balanceAccounts, paidWith);
         // Money back from a shop keeps its spending category (a refund).
         final options = isIn ? [...cats, ...money.categories(AccountSide.spending)] : cats;
         if (!options.any((a) => a.id == category) && !others.any((a) => a.id == category)) category = cats.firstOrNull?.id ?? category;
@@ -576,7 +588,7 @@ class _ImportReviewScreenState extends State<ImportReviewScreen> {
         void done(String id) {
           final row = edited();
           if (row == null) return;
-          Navigator.of(sheet).pop((isIn, id, row));
+          Navigator.of(sheet).pop((isIn, id, row, paidWith.id));
         }
 
         Widget tile(BookAccount a, {required String title}) => ListTile(
@@ -585,6 +597,15 @@ class _ImportReviewScreenState extends State<ImportReviewScreen> {
               title: Text(title),
               trailing: a.id == category ? Icon(Icons.check, color: sheet.colors.brandText) : null,
               onTap: () => done(a.id),
+            );
+        // A move between accounts is taken back by tapping it again: the
+        // row is then an ordinary one, in the category it would have had.
+        Widget otherTile(BookAccount a) => ListTile(
+              key: ValueKey('importPick-${a.id}'),
+              leading: Icon(MoneyIcons.account(a)),
+              title: Text(l10n.accountName(a)),
+              trailing: a.id == category ? Icon(Icons.check, color: sheet.colors.brandText) : null,
+              onTap: () => a.id == category ? setSheet(() => category = guessed()) : done(a.id),
             );
         final heading = TextStyle(color: sheet.colors.textSecondary, fontSize: 13, fontWeight: FontWeight.w700);
         return SafeArea(
@@ -625,15 +646,34 @@ class _ImportReviewScreenState extends State<ImportReviewScreen> {
                   onSelectionChanged: (v) => setSheet(() {
                     isIn = v.first;
                     if (others.any((a) => a.id == category)) return;
-                    category = ImportPlanner.guessCategory(c.row.description,
-                            detail: c.row.detail, isIn: isIn, categorizer: Categorizer(money.book, rules: money.settings.categoryRules))
-                        .categoryId;
+                    category = guessed();
                   }),
                 ),
               ),
+              if (accounts.length > 1) ...[
+                Padding(padding: const EdgeInsets.symmetric(horizontal: DS.spaceMD), child: Text(l10n.importRowAccount, style: heading)),
+                ListTile(
+                  key: const ValueKey('importRowAccount'),
+                  leading: Icon(MoneyIcons.account(paidWith)),
+                  title: Text(l10n.accountName(paidWith)),
+                  subtitle: item.rows.length > 1 ? Text(l10n.importRowAccountWholeFile) : null,
+                  trailing: const Icon(Icons.unfold_more),
+                  onTap: () async {
+                    final picked = await _pickAccount(sheet, paidWith, accounts);
+                    final to = accounts.where((a) => a.id == picked).firstOrNull;
+                    if (to == null || !sheet.mounted) return;
+                    setSheet(() {
+                      paidWith = to;
+                      // It can't be a move to the account it is on.
+                      if (category == to.id) category = guessed();
+                    });
+                  },
+                ),
+                const SizedBox(height: DS.spaceSM),
+              ],
               if (others.isNotEmpty) ...[
                 Padding(padding: const EdgeInsets.symmetric(horizontal: DS.spaceMD), child: Text(l10n.importBetweenAccounts, style: heading)),
-                for (final a in others) tile(a, title: l10n.accountName(a)),
+                for (final a in others) otherTile(a),
                 const SizedBox(height: DS.spaceSM),
               ],
               Padding(padding: const EdgeInsets.symmetric(horizontal: DS.spaceMD), child: Text(l10n.importCategory, style: heading)),
@@ -647,6 +687,7 @@ class _ImportReviewScreenState extends State<ImportReviewScreen> {
     setState(() {
       _isIn[c.key] = result.$1;
       _category[c.key] = result.$2;
+      if (result.$4 != account.id) _accountOf[item.id] = result.$4;
       if (result.$3 != c.row) _edited[c.key] = result.$3;
       _ticked[c.key] = true;
     });

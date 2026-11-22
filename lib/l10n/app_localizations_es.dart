@@ -4614,6 +4614,13 @@ class AppLocalizationsEs extends AppLocalizations {
   String get importMoveMessage => 'Mover a otra cuenta';
 
   @override
+  String get importRowAccount => 'Tarjeta o cuenta';
+
+  @override
+  String get importRowAccountWholeFile =>
+      'Mueve todas las filas de este archivo';
+
+  @override
   String get bankMessagesNotifyTitle => 'Mensajes del banco por revisar';
 
   @override

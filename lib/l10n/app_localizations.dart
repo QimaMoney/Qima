@@ -7889,6 +7889,18 @@ abstract class AppLocalizations {
   /// **'Move to another account'**
   String get importMoveMessage;
 
+  /// No description provided for @importRowAccount.
+  ///
+  /// In en, this message translates to:
+  /// **'Card or account'**
+  String get importRowAccount;
+
+  /// No description provided for @importRowAccountWholeFile.
+  ///
+  /// In en, this message translates to:
+  /// **'Moves every row from this file'**
+  String get importRowAccountWholeFile;
+
   /// No description provided for @bankMessagesNotifyTitle.
   ///
   /// In en, this message translates to:

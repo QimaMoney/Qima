@@ -4595,6 +4595,12 @@ class AppLocalizationsAr extends AppLocalizations {
   String get importMoveMessage => 'نقل إلى حساب آخر';
 
   @override
+  String get importRowAccount => 'البطاقة أو الحساب';
+
+  @override
+  String get importRowAccountWholeFile => 'ينقل كل معاملات هذا الملف';
+
+  @override
   String get bankMessagesNotifyTitle => 'رسائل بنكية للمراجعة';
 
   @override

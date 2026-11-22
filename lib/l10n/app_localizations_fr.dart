@@ -4615,6 +4615,13 @@ class AppLocalizationsFr extends AppLocalizations {
   String get importMoveMessage => 'Déplacer vers un autre compte';
 
   @override
+  String get importRowAccount => 'Carte ou compte';
+
+  @override
+  String get importRowAccountWholeFile =>
+      'Déplace toutes les lignes de ce fichier';
+
+  @override
   String get bankMessagesNotifyTitle => 'Messages bancaires à vérifier';
 
   @override
