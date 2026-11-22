@@ -21,7 +21,7 @@ enum AppLockFailureReason {
 }
 
 /// Thin wrapper around `local_auth`, isolated behind an interface so
-/// `LockGate`/`AppCubit` can be tested with a fake instead of touching real
+/// `LockGate`/`SettingsCubit` can be tested with a fake instead of touching real
 /// biometric hardware. Biometrics are always tried with a device-passcode
 /// fallback allowed (`biometricOnly: false`), matching the "Use device
 /// passcode" text button on the lock screen.

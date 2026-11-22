@@ -1,12 +1,12 @@
 import 'dart:ui';
 
-import '../blocs/app_state.dart';
 import '../l10n/app_localizations.dart';
 import '../models/alert_evaluation.dart';
 import '../models/asset.dart';
 import '../models/fx_history.dart';
 import '../models/holding_transaction.dart';
 import '../models/instrument_catalog.dart';
+import '../models/ledger.dart';
 import '../models/money.dart';
 import '../models/price_alert.dart';
 import '../models/quote.dart';
@@ -25,17 +25,18 @@ import 'preferences.dart';
 import 'price_converter.dart';
 import 'price_repository.dart';
 import 'watchlist_store.dart';
+import 'widget_snapshot.dart';
 import 'zakat_reminder_notifier.dart';
 
 /// The single place a price refresh, alert evaluation, notification and
 /// widget publish all happen together — used by BOTH the foreground
-/// (`AppCubit.refreshAll`) and the background task (spec Phase 5). Having
+/// (`MarketCubit.refreshAll`) and the background task (spec Phase 5). Having
 /// exactly one implementation is what guarantees an alert is evaluated
 /// exactly once per refresh regardless of which caller triggered it, and
 /// that the foreground and a background run can never both fire the same
 /// alert for the same price move (see [overlapGuard]).
 ///
-/// Deliberately independent of [AppCubit]/`BuildContext` — it's constructed
+/// Deliberately independent of the cubits and `BuildContext` — it's constructed
 /// straight from stores and the repository so the exact same code path runs
 /// headless inside a `workmanager` background isolate, which has no cubit,
 /// no widget tree and no localized `BuildContext` (notification strings are
@@ -107,7 +108,7 @@ class RefreshPipeline {
   ///
   /// [isForeground] is only ever `true` when a caller wants the SAME fetch
   /// path outside a cubit (e.g. a headless CLI/test run); the real foreground
-  /// app instead calls [evaluateAndNotify] directly from `AppCubit.refreshAll`
+  /// app instead calls [evaluateAndNotify] directly from `MarketCubit.refreshAll`
   /// so the network fetch and widget publish happen exactly once, not twice.
   /// Background runs (`isForeground: false`) are skipped entirely — no
   /// fetch, no evaluation — when ANY evaluation (foreground or background)
@@ -172,7 +173,7 @@ class RefreshPipeline {
 
   /// Evaluates [alerts] against already-fetched [seriesByID]/[rates] and
   /// notifies for anything that fired — the half of [run] the FOREGROUND app
-  /// calls directly (via `AppCubit.refreshAll`) once it already has a fresh
+  /// calls directly (via `MarketCubit.refreshAll`) once it already has a fresh
   /// refresh result, so prices are never fetched twice for one refresh.
   /// Also stamps [markForegroundRefresh] so a background run that overlaps
   /// this one skips evaluating the same price tick again (spec Phase 5:
@@ -339,10 +340,9 @@ class RefreshPipeline {
     required String baseCurrency,
   }) async {
     final hideBalances = preferences.hideBalances;
-    final state = AppState(
-      initialized: true,
+    final state = WidgetData(
       cards: cards,
-      transactions: transactions,
+      ledger: Ledger.derive(transactions),
       seriesByID: seriesByID,
       rates: rates,
       fxHistory: fxHistory,

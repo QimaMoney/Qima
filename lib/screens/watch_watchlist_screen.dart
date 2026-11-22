@@ -4,7 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../blocs/app_cubit.dart';
-import '../blocs/app_state.dart';
+import '../blocs/market_cubit.dart';
+import '../blocs/watchlist_cubit.dart';
 import '../l10n/app_localizations.dart';
 import '../theme/design_system.dart';
 import '../theme/qima_colors.dart';
@@ -14,7 +15,7 @@ import '../widgets/instrument_icon.dart';
 /// Compact, read-only watchlist for Wear OS. Mirrors `WatchWatchlistView.swift`
 /// (spec §6): no add/edit/settings/reorder affordances, just a glanceable
 /// list of whatever the shared watchlist already contains, driven by the
-/// same [AppCubit] as the phone screen.
+/// same cubits as the phone screen.
 ///
 /// Kept intentionally simple: a vertically-scrollable column of rounded
 /// tiles with generous horizontal padding, which stays clear of the corners
@@ -54,28 +55,32 @@ class _WatchWatchlistScreenState extends State<WatchWatchlistScreen> with Widget
   }
 
   void _onForeground() {
-    final cubit = context.read<AppCubit>();
-    cubit.refreshIfStale();
+    final market = context.read<MarketCubit>();
+    market.refreshIfStale();
     _timer?.cancel();
-    _timer = Timer.periodic(const Duration(seconds: 60), (_) => cubit.refreshAll(silent: true));
+    _timer = Timer.periodic(const Duration(seconds: 60), (_) => market.refreshAll(silent: true));
   }
 
   @override
   Widget build(BuildContext context) {
-    final cubit = context.read<AppCubit>();
+    final market = context.read<MarketCubit>();
     final l10n = AppLocalizations.of(context)!;
 
     return ScreenBackground(
       child: Scaffold(
         backgroundColor: Colors.transparent,
         body: SafeArea(
-          child: BlocBuilder<AppCubit, AppState>(
-            builder: (context, state) {
+          child: Builder(
+            builder: (context) {
               final colors = context.colors;
-              if (!state.initialized) {
+              final initialized = context.select<AppCubit, bool>((c) => c.state.initialized);
+              final cards = context.watch<WatchlistCubit>().state.cards;
+              // Rows show prices, so a price tick rebuilds them.
+              context.watch<MarketCubit>();
+              if (!initialized) {
                 return const Center(child: CircularProgressIndicator(strokeWidth: 2));
               }
-              if (state.cards.isEmpty) {
+              if (cards.isEmpty) {
                 return Center(
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: DS.spaceMD),
@@ -97,10 +102,10 @@ class _WatchWatchlistScreenState extends State<WatchWatchlistScreen> with Widget
 
               return ListView.builder(
                 padding: const EdgeInsets.symmetric(horizontal: DS.spaceSM, vertical: DS.spaceLG),
-                itemCount: state.cards.length,
+                itemCount: cards.length,
                 itemBuilder: (context, index) {
-                  final card = state.cards[index];
-                  final presentation = cubit.presentation(card);
+                  final card = cards[index];
+                  final presentation = market.presentation(card);
                   return Padding(
                     padding: const EdgeInsets.only(bottom: DS.spaceSM),
                     child: _WatchRow(

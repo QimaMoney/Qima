@@ -4,8 +4,8 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:qima/blocs/app_cubit.dart';
-import 'package:qima/blocs/app_state.dart';
+import 'package:qima/blocs/app_blocs.dart';
+import 'package:qima/blocs/sync_state.dart';
 import 'package:qima/models/asset.dart';
 import 'package:qima/models/fx_history.dart';
 import 'package:qima/models/holding_transaction.dart';
@@ -45,7 +45,7 @@ class _NoopRepository extends PriceRepository {
 /// needs a registered platform instance this test's plain widget binding
 /// doesn't provide) — mirrors `alerts_screen_test.dart`'s
 /// `_FakeNotificationService`, but also short-circuits `init()` since these
-/// tests DO run the full `AppCubit.init()`.
+/// tests DO run the full `AppBlocs.init()`.
 class _FakeNotificationService extends NotificationService {
   @override
   Future<void> init() async {}
@@ -54,15 +54,15 @@ class _FakeNotificationService extends NotificationService {
   Future<bool> isEnabled() async => true;
 }
 
-/// Phase 7 "iCloud key-value sync" — exercises the whole stack (`AppCubit` +
+/// Phase 7 "iCloud key-value sync" — exercises the whole stack (`AppBlocs` +
 /// `SwitchableCloudKVStore` + `SyncedStore`/`Preferences`) against the SAME
 /// mocked `qima/cloud_kv` channels `icloud_kv_store_test.dart` mocks, so two
-/// [AppCubit]s (each with its own local storage directory, sharing the one
+/// [AppBlocs]s (each with its own local storage directory, sharing the one
 /// mocked "cloud") stand in for two real devices sharing one iCloud account.
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  // `AppCubit._platformSupportsICloud` gates on `defaultTargetPlatform ==
+  // `platformSupportsICloud` gates on `defaultTargetPlatform ==
   // TargetPlatform.iOS` (spec Phase 7: iCloud KVS is iOS-only for now) — the
   // test host defaults to Android, so every test in this file needs the
   // override or sync would never actually turn on.
@@ -103,9 +103,9 @@ void main() {
   /// caused. This is the same class of bug as the `pumpEventQueue()` it
   /// replaces, just one level up: both accept "looks done" instead of
   /// awaiting the specific async work that was just started.
-  Future<void> Function() watchForCloudSyncStatus(AppCubit cubit, CloudSyncStatus status) {
+  Future<void> Function() watchForCloudSyncStatus(AppBlocs cubit, CloudSyncStatus status) {
     final completer = Completer<void>();
-    final subscription = cubit.stream.listen((s) {
+    final subscription = cubit.sync.stream.listen((s) {
       if (s.cloudSyncStatus == status && !completer.isCompleted) {
         completer.complete();
       }
@@ -161,15 +161,15 @@ void main() {
   final gold = InstrumentCatalog.instrument('metal.XAU')!;
   final silver = InstrumentCatalog.instrument('metal.XAG')!;
 
-  /// Builds a fresh [AppCubit] pointed at its own temp local-storage
+  /// Builds a fresh [AppBlocs] pointed at its own temp local-storage
   /// directory and its own [SharedPreferences] instance (so it behaves like
   /// an independent device), sharing the mocked cloud channel above. Runs
-  /// the real [AppCubit.init] so seeding/first-enable ordering matches
+  /// the real [AppBlocs.init] so seeding/first-enable ordering matches
   /// production.
-  Future<AppCubit> device(Directory dir, {bool iCloudSyncEnabled = true}) async {
+  Future<AppBlocs> device(Directory dir, {bool iCloudSyncEnabled = true}) async {
     LocalFileStore.overrideDirectoryForTesting(dir);
     SharedPreferences.setMockInitialValues({'iCloudSyncEnabled': iCloudSyncEnabled});
-    final cubit = AppCubit(
+    final cubit = AppBlocs(
       repository: _NoopRepository(),
       cloudStore: SwitchableCloudKVStore(),
       notificationService: _FakeNotificationService(),
@@ -181,10 +181,10 @@ void main() {
   /// Waits for the work a cloud change started on each device. A store runs
   /// its operations in call order, so a load queued now finishes after the
   /// ones already waiting, and the directory is not deleted under them.
-  Future<void> settle(List<AppCubit> devices) async {
+  Future<void> settle(List<AppBlocs> devices) async {
     for (final d in devices) {
-      await d.watchlistStore.load();
-      await d.holdings.load();
+      await d.watchlist.watchlistStore.load();
+      await d.holdings.ledgerStore.load();
     }
   }
 
@@ -193,18 +193,18 @@ void main() {
       final dirA = await Directory.systemTemp.createTemp('qima_icloud_a');
       final deviceA = await device(dirA);
       // A non-USD currency avoids colliding with the default-seeded
-      // USD/troy-ounce gold card every fresh device gets — `AppCubit.addCard`
+      // USD/troy-ounce gold card every fresh device gets — `WatchlistCubit.addCard`
       // treats a matching instrument+currency+unit+karat combo as "already
       // there" (`isSameCombo`) regardless of id, so a USD card here would
       // silently no-op against the seed instead of adding a new one.
-      await deviceA.addCard(WatchCard(id: 'c1', instrumentID: gold.id, currency: 'EGP', unit: PriceUnit.troyOunce));
-      await deviceA.disposeCloudSync();
+      await deviceA.watchlist.addCard(WatchCard(id: 'c1', instrumentID: gold.id, currency: 'EGP', unit: PriceUnit.troyOunce));
+      await deviceA.sync.disposeCloudSync();
 
       final dirB = await Directory.systemTemp.createTemp('qima_icloud_b');
       final deviceB = await device(dirB);
 
-      expect(deviceB.state.cards.map((c) => c.id), contains('c1'));
-      await deviceB.disposeCloudSync();
+      expect(deviceB.watchlist.state.cards.map((c) => c.id), contains('c1'));
+      await deviceB.sync.disposeCloudSync();
       await dirA.delete(recursive: true);
       await dirB.delete(recursive: true);
     });
@@ -217,23 +217,23 @@ void main() {
     test('edits and deletes converge across two devices', () async {
       final dirA = await Directory.systemTemp.createTemp('qima_icloud_edit_a');
       final deviceA = await device(dirA);
-      final defaultIds = deviceA.state.cards.map((c) => c.id).toSet();
-      await deviceA.addCard(WatchCard(id: 'c1', instrumentID: gold.id, currency: 'EGP', unit: PriceUnit.troyOunce));
-      await deviceA.addCard(WatchCard(id: 'c2', instrumentID: silver.id, currency: 'EGP', unit: PriceUnit.troyOunce));
+      final defaultIds = deviceA.watchlist.state.cards.map((c) => c.id).toSet();
+      await deviceA.watchlist.addCard(WatchCard(id: 'c1', instrumentID: gold.id, currency: 'EGP', unit: PriceUnit.troyOunce));
+      await deviceA.watchlist.addCard(WatchCard(id: 'c2', instrumentID: silver.id, currency: 'EGP', unit: PriceUnit.troyOunce));
 
       final dirB = await Directory.systemTemp.createTemp('qima_icloud_edit_b');
       final deviceB = await device(dirB);
-      expect(deviceB.state.cards.map((c) => c.id).toSet(), {...defaultIds, 'c1', 'c2'});
+      expect(deviceB.watchlist.state.cards.map((c) => c.id).toSet(), {...defaultIds, 'c1', 'c2'});
 
       // B deletes c2; A concurrently reorders (no-op mutation on c1's data
       // isn't available directly, so use removeCard on B and re-load A).
-      await deviceB.removeCard('c2');
-      final reloadedA = await deviceA.watchlistStore.load();
+      await deviceB.watchlist.removeCard('c2');
+      final reloadedA = await deviceA.watchlist.watchlistStore.load();
       expect(reloadedA.map((c) => c.id).toSet(), {...defaultIds, 'c1'});
 
       await settle([deviceA, deviceB]);
-      await deviceA.disposeCloudSync();
-      await deviceB.disposeCloudSync();
+      await deviceA.sync.disposeCloudSync();
+      await deviceB.sync.disposeCloudSync();
       await dirA.delete(recursive: true);
       await dirB.delete(recursive: true);
     });
@@ -241,23 +241,23 @@ void main() {
     test('reorder on one device is respected by the other after reload', () async {
       final dirA = await Directory.systemTemp.createTemp('qima_icloud_reorder_a');
       final deviceA = await device(dirA);
-      await deviceA.addCard(WatchCard(id: 'c1', instrumentID: gold.id, currency: 'EGP', unit: PriceUnit.troyOunce));
-      await deviceA.addCard(WatchCard(id: 'c2', instrumentID: silver.id, currency: 'EGP', unit: PriceUnit.troyOunce));
+      await deviceA.watchlist.addCard(WatchCard(id: 'c1', instrumentID: gold.id, currency: 'EGP', unit: PriceUnit.troyOunce));
+      await deviceA.watchlist.addCard(WatchCard(id: 'c2', instrumentID: silver.id, currency: 'EGP', unit: PriceUnit.troyOunce));
 
       // Reverse the whole order via `setOrder` directly, so the expected
       // result doesn't depend on reasoning about `move`'s from/to index
       // semantics — only that A's chosen order round-trips through B.
-      final reversed = deviceA.state.cards.map((c) => c.id).toList().reversed.toList();
-      await deviceA.watchlistStore.setOrder(reversed);
-      final reloadedA = await deviceA.watchlistStore.load();
+      final reversed = deviceA.watchlist.state.cards.map((c) => c.id).toList().reversed.toList();
+      await deviceA.watchlist.watchlistStore.setOrder(reversed);
+      final reloadedA = await deviceA.watchlist.watchlistStore.load();
       expect(reloadedA.map((c) => c.id).toList(), reversed);
 
       final dirB = await Directory.systemTemp.createTemp('qima_icloud_reorder_b');
       final deviceB = await device(dirB);
-      expect(deviceB.state.cards.map((c) => c.id).toList(), reversed);
+      expect(deviceB.watchlist.state.cards.map((c) => c.id).toList(), reversed);
 
-      await deviceA.disposeCloudSync();
-      await deviceB.disposeCloudSync();
+      await deviceA.sync.disposeCloudSync();
+      await deviceB.sync.disposeCloudSync();
       await dirA.delete(recursive: true);
       await dirB.delete(recursive: true);
     });
@@ -266,19 +266,19 @@ void main() {
       final dirA = await Directory.systemTemp.createTemp('qima_icloud_tomb_a');
       final deviceA = await device(dirA);
       final added =
-          await deviceA.addCard(WatchCard(id: 'c1', instrumentID: gold.id, currency: 'EGP', unit: PriceUnit.troyOunce));
+          await deviceA.watchlist.addCard(WatchCard(id: 'c1', instrumentID: gold.id, currency: 'EGP', unit: PriceUnit.troyOunce));
       expect(added.created, isTrue);
 
       final dirB = await Directory.systemTemp.createTemp('qima_icloud_tomb_b');
       final deviceB = await device(dirB);
-      expect(deviceB.state.cards.map((c) => c.id), contains('c1'));
+      expect(deviceB.watchlist.state.cards.map((c) => c.id), contains('c1'));
 
-      await deviceA.removeCard('c1');
-      final reloadedB = await deviceB.watchlistStore.load();
+      await deviceA.watchlist.removeCard('c1');
+      final reloadedB = await deviceB.watchlist.watchlistStore.load();
       expect(reloadedB.map((c) => c.id), isNot(contains('c1')));
 
-      await deviceA.disposeCloudSync();
-      await deviceB.disposeCloudSync();
+      await deviceA.sync.disposeCloudSync();
+      await deviceB.sync.disposeCloudSync();
       await dirA.delete(recursive: true);
       await dirB.delete(recursive: true);
     });
@@ -289,26 +289,26 @@ void main() {
       // Device A seeds the cloud with a card.
       final dirA = await Directory.systemTemp.createTemp('qima_icloud_first_a');
       final deviceA = await device(dirA);
-      await deviceA.addCard(WatchCard(id: 'cloud-card', instrumentID: gold.id, currency: 'EGP', unit: PriceUnit.troyOunce));
-      await deviceA.disposeCloudSync();
+      await deviceA.watchlist.addCard(WatchCard(id: 'cloud-card', instrumentID: gold.id, currency: 'EGP', unit: PriceUnit.troyOunce));
+      await deviceA.sync.disposeCloudSync();
 
       // Device B starts with sync OFF and adds its own local-only card first.
       final dirB = await Directory.systemTemp.createTemp('qima_icloud_first_b');
       final deviceB = await device(dirB, iCloudSyncEnabled: false);
-      final defaultIds = deviceB.state.cards.map((c) => c.id).toSet();
-      await deviceB.addCard(
+      final defaultIds = deviceB.watchlist.state.cards.map((c) => c.id).toSet();
+      await deviceB.watchlist.addCard(
           WatchCard(id: 'local-card', instrumentID: silver.id, currency: 'EGP', unit: PriceUnit.troyOunce));
-      expect(deviceB.state.cards.map((c) => c.id).toSet(), {...defaultIds, 'local-card'});
+      expect(deviceB.watchlist.state.cards.map((c) => c.id).toSet(), {...defaultIds, 'local-card'});
 
       // Now B turns sync on: every card (its own defaults, its local-only
       // addition, AND A's cloud addition) must still be present afterward —
       // local data is never wiped by enabling.
-      await deviceB.setICloudSyncEnabled(true);
-      expect(deviceB.state.cards.map((c) => c.id).toSet(), {...defaultIds, 'local-card', 'cloud-card'});
-      expect(deviceB.state.cloudSyncStatus, CloudSyncStatus.upToDate);
+      await deviceB.sync.setICloudSyncEnabled(true);
+      expect(deviceB.watchlist.state.cards.map((c) => c.id).toSet(), {...defaultIds, 'local-card', 'cloud-card'});
+      expect(deviceB.sync.state.cloudSyncStatus, CloudSyncStatus.upToDate);
 
-      await deviceA.disposeCloudSync();
-      await deviceB.disposeCloudSync();
+      await deviceA.sync.disposeCloudSync();
+      await deviceB.sync.disposeCloudSync();
       await dirA.delete(recursive: true);
       await dirB.delete(recursive: true);
     });
@@ -318,7 +318,7 @@ void main() {
     test('turning sync off then on again keeps local data and re-merges instead of overwriting', () async {
       final dirA = await Directory.systemTemp.createTemp('qima_icloud_toggle_a');
       final deviceA = await device(dirA);
-      final defaultIds = deviceA.state.cards.map((c) => c.id).toSet();
+      final defaultIds = deviceA.watchlist.state.cards.map((c) => c.id).toSet();
       // NOTE: unlike the real `NSUbiquitousKeyValueStore` (which never fires
       // `didChangeExternallyNotification` for a change this same process
       // just made), this test's mocked channel broadcasts on every
@@ -329,24 +329,24 @@ void main() {
       // below can't miss (or mistake a stale prior state for) the fresh
       // reload cycle this specific write causes.
       final settled = watchForCloudSyncStatus(deviceA, CloudSyncStatus.upToDate);
-      await deviceA.addCard(WatchCard(id: 'c1', instrumentID: gold.id, currency: 'EGP', unit: PriceUnit.troyOunce));
+      await deviceA.watchlist.addCard(WatchCard(id: 'c1', instrumentID: gold.id, currency: 'EGP', unit: PriceUnit.troyOunce));
       await settled();
-      expect(deviceA.state.cloudSyncStatus, CloudSyncStatus.upToDate);
+      expect(deviceA.sync.state.cloudSyncStatus, CloudSyncStatus.upToDate);
 
-      await deviceA.setICloudSyncEnabled(false);
-      expect(deviceA.state.cards.map((c) => c.id), contains('c1')); // Still there locally.
-      expect(deviceA.state.cloudSyncStatus, CloudSyncStatus.disabled);
+      await deviceA.sync.setICloudSyncEnabled(false);
+      expect(deviceA.watchlist.state.cards.map((c) => c.id), contains('c1')); // Still there locally.
+      expect(deviceA.sync.state.cloudSyncStatus, CloudSyncStatus.disabled);
 
       // While A is off, a second device adds another card to the cloud.
       final dirB = await Directory.systemTemp.createTemp('qima_icloud_toggle_b');
       final deviceB = await device(dirB);
-      await deviceB.addCard(WatchCard(id: 'c2', instrumentID: silver.id, currency: 'EGP', unit: PriceUnit.troyOunce));
-      await deviceB.disposeCloudSync();
+      await deviceB.watchlist.addCard(WatchCard(id: 'c2', instrumentID: silver.id, currency: 'EGP', unit: PriceUnit.troyOunce));
+      await deviceB.sync.disposeCloudSync();
 
-      await deviceA.setICloudSyncEnabled(true);
-      expect(deviceA.state.cards.map((c) => c.id).toSet(), {...defaultIds, 'c1', 'c2'});
+      await deviceA.sync.setICloudSyncEnabled(true);
+      expect(deviceA.watchlist.state.cards.map((c) => c.id).toSet(), {...defaultIds, 'c1', 'c2'});
 
-      await deviceA.disposeCloudSync();
+      await deviceA.sync.disposeCloudSync();
       await dirA.delete(recursive: true);
       await dirB.delete(recursive: true);
     });
@@ -356,14 +356,14 @@ void main() {
     test('a quotaViolationChange event surfaces a storage-full status', () async {
       final dir = await Directory.systemTemp.createTemp('qima_icloud_quota');
       final deviceCubit = await device(dir);
-      expect(deviceCubit.state.cloudSyncStatus, CloudSyncStatus.upToDate);
+      expect(deviceCubit.sync.state.cloudSyncStatus, CloudSyncStatus.upToDate);
 
       final settled = watchForCloudSyncStatus(deviceCubit, CloudSyncStatus.storageFull);
       broadcastChange('watchcards.records', reason: 'quotaViolationChange');
       await settled();
-      expect(deviceCubit.state.cloudSyncStatus, CloudSyncStatus.storageFull);
+      expect(deviceCubit.sync.state.cloudSyncStatus, CloudSyncStatus.storageFull);
 
-      await deviceCubit.disposeCloudSync();
+      await deviceCubit.sync.disposeCloudSync();
       await dir.delete(recursive: true);
     });
   });
@@ -375,14 +375,14 @@ void main() {
 
       final dirB = await Directory.systemTemp.createTemp('qima_icloud_targeted2_b');
       final deviceB = await device(dirB);
-      final cardsIdentityBefore = deviceB.state.cards;
+      final cardsIdentityBefore = deviceB.watchlist.state.cards;
       final reloadedBook = <String?>[];
       deviceB.onBookChanged = (key) async => reloadedBook.add(key);
 
       // A trade made on A reaches the cloud as a change of the book's entries.
       // (Only B receives the event: see the note below.)
       LocalFileStore.overrideDirectoryForTesting(dirA);
-      await deviceA.saveTransaction(HoldingTransaction(
+      await deviceA.holdings.saveTransaction(HoldingTransaction(
         id: 'tx1',
         instrumentID: gold.id,
         kind: TransactionKind.buy,
@@ -402,7 +402,7 @@ void main() {
       // the first's handler, so only the most-recently-listening device
       // (B) actually receives a dispatched event here; A's Dart-side
       // subscription stays alive but silently never gets this one. That's a
-      // limitation of two `AppCubit`s sharing one static channel name
+      // limitation of two `AppBlocs`s sharing one static channel name
       // in-process — real usage never has two — so only B's reload is
       // awaited/asserted on.
       LocalFileStore.overrideDirectoryForTesting(dirB);
@@ -410,14 +410,14 @@ void main() {
       broadcastChange('ledger.entries');
       await settled();
 
-      expect(deviceB.state.transactions.map((t) => t.id), ['tx1'], reason: 'the holdings side reloaded');
+      expect(deviceB.holdings.state.transactions.map((t) => t.id), ['tx1'], reason: 'the holdings side reloaded');
       expect(reloadedBook, contains('ledger.entries'), reason: 'and so did the book');
       expect(reloadedBook.toSet(), {'ledger.entries'});
-      expect(deviceB.state.cards, same(cardsIdentityBefore));
+      expect(deviceB.watchlist.state.cards, same(cardsIdentityBefore));
 
       await settle([deviceA, deviceB]);
-      await deviceA.disposeCloudSync();
-      await deviceB.disposeCloudSync();
+      await deviceA.sync.disposeCloudSync();
+      await deviceB.sync.disposeCloudSync();
       await dirA.delete(recursive: true);
       await dirB.delete(recursive: true);
     });
@@ -427,7 +427,7 @@ void main() {
       final deviceB = await device(dir);
       final reloadedBook = <String?>[];
       deviceB.onBookChanged = (key) async => reloadedBook.add(key);
-      final transactionsBefore = deviceB.state.transactions;
+      final transactionsBefore = deviceB.holdings.state.transactions;
 
       for (final key in ['holdings.records', 'transactions.records']) {
         cloudValues[key] = '[]';
@@ -436,11 +436,11 @@ void main() {
         await settled();
       }
 
-      expect(deviceB.state.transactions, same(transactionsBefore));
+      expect(deviceB.holdings.state.transactions, same(transactionsBefore));
       expect(reloadedBook, isEmpty);
 
       await settle([deviceB]);
-      await deviceB.disposeCloudSync();
+      await deviceB.sync.disposeCloudSync();
       await dir.delete(recursive: true);
     });
   });
@@ -449,37 +449,37 @@ void main() {
     test('iCloudSyncEnabled itself is never written to the cloud store', () async {
       final dir = await Directory.systemTemp.createTemp('qima_icloud_pref_local');
       final deviceCubit = await device(dir);
-      await deviceCubit.setICloudSyncEnabled(false);
-      await deviceCubit.setICloudSyncEnabled(true);
+      await deviceCubit.sync.setICloudSyncEnabled(false);
+      await deviceCubit.sync.setICloudSyncEnabled(true);
 
       expect(cloudValues.containsKey('iCloudSyncEnabled'), isFalse);
 
-      await deviceCubit.disposeCloudSync();
+      await deviceCubit.sync.disposeCloudSync();
       await dir.delete(recursive: true);
     });
 
     test('hideBalances, appLockEnabled and lockGrace never reach the cloud store', () async {
       final dir = await Directory.systemTemp.createTemp('qima_icloud_pref_local2');
       final deviceCubit = await device(dir);
-      await deviceCubit.setHideBalances(true);
-      await deviceCubit.setLockGrace(deviceCubit.state.lockGrace);
+      await deviceCubit.settings.setHideBalances(true);
+      await deviceCubit.settings.setLockGrace(deviceCubit.settings.state.lockGrace);
 
       expect(cloudValues.containsKey('hideBalances'), isFalse);
       expect(cloudValues.containsKey('appLockEnabled'), isFalse);
       expect(cloudValues.containsKey('lockGrace'), isFalse);
 
-      await deviceCubit.disposeCloudSync();
+      await deviceCubit.sync.disposeCloudSync();
       await dir.delete(recursive: true);
     });
 
     test('baseCurrency (a synced preference) DOES reach the cloud store', () async {
       final dir = await Directory.systemTemp.createTemp('qima_icloud_pref_synced');
       final deviceCubit = await device(dir);
-      await deviceCubit.setBaseCurrency('EGP');
+      await deviceCubit.settings.setBaseCurrency('EGP');
 
       expect(cloudValues['baseCurrency'], 'EGP');
 
-      await deviceCubit.disposeCloudSync();
+      await deviceCubit.sync.disposeCloudSync();
       await dir.delete(recursive: true);
     });
   });

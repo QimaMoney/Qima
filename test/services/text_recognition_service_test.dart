@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:qima/models/statement_reader.dart';
-import 'package:qima/blocs/app_cubit.dart';
+import 'package:qima/blocs/app_blocs.dart';
 import 'package:qima/l10n/app_localizations.dart';
 import 'package:qima/l10n/app_localizations_en.dart';
 import 'package:qima/models/asset.dart';
@@ -92,8 +92,8 @@ void main() {
     Future<List<String>> pump(WidgetTester tester, _FakeRecognition recognition, {String? path = '/tmp/r.jpg'}) async {
       final texts = <String>[];
       await tester.pumpWidget(
-        BlocProvider<AppCubit>.value(
-          value: AppCubit(textRecognition: recognition),
+        MultiBlocProvider(
+          providers: AppBlocs(textRecognition: recognition).providers,
           child: MaterialApp(
             localizationsDelegates: AppLocalizations.localizationsDelegates,
             supportedLocales: AppLocalizations.supportedLocales,

@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
-import '../blocs/app_cubit.dart';
-import '../blocs/app_state.dart';
+import '../blocs/alerts_cubit.dart';
+import '../blocs/alerts_state.dart';
+import '../blocs/market_cubit.dart';
+import '../blocs/watchlist_cubit.dart';
 import '../l10n/app_localizations.dart';
 import '../models/price_alert.dart';
 import '../models/watch_card.dart';
@@ -36,7 +38,7 @@ class _AlertsScreenState extends State<AlertsScreen> with WidgetsBindingObserver
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    WidgetsBinding.instance.addPostFrameCallback((_) => context.read<AppCubit>().refreshNotificationStatus());
+    WidgetsBinding.instance.addPostFrameCallback((_) => context.read<AlertsCubit>().refreshNotificationStatus());
   }
 
   @override
@@ -51,13 +53,13 @@ class _AlertsScreenState extends State<AlertsScreen> with WidgetsBindingObserver
     // "Open settings" had them backgrounded, so the banner clears the
     // moment they come back instead of looking stale.
     if (state == AppLifecycleState.resumed && mounted) {
-      context.read<AppCubit>().refreshNotificationStatus();
+      context.read<AlertsCubit>().refreshNotificationStatus();
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final cubit = context.read<AppCubit>();
+    final cubit = context.read<AlertsCubit>();
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
 
@@ -69,14 +71,18 @@ class _AlertsScreenState extends State<AlertsScreen> with WidgetsBindingObserver
           title: Text(l10n.alertsScreenTitle),
           actions: const [HelpButton(topic: HelpTopicId.priceAlerts)],
         ),
-        body: BlocBuilder<AppCubit, AppState>(
+        body: BlocBuilder<AlertsCubit, AlertsState>(
           builder: (context, state) {
+            // Each tile prices its target, so the cards and the rates are
+            // followed too.
+            final cards = context.watch<WatchlistCubit>().state.cards;
+            context.watch<MarketCubit>();
             final alerts = state.alerts;
             final grouped = <String, List<PriceAlert>>{};
             for (final alert in alerts) {
               grouped.putIfAbsent(alert.cardID, () => []).add(alert);
             }
-            final cardsByID = {for (final c in state.cards) c.id: c};
+            final cardsByID = {for (final c in cards) c.id: c};
 
             return ListView(
               padding: const EdgeInsets.all(DS.spaceMD),
@@ -161,7 +167,7 @@ class _NotificationsOffBanner extends StatelessWidget {
 class _CardGroup extends StatelessWidget {
   final WatchCard card;
   final List<PriceAlert> alerts;
-  final AppCubit cubit;
+  final AlertsCubit cubit;
 
   const _CardGroup({required this.card, required this.alerts, required this.cubit});
 
@@ -211,14 +217,14 @@ class _CardGroup extends StatelessWidget {
 class _AlertTile extends StatelessWidget {
   final PriceAlert alert;
   final WatchCard card;
-  final AppCubit cubit;
+  final AlertsCubit cubit;
   final Color accent;
 
   const _AlertTile({required this.alert, required this.card, required this.cubit, required this.accent});
 
   String _summary(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    final converter = cubit.presentation(card).converter;
+    final converter = context.read<MarketCubit>().presentation(card).converter;
     switch (alert.kind) {
       case AlertKind.above:
         return '${l10n.alertKindAbove} ${converter.money(alert.target).formatted()}';

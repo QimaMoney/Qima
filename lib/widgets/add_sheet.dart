@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
-import '../blocs/app_cubit.dart';
+import '../blocs/settings_cubit.dart';
 import '../l10n/app_localizations.dart';
 import '../screens/add_instrument_screen.dart';
 import '../screens/money/accounts_screens.dart';
@@ -43,7 +43,7 @@ class AddButton extends StatelessWidget {
 /// this device can do; a mic that's merely turned off still counts, and
 /// explains itself on the Add screen.
 Future<void> showAddSheet(BuildContext context) async {
-  final cubit = context.read<AppCubit>();
+  final cubit = context.read<SettingsCubit>();
   final tag = dictationLocaleTag(Localizations.localeOf(context));
   const unavailable = Duration(seconds: 1);
   final (dictation, scan) = await (

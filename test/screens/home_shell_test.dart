@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:qima/blocs/app_cubit.dart';
+import 'package:qima/blocs/app_blocs.dart';
 import 'package:qima/l10n/app_localizations.dart';
 import 'package:qima/models/asset.dart';
 import 'package:qima/models/fx_history.dart';
@@ -28,9 +28,10 @@ import 'package:qima/theme/app_theme.dart';
 import 'package:qima/widgets/guided_tour.dart';
 import 'package:qima/widgets/portfolio_hero.dart';
 
+import '../helpers/app_blocs.dart';
 import '../helpers/money_provider.dart';
 
-/// No-ops every network/on-disk call `AppCubit` fires in the background, so
+/// No-ops every network/on-disk call the cubits fire in the background, so
 /// these widget tests can exercise `HomeShell` deterministically and offline
 /// (same fake as `add_instrument_flow_test.dart`).
 class _FakeRepository extends PriceRepository {
@@ -66,7 +67,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   late Directory tempDir;
-  late AppCubit cubit;
+  late AppBlocs blocs;
   late _FakeRepository repository;
   final gold = InstrumentCatalog.instrument('metal.XAU')!;
   final silver = InstrumentCatalog.instrument('metal.XAG')!;
@@ -75,7 +76,7 @@ void main() {
     tempDir = await Directory.systemTemp.createTemp('qima_home_shell_test');
     LocalFileStore.overrideDirectoryForTesting(tempDir);
     repository = _FakeRepository();
-    cubit = AppCubit(repository: repository);
+    blocs = AppBlocs(repository: repository);
     final now = DateTime(2024, 6, 10);
     final cards = [
       WatchCard(id: 'c1', instrumentID: gold.id, currency: 'USD', unit: PriceUnit.troyOunce),
@@ -102,7 +103,7 @@ void main() {
         Quote(instrumentID: silver.id, timestamp: now, canonicalUSD: 25),
       ]),
     };
-    cubit.emit(cubit.state.copyWith(
+    blocs.seed(
       initialized: true,
       cards: cards,
       lots: lots,
@@ -110,11 +111,11 @@ void main() {
       rates: FXRates(base: 'USD', rates: const {'USD': 1}, updatedAt: now),
       fxHistory: FXHistory.empty,
       baseCurrency: 'USD',
-    ));
+    );
   });
 
   tearDown(() async {
-    cubit.close();
+    await blocs.close();
     if (await tempDir.exists()) {
       await tempDir.delete(recursive: true);
     }
@@ -131,8 +132,8 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
   }
 
-  Widget app(AppCubit cubit, {Locale locale = const Locale('en')}) {
-    return MultiBlocProvider(providers: [BlocProvider<AppCubit>.value(value: cubit), testMoneyProvider(cubit)],
+  Widget app(AppBlocs blocs, {Locale locale = const Locale('en')}) {
+    return MultiBlocProvider(providers: [...blocs.providers, testMoneyProvider(blocs)],
       child: MaterialApp(
         locale: locale,
         localizationsDelegates: AppLocalizations.localizationsDelegates,
@@ -168,7 +169,7 @@ void main() {
 
   testWidgets('the phone bar has Home, Money and Prices, and Settings opens from Home', (tester) async {
     setSurfaceSize(tester, const Size(400, 800));
-    await tester.pumpWidget(app(cubit));
+    await tester.pumpWidget(app(blocs));
     await settle(tester);
 
     final l10n = await AppLocalizations.delegate.load(const Locale('en'));
@@ -189,14 +190,14 @@ void main() {
   testWidgets('switching tabs preserves the Prices asset-class filter', (tester) async {
     // Add a non-metal card directly to state (not via `addCard`, which
     // round-trips through the on-disk store) so the filter renders.
-    cubit.emit(cubit.state.copyWith(
+    blocs.seed(
       cards: [
-        ...cubit.state.cards,
+        ...blocs.watchlist.state.cards,
         WatchCard(id: 'c3', instrumentID: 'crypto.BTC', currency: 'USD', unit: PriceUnit.each),
       ],
-    ));
+    );
     setSurfaceSize(tester, const Size(400, 800));
-    await tester.pumpWidget(app(cubit));
+    await tester.pumpWidget(app(blocs));
     await settle(tester);
     final l10n = await AppLocalizations.delegate.load(const Locale('en'));
 
@@ -216,11 +217,11 @@ void main() {
   });
 
   testWidgets('Edit order hides the tab bar and the +, puts the hint first, and lets the last card clear the screen edge', (tester) async {
-    cubit.emit(cubit.state.copyWith(cards: [
+    blocs.seed(cards: [
       for (var i = 0; i < 10; i++) WatchCard(id: 'm$i', instrumentID: i.isEven ? gold.id : silver.id, currency: 'USD', unit: PriceUnit.troyOunce),
-    ]));
+    ]);
     setSurfaceSize(tester, const Size(400, 700));
-    await tester.pumpWidget(app(cubit));
+    await tester.pumpWidget(app(blocs));
     await settle(tester);
     final l10n = await AppLocalizations.delegate.load(const Locale('en'));
 
@@ -245,7 +246,7 @@ void main() {
 
   testWidgets('the Prices tab has no portfolio total and no back button', (tester) async {
     setSurfaceSize(tester, const Size(400, 800));
-    await tester.pumpWidget(app(cubit));
+    await tester.pumpWidget(app(blocs));
     await settle(tester);
     final l10n = await AppLocalizations.delegate.load(const Locale('en'));
 
@@ -256,7 +257,7 @@ void main() {
 
   testWidgets('Android back from Money returns to Home instead of exiting', (tester) async {
     setSurfaceSize(tester, const Size(400, 800));
-    await tester.pumpWidget(app(cubit));
+    await tester.pumpWidget(app(blocs));
     await settle(tester);
     final l10n = await AppLocalizations.delegate.load(const Locale('en'));
 
@@ -270,7 +271,7 @@ void main() {
 
   testWidgets('before any account, Home shows the Portfolio total, and tapping it opens the balance sheet', (tester) async {
     setSurfaceSize(tester, const Size(400, 800));
-    await tester.pumpWidget(app(cubit));
+    await tester.pumpWidget(app(blocs));
     await settle(tester);
 
     expect(find.byType(PortfolioHero), findsOneWidget);
@@ -281,7 +282,7 @@ void main() {
 
   testWidgets('add flow ends at [Shell, Detail] and Back shows the shell again', (tester) async {
     setSurfaceSize(tester, const Size(400, 800));
-    await tester.pumpWidget(app(cubit));
+    await tester.pumpWidget(app(blocs));
     await settle(tester);
 
     await tester.tap(find.byIcon(Icons.add));
@@ -318,7 +319,7 @@ void main() {
 
   testWidgets('a NavigationRail with three tabs, the + and Settings at the foot is used at width >= 600', (tester) async {
     setSurfaceSize(tester, const Size(900, 800));
-    await tester.pumpWidget(app(cubit));
+    await tester.pumpWidget(app(blocs));
     await settle(tester);
 
     final l10n = await AppLocalizations.delegate.load(const Locale('en'));
@@ -332,7 +333,7 @@ void main() {
 
   testWidgets('refresh keeps running while another tab is showing', (tester) async {
     setSurfaceSize(tester, const Size(400, 800));
-    await tester.pumpWidget(app(cubit));
+    await tester.pumpWidget(app(blocs));
     await settle(tester);
     final callsAfterMount = repository.refreshAllCallCount;
     expect(callsAfterMount, greaterThan(0));
@@ -341,14 +342,14 @@ void main() {
     await tapTab(tester, l10n.navMoney);
 
     await tester.runAsync(() async {
-      await cubit.refreshAll(silent: true);
+      await blocs.market.refreshAll(silent: true);
     });
     expect(repository.refreshAllCallCount, greaterThan(callsAfterMount));
   });
 
   testWidgets('builds under RTL (Arabic locale)', (tester) async {
     setSurfaceSize(tester, const Size(400, 800));
-    await tester.pumpWidget(app(cubit, locale: const Locale('ar')));
+    await tester.pumpWidget(app(blocs, locale: const Locale('ar')));
     await settle(tester);
     expect(tester.takeException(), isNull);
     expect(Directionality.of(tester.element(find.byType(HomeShell))), TextDirection.rtl);
@@ -357,7 +358,7 @@ void main() {
   testWidgets('builds cleanly in light theme', (tester) async {
     setSurfaceSize(tester, const Size(400, 800));
     await tester.pumpWidget(
-      MultiBlocProvider(providers: [BlocProvider<AppCubit>.value(value: cubit), testMoneyProvider(cubit)],
+      MultiBlocProvider(providers: [...blocs.providers, testMoneyProvider(blocs)],
         child: MaterialApp(
           localizationsDelegates: AppLocalizations.localizationsDelegates,
           supportedLocales: AppLocalizations.supportedLocales,
@@ -374,15 +375,15 @@ void main() {
     testWidgets('walks the stops over the shell, changing tab, and Done returns to Home', (tester) async {
       setSurfaceSize(tester, const Size(400, 800));
       final l10n = await AppLocalizations.delegate.load(const Locale('en'));
-      await tester.pumpWidget(app(cubit));
+      await tester.pumpWidget(app(blocs));
       await settle(tester);
       expect(find.byType(GuidedTourOverlay), findsNothing);
 
-      cubit.requestTour();
+      blocs.app.requestTour();
       await settle(tester);
 
       // The shell took the request; with no setup answers every stop shows.
-      expect(cubit.state.tourRequested, isFalse);
+      expect(blocs.app.state.tourRequested, isFalse);
       expect(find.text(l10n.tourTabsTitle), findsOneWidget);
       expect(find.text(l10n.tourStepOf(1, 4)), findsOneWidget);
 
@@ -421,9 +422,9 @@ void main() {
         if (details.toString().contains('guided_tour.dart')) tourErrors.add(details.exceptionAsString());
       };
       addTearDown(() => FlutterError.onError = previous);
-      await tester.pumpWidget(app(cubit));
+      await tester.pumpWidget(app(blocs));
       await settle(tester);
-      cubit.requestTour();
+      blocs.app.requestTour();
       await settle(tester);
 
       for (var stop = 1; stop <= 4; stop++) {
@@ -442,9 +443,9 @@ void main() {
     testWidgets('Skip tour ends it at any stop, and nothing under it reacts while it runs', (tester) async {
       setSurfaceSize(tester, const Size(400, 800));
       final l10n = await AppLocalizations.delegate.load(const Locale('en'));
-      await tester.pumpWidget(app(cubit));
+      await tester.pumpWidget(app(blocs));
       await settle(tester);
-      cubit.requestTour();
+      blocs.app.requestTour();
       await settle(tester);
 
       // A tap on the dimmed Money tab moves the tour on instead of
@@ -462,10 +463,10 @@ void main() {
     testWidgets('leaves out the stops for what setup did not choose', (tester) async {
       setSurfaceSize(tester, const Size(400, 800));
       final l10n = await AppLocalizations.delegate.load(const Locale('en'));
-      cubit.emit(cubit.state.copyWith(setup: const SetupAnswers(uses: {SetupUse.netWorth})));
-      await tester.pumpWidget(app(cubit));
+      blocs.seed(setup: const SetupAnswers(uses: {SetupUse.netWorth}));
+      await tester.pumpWidget(app(blocs));
       await settle(tester);
-      cubit.requestTour();
+      blocs.app.requestTour();
       await settle(tester);
 
       expect(find.text(l10n.tourStepOf(1, 2)), findsOneWidget);
@@ -477,8 +478,8 @@ void main() {
     testWidgets('a tour asked for before the shell is on screen starts with it', (tester) async {
       setSurfaceSize(tester, const Size(400, 800));
       final l10n = await AppLocalizations.delegate.load(const Locale('en'));
-      cubit.requestTour();
-      await tester.pumpWidget(app(cubit));
+      blocs.app.requestTour();
+      await tester.pumpWidget(app(blocs));
       await settle(tester);
 
       expect(find.text(l10n.tourTabsTitle), findsOneWidget);
@@ -486,9 +487,9 @@ void main() {
 
     testWidgets('Android back ends the tour instead of leaving the app', (tester) async {
       setSurfaceSize(tester, const Size(400, 800));
-      await tester.pumpWidget(app(cubit));
+      await tester.pumpWidget(app(blocs));
       await settle(tester);
-      cubit.requestTour();
+      blocs.app.requestTour();
       await settle(tester);
 
       await tester.binding.handlePopRoute();
@@ -501,9 +502,9 @@ void main() {
     testWidgets('runs over the rail on a wide screen and in Arabic', (tester) async {
       setSurfaceSize(tester, const Size(900, 700));
       final l10n = await AppLocalizations.delegate.load(const Locale('ar'));
-      await tester.pumpWidget(app(cubit, locale: const Locale('ar')));
+      await tester.pumpWidget(app(blocs, locale: const Locale('ar')));
       await settle(tester);
-      cubit.requestTour();
+      blocs.app.requestTour();
       await settle(tester);
 
       for (final title in [l10n.tourTabsTitle, l10n.tourAddTitle, l10n.tourMoneyTitle, l10n.tourPricesTitle]) {
@@ -519,8 +520,8 @@ void main() {
   testWidgets('opens on the tab setup chose when Qima is for one thing only', (tester) async {
     setSurfaceSize(tester, const Size(400, 800));
     final l10n = await AppLocalizations.delegate.load(const Locale('en'));
-    cubit.emit(cubit.state.copyWith(setup: const SetupAnswers(uses: {SetupUse.prices}, products: {SetupProduct.metals})));
-    await tester.pumpWidget(app(cubit));
+    blocs.seed(setup: const SetupAnswers(uses: {SetupUse.prices}, products: {SetupProduct.metals}));
+    await tester.pumpWidget(app(blocs));
     await settle(tester);
 
     expectTabSelected(tester, l10n.navPrices);
