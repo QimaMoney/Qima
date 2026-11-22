@@ -73,6 +73,15 @@ abstract class LocalRecords<T extends Syncable> {
   Future<void> write(List<Record<T>> records);
 }
 
+/// A backend that holds its rows to the merge rule, and so may keep a stored
+/// record in place of the one it is given (another isolate stored a record
+/// that wins, after this store read).
+abstract class GuardedRecords<T extends Syncable> implements LocalRecords<T> {
+  /// [write], returning [records] as they are now stored: where a stored
+  /// record was kept, that record.
+  Future<List<Record<T>>> writeGuarded(List<Record<T>> records);
+}
+
 /// The local copy as one JSON file holding every record, `{"records": [...]}`.
 class JsonFileRecords<T extends Syncable> implements LocalRecords<T> {
   final String filePath;
@@ -128,7 +137,7 @@ class SyncedStore<T extends Syncable> {
   /// the one this returns true for ([incoming] against [stored]) wins,
   /// whichever side it came from. Should be a strict order (not true both
   /// ways). Without it a tie goes to the later record in the merge, and
-  /// [absorb] ignores a tie.
+  /// [absorb] ignores a tie. See [replaces].
   final bool Function(Record<T> incoming, Record<T> stored)? prefer;
 
   /// How long a tombstone is kept; null keeps tombstones for ever.
@@ -165,17 +174,46 @@ class SyncedStore<T extends Syncable> {
     this.tombstoneTTL = defaultTombstoneTTL,
   }) : _local = local ?? JsonFileRecords<T>(filePath, itemFromJson);
 
+  /// The smallest step between two stamps that every stored form keeps. A
+  /// stamp is stored as ISO text, down to the microsecond where the platform
+  /// has microseconds and to the millisecond on web, so a microsecond would
+  /// not survive a round through a web device.
+  static const Duration stampStep = Duration(milliseconds: 1);
+
+  /// Whether [incoming] takes the place of [stored], a record with the same
+  /// id. This is the one rule every path decides by: a merge ([keyed]), the
+  /// local rows (`DbRecords`), an import of an old file, and [absorb].
+  ///
+  /// The later `updatedAt` wins. For equal stamps [prefer] decides, and
+  /// without one [incoming] is taken. With [strict], equal stamps are never
+  /// taken: that is for a source that only flows one way and is never
+  /// cleared (an old cloud key, an old file), which must not keep winning a
+  /// tie against what this build writes.
+  static bool replaces<T extends Syncable>(Record<T> incoming, Record<T> stored, bool Function(Record<T> incoming, Record<T> stored)? prefer, {bool strict = false}) {
+    if (strict) return incoming.updatedAt.isAfter(stored.updatedAt);
+    if (prefer != null && stored.updatedAt == incoming.updatedAt) return prefer(incoming, stored);
+    return !stored.updatedAt.isAfter(incoming.updatedAt);
+  }
+
+  /// The stamp of a change made on this device, at [now], to the record
+  /// [held] (null for a new one). A clock that is behind the held stamp (it
+  /// was set back, or the record came from a device whose clock is ahead)
+  /// would stamp the change earlier than what it replaces, and every merge
+  /// would then keep the old record and drop the change. So the stamp is
+  /// never earlier than one [stampStep] after the held one. [held] is the
+  /// record as [_held] gives it, the cloud's copy included: a version that
+  /// has arrived in the cloud and was not loaded yet counts as held.
+  static DateTime stampAfter(DateTime now, Record? held) {
+    if (held == null) return now;
+    final least = held.updatedAt.add(stampStep);
+    return now.isBefore(least) ? least : now;
+  }
+
   Map<String, Record<T>> keyed(List<Record<T>> records) {
     final byId = <String, Record<T>>{};
     for (final record in records) {
       final existing = byId[record.item.id];
-      if (existing == null) {
-        byId[record.item.id] = record;
-      } else if (prefer != null && existing.updatedAt == record.updatedAt) {
-        if (prefer!(record, existing)) byId[record.item.id] = record;
-      } else if (!existing.updatedAt.isAfter(record.updatedAt)) {
-        byId[record.item.id] = record;
-      }
+      if (existing == null || replaces(record, existing, prefer)) byId[record.item.id] = record;
     }
     return byId;
   }
@@ -225,7 +263,14 @@ class SyncedStore<T extends Syncable> {
 
   Future<List<Record<T>>> _readLocal() => _local.read();
 
-  Future<void> _writeLocal(List<Record<T>> records) => _local.write(records);
+  /// Writes [records] locally and returns them as they are stored, which a
+  /// backend that guards its rows may have decided otherwise for some.
+  Future<List<Record<T>>> _writeLocal(List<Record<T>> records) async {
+    final local = _local;
+    if (local is GuardedRecords<T>) return local.writeGuarded(records);
+    await local.write(records);
+    return records;
+  }
 
   /// True while the last cloud read found a value this build cannot use: an
   /// envelope with a newer version, or one that does not decode. The store
@@ -351,10 +396,10 @@ class SyncedStore<T extends Syncable> {
       merged = prune(merge(local, cloudRecords));
     }
 
-    await _writeLocal(merged);
+    final stored = await _writeLocal(merged);
     final prunedCloud = prune(cloudRecords);
-    if (!_sameRecordSet(prunedCloud, merged)) {
-      await _writeCloud(merged);
+    if (!_sameRecordSet(prunedCloud, stored)) {
+      await _writeCloud(stored);
     } else if (!_cloudUnreadable) {
       _cloudWriteSkipped = false;
       _skippedValue = null;
@@ -362,7 +407,7 @@ class SyncedStore<T extends Syncable> {
       _skippedTracked = null;
     }
 
-    return _liveSorted(merged);
+    return _liveSorted(stored);
   }
 
   bool _sameRecordSet(List<Record<T>> a, List<Record<T>> b) {
@@ -378,29 +423,35 @@ class SyncedStore<T extends Syncable> {
     return true;
   }
 
-  Future<void> _commit(List<Record<T>> localRecords) async {
-    final cloudRecords = await _readCloud();
-    final merged = prune(merge(localRecords, cloudRecords));
-    await _writeLocal(merged);
-    await _writeCloud(merged);
+  /// Everything this device knows of the collection: its own copy merged
+  /// with the cloud's. Every change the person makes is made to this and
+  /// stamped against it ([stampAfter]), so a version that is in the cloud
+  /// and was not loaded yet is not written over by an older stamp.
+  Future<List<Record<T>>> _held() async => merge(await _readLocal(), await _readCloud());
+
+  /// Makes [records] (what [_held] gave, with a change) the state of the
+  /// collection, here and in the cloud. What goes to the cloud is what is
+  /// stored here after the write, which is not always what was asked for
+  /// (see [GuardedRecords]).
+  Future<void> _put(List<Record<T>> records) async {
+    await _writeCloud(await _writeLocal(prune(records)));
   }
 
   Future<List<T>> upsert(T item) => _serialized(() => _upsert(item));
 
   Future<List<T>> _upsert(T item) async {
-    final local = await _readLocal();
+    final held = await _held();
     final now = DateTime.now();
-    final existingIndex = local.indexWhere((r) => r.item.id == item.id);
-    List<Record<T>> updatedLocal;
+    final existingIndex = held.indexWhere((r) => r.item.id == item.id);
+    List<Record<T>> updated;
     if (existingIndex >= 0) {
-      final existing = local[existingIndex];
-      final updated = existing.copyWith(item: item, updatedAt: now, deleted: false);
-      updatedLocal = List.of(local)..[existingIndex] = updated;
+      final existing = held[existingIndex];
+      updated = List.of(held)..[existingIndex] = existing.copyWith(item: item, updatedAt: stampAfter(now, existing), deleted: false);
     } else {
-      final maxOrder = local.isEmpty ? -1.0 : local.map((r) => r.order).reduce(max);
-      updatedLocal = [...local, Record<T>(item: item, order: maxOrder + 1, updatedAt: now)];
+      final maxOrder = held.isEmpty ? -1.0 : held.map((r) => r.order).reduce(max);
+      updated = [...held, Record<T>(item: item, order: maxOrder + 1, updatedAt: now)];
     }
-    await _commit(updatedLocal);
+    await _put(updated);
     return _liveSorted(await _readLocal());
   }
 
@@ -409,33 +460,32 @@ class SyncedStore<T extends Syncable> {
 
   Future<List<T>> _upsertAll(List<T> items) async {
     if (items.isEmpty) return _liveSorted(await _readLocal());
-    final local = List<Record<T>>.of(await _readLocal());
+    final held = List<Record<T>>.of(await _held());
     final now = DateTime.now();
-    var maxOrder = local.isEmpty ? -1.0 : local.map((r) => r.order).reduce(max);
-    final index = {for (var i = 0; i < local.length; i++) local[i].item.id: i};
+    var maxOrder = held.isEmpty ? -1.0 : held.map((r) => r.order).reduce(max);
+    final index = {for (var i = 0; i < held.length; i++) held[i].item.id: i};
     for (final item in items) {
       final at = index[item.id];
       if (at != null) {
-        local[at] = local[at].copyWith(item: item, updatedAt: now, deleted: false);
+        held[at] = held[at].copyWith(item: item, updatedAt: stampAfter(now, held[at]), deleted: false);
       } else {
         maxOrder += 1;
-        index[item.id] = local.length;
-        local.add(Record<T>(item: item, order: maxOrder, updatedAt: now));
+        index[item.id] = held.length;
+        held.add(Record<T>(item: item, order: maxOrder, updatedAt: now));
       }
     }
-    await _commit(local);
+    await _put(held);
     return _liveSorted(await _readLocal());
   }
 
   Future<List<T>> delete(String id) => _serialized(() => _delete(id));
 
   Future<List<T>> _delete(String id) async {
-    final local = await _readLocal();
-    final index = local.indexWhere((r) => r.item.id == id);
-    if (index < 0) return _liveSorted(local);
+    final held = await _held();
+    final index = held.indexWhere((r) => r.item.id == id);
+    if (index < 0) return _liveSorted(await _readLocal());
     final now = DateTime.now();
-    final updatedLocal = List<Record<T>>.of(local)..[index] = local[index].copyWith(deleted: true, updatedAt: now);
-    await _commit(updatedLocal);
+    await _put(List<Record<T>>.of(held)..[index] = held[index].copyWith(deleted: true, updatedAt: stampAfter(now, held[index])));
     return _liveSorted(await _readLocal());
   }
 
@@ -449,40 +499,42 @@ class SyncedStore<T extends Syncable> {
 
   Future<int> _insertMissing(List<Record<T>> records) async {
     if (records.isEmpty) return 0;
-    final merged = merge(await _readLocal(), await _readCloud());
-    final known = {for (final r in merged) r.item.id};
+    final held = await _held();
+    final known = {for (final r in held) r.item.id};
     final missing = [for (final r in records) if (!known.contains(r.item.id)) r];
     if (missing.isEmpty) return 0;
-    await _commit([...merged, ...missing]);
+    await _put([...held, ...missing]);
     return missing.length;
   }
 
   /// One-way intake of records converted from another source. A record is
   /// taken when its id has never been seen here (a tombstone counts as seen),
-  /// or when its `updatedAt` is strictly later than the stored one; anything
-  /// else, equal stamps included, is ignored. The record is kept as given,
-  /// metadata and all. One commit for the batch; returns whether anything
-  /// changed.
-  Future<bool> absorb(List<Record<T>> incoming) => _serialized(() => _absorb(incoming));
+  /// or when it takes the place of the stored one by [replaces]: a strictly
+  /// later `updatedAt`, or an equal one that [prefer] prefers. A store
+  /// without [prefer] ignores equal stamps, and so does every store when
+  /// [strict] is set, which is how an old cloud key is read: it is never
+  /// cleared, so a tie taken from it would be taken again by every device
+  /// and for ever, against whatever this build writes under the same stamp.
+  /// The record is kept as given, metadata and all. One commit for the
+  /// batch; returns whether anything changed.
+  Future<bool> absorb(List<Record<T>> incoming, {bool strict = false}) => _serialized(() => _absorb(incoming, strict: strict));
 
-  Future<bool> _absorb(List<Record<T>> incoming) async {
+  Future<bool> _absorb(List<Record<T>> incoming, {required bool strict}) async {
     // Tombstones too old to keep would be pruned straight away (never, when
     // the store keeps tombstones for ever).
     final candidates = prune(incoming);
     if (candidates.isEmpty) return false;
-    final byId = keyed(await _readLocal() + await _readCloud());
+    final byId = keyed(await _held());
     var changed = false;
     for (final record in candidates) {
       final stored = byId[record.item.id];
-      if (stored == null ||
-          record.updatedAt.isAfter(stored.updatedAt) ||
-          (prefer != null && record.updatedAt == stored.updatedAt && prefer!(record, stored))) {
+      if (stored == null || replaces(record, stored, prefer, strict: strict || prefer == null)) {
         byId[record.item.id] = record;
         changed = true;
       }
     }
     if (!changed) return false;
-    await _commit(byId.values.toList());
+    await _put(byId.values.toList());
     return true;
   }
 
@@ -491,14 +543,13 @@ class SyncedStore<T extends Syncable> {
 
   Future<List<T>> _deleteAll(Iterable<String> ids) async {
     final targets = ids.toSet();
-    final local = await _readLocal();
-    if (!local.any((r) => targets.contains(r.item.id) && !r.deleted)) return _liveSorted(local);
+    final held = await _held();
+    if (!held.any((r) => targets.contains(r.item.id) && !r.deleted)) return _liveSorted(await _readLocal());
     final now = DateTime.now();
-    final updated = [
-      for (final r in local)
-        targets.contains(r.item.id) && !r.deleted ? r.copyWith(deleted: true, updatedAt: now) : r,
-    ];
-    await _commit(updated);
+    await _put([
+      for (final r in held)
+        targets.contains(r.item.id) && !r.deleted ? r.copyWith(deleted: true, updatedAt: stampAfter(now, r)) : r,
+    ]);
     return _liveSorted(await _readLocal());
   }
 
@@ -507,18 +558,17 @@ class SyncedStore<T extends Syncable> {
   Future<List<T>> setOrder(List<String> orderedIds) => _serialized(() => _setOrder(orderedIds));
 
   Future<List<T>> _setOrder(List<String> orderedIds) async {
-    final local = await _readLocal();
     final now = DateTime.now();
-    final updatedLocal = List<Record<T>>.of(local);
+    final updated = List<Record<T>>.of(await _held());
     for (var i = 0; i < orderedIds.length; i++) {
-      final index = updatedLocal.indexWhere((r) => r.item.id == orderedIds[i]);
+      final index = updated.indexWhere((r) => r.item.id == orderedIds[i]);
       if (index < 0) continue;
-      final record = updatedLocal[index];
+      final record = updated[index];
       if (record.order != i.toDouble()) {
-        updatedLocal[index] = record.copyWith(order: i.toDouble(), updatedAt: now);
+        updated[index] = record.copyWith(order: i.toDouble(), updatedAt: stampAfter(now, record));
       }
     }
-    await _commit(updatedLocal);
+    await _put(updated);
     return _liveSorted(await _readLocal());
   }
 
@@ -526,11 +576,7 @@ class SyncedStore<T extends Syncable> {
   /// purposes — the merged local+cloud state, unfiltered by [_liveSorted].
   Future<List<Record<T>>> exportRecords() => _serialized(() => _exportRecords());
 
-  Future<List<Record<T>>> _exportRecords() async {
-    final local = await _readLocal();
-    final cloudRecords = await _readCloud();
-    return prune(merge(local, cloudRecords));
-  }
+  Future<List<Record<T>>> _exportRecords() async => prune(await _held());
 
   /// Imports a previously-exported record set.
   ///
@@ -543,7 +589,10 @@ class SyncedStore<T extends Syncable> {
   /// every existing live item is tombstoned (unless the import re-adds it),
   /// and every imported item is written, all re-stamped with [now]
   /// (defaulting to the current time) so this restore beats any older edit
-  /// already sitting on another device once sync catches up.
+  /// already sitting on another device once sync catches up. A record that
+  /// is held with a later stamp still (a clock that is behind) is stamped
+  /// just after it, see [stampAfter]. "Existing" is everything this store
+  /// knows, the cloud's copy included.
   ///
   /// [replaceWhere] limits a replace to part of the collection: only records
   /// it selects are tombstoned or overwritten, and an imported record is
@@ -554,37 +603,34 @@ class SyncedStore<T extends Syncable> {
       _serialized(() => _importRecords(records, replace: replace, now: now, replaceWhere: replaceWhere));
 
   Future<List<T>> _importRecords(List<Record<T>> records, {required bool replace, DateTime? now, bool Function(Record<T> record)? replaceWhere}) async {
-    var local = await _readLocal();
+    final held = await _held();
     if (!replace) {
-      final updatedLocal = merge(local, records);
-      await _commit(updatedLocal);
+      await _put(merge(held, records));
       return _liveSorted(await _readLocal());
     }
 
     final effectiveNow = now ?? DateTime.now();
+    final heldById = {for (final r in held) r.item.id: r};
     if (replaceWhere != null) {
       // A scope is judged against everything this store knows, cloud-only
       // records included, so one outside the selection is never overwritten.
-      local = keyed([...local, ...await _readCloud()]).values.toList();
-      final localById = {for (final r in local) r.item.id: r};
       records = [
         for (final r in records)
-          if (replaceWhere(r) && (localById[r.item.id] == null || replaceWhere(localById[r.item.id]!))) r,
+          if (replaceWhere(r) && (heldById[r.item.id] == null || replaceWhere(heldById[r.item.id]!))) r,
       ];
     }
     final importedIds = records.map((r) => r.item.id).toSet();
-    // Every local LIVE item not present in the import is tombstoned (soft
+    // Every held LIVE item not present in the import is tombstoned (soft
     // deleted) rather than dropped, so the deletion itself propagates on
     // sync instead of silently reappearing from another device's copy.
-    // Already-deleted local records are left as-is: their tombstone TTL
+    // Already-deleted records are left as-is: their tombstone TTL
     // clock shouldn't reset just because a restore happened to run.
     final tombstoned = [
-      for (final r in local)
-        if (r.deleted || importedIds.contains(r.item.id) || (replaceWhere != null && !replaceWhere(r))) r else r.copyWith(deleted: true, updatedAt: effectiveNow),
+      for (final r in held)
+        if (r.deleted || importedIds.contains(r.item.id) || (replaceWhere != null && !replaceWhere(r))) r else r.copyWith(deleted: true, updatedAt: stampAfter(effectiveNow, r)),
     ];
-    final restamped = [for (final r in records) r.copyWith(updatedAt: effectiveNow)];
-    final updatedLocal = [...tombstoned, ...restamped];
-    await _commit(updatedLocal);
+    final restamped = [for (final r in records) r.copyWith(updatedAt: stampAfter(effectiveNow, heldById[r.item.id]))];
+    await _put(merge(tombstoned, restamped));
     return _liveSorted(await _readLocal());
   }
 

@@ -14,17 +14,25 @@ import 'ledger_plan.dart';
 /// One SQL statement and its arguments.
 typedef _Sql = (String, List<Object?>);
 
+/// How `changes` names the rows of a write that did not start on this device
+/// (records taken in from a sync remote): every row it touches is logged with
+/// this `op` and `body`, so the reader of the log can tell them from the
+/// person's own changes and not send them back where they came from.
+typedef ChangeOrigin = ({String op, String? body});
+
 /// A [LocalRecords] kept in the book database. `write` is row level: it
 /// compares the records with what this store last read and applies only the
 /// difference, in one transaction, logging each row it touches in `changes`.
 /// A row this store never read, because another store (another isolate, the
 /// background refresh) added it since, is never touched, so a write cannot
-/// undo someone else's save. When two stores change the same row the later
-/// writer wins.
+/// undo someone else's save. When two stores change the same row, the record
+/// that wins a merge stays (`SyncedStore.replaces`, with [prefer] for equal
+/// stamps): a save worked out from an older read never puts an older record
+/// over a newer one.
 ///
 /// Subclasses say how one record maps to rows; the diff, the import of the
 /// old JSON file and the log are here.
-abstract class DbRecords<T extends Syncable> implements LocalRecords<T> {
+abstract class DbRecords<T extends Syncable> implements GuardedRecords<T> {
   /// The cloud key of the collection; names it in `documents`, `changes` and
   /// the `imported.*` flag.
   final String collection;
@@ -33,12 +41,35 @@ abstract class DbRecords<T extends Syncable> implements LocalRecords<T> {
   final String filePath;
   final T Function(Map<String, dynamic>) itemFromJson;
 
-  DbRecords({required this.collection, required this.filePath, required this.itemFromJson});
+  /// The tie rule of the store that writes through this, see
+  /// `SyncedStore.prefer`. Null gives an equal stamp to the record being
+  /// written.
+  final bool Function(Record<T> incoming, Record<T> stored)? prefer;
 
-  /// Every stored record, in the order they were first stored. Run inside one
-  /// transaction by the callers, so entries and their lines come from the
-  /// same moment.
-  Future<List<Record<T>>> _selectAll(BookDatabase db);
+  DbRecords({required this.collection, required this.filePath, required this.itemFromJson, this.prefer});
+
+  /// The stored records, in the order they were first stored: all of them, or
+  /// those with an id in [ids]. Run inside one transaction by the callers, so
+  /// entries and their lines come from the same moment.
+  Future<List<Record<T>>> _select(BookDatabase db, Iterable<String>? ids);
+
+  /// How many ids one statement names: well under the number of variables
+  /// SQLite allows in a statement on every platform.
+  static const int _idsPerStatement = 500;
+
+  /// [ids] in runs of [_idsPerStatement], each with the `?, ?, ...` that
+  /// names it in a statement; one run of null for all records.
+  static Iterable<(List<String>?, String)> _runs(Iterable<String>? ids) sync* {
+    if (ids == null) {
+      yield (null, '');
+      return;
+    }
+    final all = ids.toSet().toList();
+    for (var i = 0; i < all.length; i += _idsPerStatement) {
+      final run = all.sublist(i, i + _idsPerStatement > all.length ? all.length : i + _idsPerStatement);
+      yield (run, List.filled(run.length, '?').join(', '));
+    }
+  }
 
   List<_Sql> _insertRecord(Record<T> record);
 
@@ -61,9 +92,13 @@ abstract class DbRecords<T extends Syncable> implements LocalRecords<T> {
     await ensureImported(db);
   }
 
-  /// Every stored record, for a migration that already holds a transaction on
-  /// [db].
-  Future<List<Record<T>>> storedIn(BookDatabase db) => _selectAll(db);
+  /// [_prepare], for a caller that works on [db] through [storedIn] and
+  /// [writeIn] and not through `read` and `write`.
+  Future<void> prepareIn(BookDatabase db) => _prepare(db);
+
+  /// The stored records, all or those with an id in [ids], for a caller that
+  /// already holds a transaction on [db].
+  Future<List<Record<T>>> storedIn(BookDatabase db, {Iterable<String>? ids}) => _select(db, ids);
 
   /// What this store last read or wrote, by id, and the database it came
   /// from. A write is measured against it: the store changes the rows it has
@@ -75,21 +110,27 @@ abstract class DbRecords<T extends Syncable> implements LocalRecords<T> {
   Future<List<Record<T>>> read() async {
     final db = await BookDatabase.open();
     await _prepare(db);
-    final records = await db.transaction(() => _selectAll(db));
+    final records = await db.transaction(() => _select(db, null));
     _remember(db, records);
     return records;
   }
 
   @override
-  Future<void> write(List<Record<T>> records) async {
+  Future<void> write(List<Record<T>> records) => writeGuarded(records);
+
+  /// What this store then remembers as last written is what is stored: a
+  /// record that lost to the stored row is remembered as that row, so the
+  /// next write does not take the row for something to change back.
+  @override
+  Future<List<Record<T>>> writeGuarded(List<Record<T>> records) async {
     final db = await BookDatabase.open();
     await _prepare(db);
     final known = identical(_knownIn, db) ? _known! : <String, Record<T>>{};
     final (changed, dropped) = _difference(known, records);
-    if (changed.isNotEmpty || dropped.isNotEmpty) {
-      await db.transaction(() => _apply(db, changed, dropped));
-    }
-    _remember(db, records);
+    final kept = changed.isEmpty && dropped.isEmpty ? const <String, Never>{} : await db.transaction(() => _apply(db, changed, dropped));
+    final stored = kept.isEmpty ? records : [for (final r in records) kept[r.item.id] ?? r];
+    _remember(db, stored);
+    return stored;
   }
 
   void _remember(BookDatabase db, List<Record<T>> records) {
@@ -103,10 +144,11 @@ abstract class DbRecords<T extends Syncable> implements LocalRecords<T> {
   /// A stored row the caller never read is left alone, and so is one that
   /// already is what would be written, so nothing is logged for it. Runs
   /// inside the transaction the caller holds. With nothing known (a caller
-  /// that only adds, like the migration) nothing is purged.
-  Future<void> writeIn(BookDatabase db, List<Record<T>> records, {Map<String, Record<T>> known = const {}}) async {
+  /// that only adds, like the migration) nothing is purged. [origin] names
+  /// the rows in the log when the records came from somewhere else.
+  Future<void> writeIn(BookDatabase db, List<Record<T>> records, {Map<String, Record<T>> known = const {}, ChangeOrigin? origin}) async {
     final (changed, dropped) = _difference(known, records);
-    await _apply(db, changed, dropped);
+    await _apply(db, changed, dropped, origin: origin);
   }
 
   /// The records that differ from what [known] holds for their id, and the
@@ -126,11 +168,14 @@ abstract class DbRecords<T extends Syncable> implements LocalRecords<T> {
   }
 
   /// Puts [changed] and purges [dropped], logging each row it really
-  /// touches. If another store changed the same row meanwhile, this write
-  /// wins: the later writer's version is the one that stays.
-  Future<void> _apply(BookDatabase db, List<Record<T>> changed, List<String> dropped) async {
-    if (changed.isEmpty && dropped.isEmpty) return;
-    final stored = {for (final r in await _selectAll(db)) r.item.id: r};
+  /// touches. If another store changed the same row meanwhile, the record
+  /// that wins a merge is the one that stays: a changed record that would
+  /// lose to the stored one is not written, and the stored one is returned
+  /// under its id. Only the rows named are read.
+  Future<Map<String, Record<T>>> _apply(BookDatabase db, List<Record<T>> changed, List<String> dropped, {ChangeOrigin? origin}) async {
+    final kept = <String, Record<T>>{};
+    if (changed.isEmpty && dropped.isEmpty) return kept;
+    final stored = {for (final r in await _select(db, [for (final r in changed) r.item.id, ...dropped])) r.item.id: r};
     final at = DateTime.now().toUtc().toIso8601String();
     final statements = <_Sql>[];
     for (final record in changed) {
@@ -142,6 +187,10 @@ abstract class DbRecords<T extends Syncable> implements LocalRecords<T> {
       } else {
         final sameItem = _sameItem(before.item, record.item);
         if (sameItem && _sameMeta(before, record)) continue;
+        if (!SyncedStore.replaces(record, before, prefer)) {
+          kept[record.item.id] = before;
+          continue;
+        }
         statements.addAll(sameItem ? _updateMeta(record) : _updateRecord(record));
         // A move or a re-stamp is logged without the item, which did not
         // change; only the first delete and a revival are worth a name.
@@ -155,7 +204,7 @@ abstract class DbRecords<T extends Syncable> implements LocalRecords<T> {
           op = 'meta';
         }
       }
-      statements.add(_log(at, op, record.item.id, op == 'put' ? jsonEncode(record.item.toJson()) : null));
+      statements.add(origin == null ? _log(at, op, record.item.id, op == 'put' ? jsonEncode(record.item.toJson()) : null) : _log(at, origin.op, record.item.id, origin.body));
     }
     for (final id in dropped) {
       if (!stored.containsKey(id)) continue;
@@ -163,6 +212,7 @@ abstract class DbRecords<T extends Syncable> implements LocalRecords<T> {
       statements.add(_log(at, 'purge', id, null));
     }
     await _run(db, statements);
+    return kept;
   }
 
   bool _same(Record<T>? a, Record<T> b) => a != null && _sameItem(a.item, b.item) && _sameMeta(a, b);
@@ -170,8 +220,11 @@ abstract class DbRecords<T extends Syncable> implements LocalRecords<T> {
   bool _sameMeta(Record<T> a, Record<T> b) => a.order == b.order && a.deleted == b.deleted && _stamp(a) == _stamp(b);
 
   /// Folds the collection's JSON file into the database the first time it is
-  /// used, the way `SyncedStore.merge` folds two copies: per id the newer
-  /// `updatedAt` wins, whole, so a stored record is never half replaced.
+  /// used, by the rule of a merge (`SyncedStore.replaces`): of two records
+  /// with one id in the file the merge's winner is taken, and it replaces a
+  /// stored record only when its `updatedAt` is strictly later (the file is
+  /// an old source that flows one way), whole, so a stored record is never
+  /// half replaced.
   /// Ids, order, times and deleted flags are kept. The file is left where it
   /// is. All of it, flag included, is one transaction, so a stop half way
   /// imports nothing and the next start tries again.
@@ -189,18 +242,18 @@ abstract class DbRecords<T extends Syncable> implements LocalRecords<T> {
     final newest = <String, Record<T>>{};
     for (final record in legacy) {
       final seen = newest[record.item.id];
-      if (seen == null || !seen.updatedAt.isAfter(record.updatedAt)) newest[record.item.id] = record;
+      if (seen == null || SyncedStore.replaces(record, seen, prefer)) newest[record.item.id] = record;
     }
     await db.transaction(() async {
       if (await db.hasFlag(_flag)) return;
-      final stored = {for (final r in await _selectAll(db)) r.item.id: r};
+      final stored = {for (final r in await _select(db, null)) r.item.id: r};
       final statements = <_Sql>[];
       var applied = 0;
       for (final record in newest.values) {
         final before = stored[record.item.id];
         if (before == null) {
           statements.addAll(_insertRecord(record));
-        } else if (record.updatedAt.isAfter(before.updatedAt)) {
+        } else if (SyncedStore.replaces(record, before, prefer, strict: true)) {
           statements.addAll(_updateRecord(record));
         } else {
           continue;
@@ -262,14 +315,19 @@ abstract class DbRecords<T extends Syncable> implements LocalRecords<T> {
 /// Accounts, recurring payments and settings: one row each, the item's JSON
 /// as the body.
 class DocumentRecords<T extends Syncable> extends DbRecords<T> {
-  DocumentRecords({required super.collection, required super.filePath, required super.itemFromJson});
+  DocumentRecords({required super.collection, required super.filePath, required super.itemFromJson, super.prefer});
 
   @override
-  Future<List<Record<T>>> _selectAll(BookDatabase db) async {
-    final rows = await db
-        .customSelect('SELECT id, body, sort, updated_at, deleted FROM documents WHERE collection = ? ORDER BY rowid', variables: [Variable<String>(collection)])
-        .get();
-    return [for (final row in rows) _assemble(jsonDecode(row.data['body'] as String) as Map<String, dynamic>, row.data)];
+  Future<List<Record<T>>> _select(BookDatabase db, Iterable<String>? ids) async {
+    final out = <Record<T>>[];
+    for (final (run, marks) in DbRecords._runs(ids)) {
+      final rows = await db.customSelect(
+        'SELECT id, body, sort, updated_at, deleted FROM documents WHERE collection = ?${run == null ? '' : ' AND id IN ($marks)'} ORDER BY rowid',
+        variables: [Variable<String>(collection), ...?run?.map(Variable<String>.new)],
+      ).get();
+      out.addAll([for (final row in rows) _assemble(jsonDecode(row.data['body'] as String) as Map<String, dynamic>, row.data)]);
+    }
+    return out;
   }
 
   @override
@@ -306,11 +364,11 @@ class DocumentRecords<T extends Syncable> extends DbRecords<T> {
 /// are unique across collections (the id is the table's key), which holds for
 /// the ids the app makes.
 class EntryRecords extends DbRecords<BookEntry> {
-  EntryRecords({required super.collection, required super.filePath}) : super(itemFromJson: BookEntry.fromJson);
+  EntryRecords({required super.collection, required super.filePath, super.prefer}) : super(itemFromJson: BookEntry.fromJson);
 
   /// For a model that reads keys `BookEntry` does not.
   @visibleForTesting
-  EntryRecords.forTesting({required super.collection, required super.filePath, required super.itemFromJson});
+  EntryRecords.forTesting({required super.collection, required super.filePath, required super.itemFromJson, super.prefer});
 
   /// `BookEntry.toJson` key and the column that holds it.
   static const List<(String, String)> _textColumns = [
@@ -341,40 +399,43 @@ class EntryRecords extends DbRecords<BookEntry> {
   ];
 
   @override
-  Future<List<Record<BookEntry>>> _selectAll(BookDatabase db) async {
-    final lineRows = await db
-        .customSelect(
-          'SELECT l.entry_id, l.idx, l.account_id, l.amount, l.currency, l.base_amount, l.quantity, l.commodity, l.extra '
-          'FROM entry_lines l JOIN entries e ON e.id = l.entry_id WHERE e.collection = ? ORDER BY l.entry_id, l.idx',
-          variables: [Variable<String>(collection)],
-        )
-        .get();
-    final linesByEntry = <String, List<Map<String, dynamic>>>{};
-    for (final row in lineRows) {
-      final data = row.data;
-      linesByEntry.putIfAbsent(data['entry_id'] as String, () => []).add({
-        for (final (key, column, _) in _lineColumns) key: data[column],
-        for (final (key, column, _) in _optionalLineColumns)
-          if (data[column] != null) key: data[column],
-        ..._decode(data['extra']),
-      });
+  Future<List<Record<BookEntry>>> _select(BookDatabase db, Iterable<String>? ids) async {
+    final out = <Record<BookEntry>>[];
+    for (final (run, marks) in DbRecords._runs(ids)) {
+      final only = run == null ? '' : ' AND e.id IN ($marks)';
+      final variables = [Variable<String>(collection), ...?run?.map(Variable<String>.new)];
+      final lineRows = await db
+          .customSelect(
+            'SELECT l.entry_id, l.idx, l.account_id, l.amount, l.currency, l.base_amount, l.quantity, l.commodity, l.extra '
+            'FROM entry_lines l JOIN entries e ON e.id = l.entry_id WHERE e.collection = ?$only ORDER BY l.entry_id, l.idx',
+            variables: variables,
+          )
+          .get();
+      final linesByEntry = <String, List<Map<String, dynamic>>>{};
+      for (final row in lineRows) {
+        final data = row.data;
+        linesByEntry.putIfAbsent(data['entry_id'] as String, () => []).add({
+          for (final (key, column, _) in _lineColumns) key: data[column],
+          for (final (key, column, _) in _optionalLineColumns)
+            if (data[column] != null) key: data[column],
+          ..._decode(data['extra']),
+        });
+      }
+      final rows = await db.customSelect('SELECT e.* FROM entries e WHERE e.collection = ?$only ORDER BY e.rowid', variables: variables).get();
+      for (final row in rows) {
+        final data = row.data;
+        final id = data['id'] as String;
+        final item = <String, dynamic>{'id': id};
+        for (final (key, column) in _textColumns) {
+          final value = data[column];
+          if (value != null) item[key] = value;
+        }
+        item['lines'] = linesByEntry[id] ?? <Map<String, dynamic>>[];
+        item.addAll(_decode(data['extra']));
+        out.add(_assemble(item, data));
+      }
     }
-    final rows = await db.customSelect('SELECT * FROM entries WHERE collection = ? ORDER BY rowid', variables: [Variable<String>(collection)]).get();
-    return [
-      for (final row in rows)
-        () {
-          final data = row.data;
-          final id = data['id'] as String;
-          final item = <String, dynamic>{'id': id};
-          for (final (key, column) in _textColumns) {
-            final value = data[column];
-            if (value != null) item[key] = value;
-          }
-          item['lines'] = linesByEntry[id] ?? <Map<String, dynamic>>[];
-          item.addAll(_decode(data['extra']));
-          return _assemble(item, data);
-        }(),
-    ];
+    return out;
   }
 
   @override
