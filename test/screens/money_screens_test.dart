@@ -701,6 +701,58 @@ void main() {
     expect(find.descendant(of: find.byKey(const ValueKey('importRowAccount')), matching: find.text('Visa Signature')), findsOneWidget);
   });
 
+  testWidgets('an imported row can be set as lent to someone new or as a repayment, and taken back', (tester) async {
+    await tester.runAsync(seed);
+    size(tester, const Size(390, 2800));
+    final l10n = await AppLocalizations.delegate.load(const Locale('en'));
+    await tester.pumpWidget(wrap(const ImportReviewScreen(), const Locale('en')));
+    await tester.pump(const Duration(milliseconds: 300));
+
+    // Money out: lent to someone who is not in the book yet.
+    await tester.tap(find.text('PANDA RIYADH'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('importPerson-lent')), findsOneWidget);
+    expect(find.byKey(const ValueKey('importPerson-borrowed')), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('importPerson-lent')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.descendant(of: find.byKey(const ValueKey('importPersonName')), matching: find.byType(TextField)), 'Omar');
+    await tester.tap(find.byKey(const ValueKey('importPersonSave')));
+    await tester.pump();
+    // Saving the new person is real work on the book.
+    for (var i = 0; i < 40 && !money.state.accounts.any((a) => a.name == 'Omar'); i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.pump();
+    }
+    await tester.pumpAndSettle();
+    expect(money.state.accounts.where((a) => a.name == 'Omar').single.type, AccountType.receivable);
+    expect(find.textContaining('${l10n.tplLent} · Omar'), findsOneWidget);
+
+    // It is ticked with the name under it, and tapping it again takes it back.
+    await tester.tap(find.text('PANDA RIYADH'));
+    await tester.pumpAndSettle();
+    final lent = find.byKey(const ValueKey('importPerson-lent'));
+    expect(find.descendant(of: lent, matching: find.text('Omar')), findsOneWidget);
+    expect(find.descendant(of: lent, matching: find.byIcon(Icons.check)), findsOneWidget);
+    await tester.tap(lent);
+    await tester.pumpAndSettle();
+    expect(find.descendant(of: lent, matching: find.byIcon(Icons.check)), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('importRowDone')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('${l10n.tplLent} · Omar'), findsNothing);
+
+    // Money in: a repayment from someone who owes.
+    await tester.tap(find.text('SALARY NOVEMBER'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('importPerson-lent')), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('importPerson-repaymentIn')));
+    await tester.pumpAndSettle();
+    final faisal = money.state.accounts.firstWhere((a) => a.name == 'Faisal' && a.type == AccountType.receivable);
+    await tester.tap(find.byKey(ValueKey('importPersonPick-${faisal.id}')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('${l10n.tplRepaymentIn} · Faisal'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('the import review in Arabic on a narrow phone: the balance offer fits', (tester) async {
     await tester.runAsync(seed);
     size(tester, const Size(320, 2400));

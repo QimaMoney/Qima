@@ -17,6 +17,7 @@ import '../../models/entry_builder.dart';
 import '../../models/import_plan.dart';
 import '../../models/message_shape.dart';
 import '../../models/minor_units.dart';
+import '../../models/money_settings.dart';
 import '../../models/statement_facts.dart';
 import '../../models/statement_reader.dart';
 import '../../services/import/bank_messages.dart';
@@ -435,7 +436,7 @@ class _ImportReviewScreenState extends State<ImportReviewScreen> {
                 currency: c.row.currency ?? account.currency ?? '',
                 ticked: _tickedOf(c),
                 isIn: _isIn[c.key] ?? c.row.isIn,
-                categoryName: _categoryName(l10n, money.book.accounts[_category[c.key] ?? c.categoryId] ?? money.book.accounts.values.first),
+                categoryName: _categoryName(l10n, money.book.accounts[_category[c.key] ?? c.categoryId] ?? money.book.accounts.values.first, isIn: _isIn[c.key] ?? c.row.isIn),
                 onTicked: (v) => setState(() => _ticked[c.key] = v),
                 onTap: () => _edit(c, money, account, item, accounts),
                 onAdd: _saving ? null : () => _addOne(c),
@@ -501,6 +502,43 @@ class _ImportReviewScreenState extends State<ImportReviewScreen> {
     setState(() => _accountOf[item.id] = picked);
   }
 
+  static bool _isRepayment(EntryTemplate t) => t == EntryTemplate.repaymentIn || t == EntryTemplate.repaymentOut;
+
+  /// Asks who a row was lent to, borrowed from or settled with. A repayment
+  /// picks from [known], the people something is open with; lending and
+  /// borrowing take a name, which may be someone new. Null when the person
+  /// backs out.
+  Future<BookAccount?> _pickPerson(BuildContext context, EntryTemplate template, List<BookAccount> known, String currency) async {
+    final l10n = AppLocalizations.of(context)!;
+    final money = context.read<MoneyCubit>();
+    if (_isRepayment(template)) {
+      final id = await showModalBottomSheet<String>(
+        context: context,
+        showDragHandle: true,
+        useSafeArea: true,
+        builder: (sheet) => SafeArea(
+          child: ListView(shrinkWrap: true, children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(DS.spaceMD, 0, DS.spaceMD, DS.spaceXS),
+              child: Text(l10n.template(template), style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+            ),
+            for (final a in known)
+              ListTile(
+                key: ValueKey('importPersonPick-${a.id}'),
+                leading: Icon(MoneyIcons.account(a)),
+                title: Text(l10n.accountName(a)),
+                onTap: () => Navigator.of(sheet).pop(a.id),
+              ),
+          ]),
+        ),
+      );
+      return known.where((a) => a.id == id).firstOrNull;
+    }
+    final name = await showDialog<String>(context: context, builder: (_) => _PersonNameDialog(title: l10n.template(template)));
+    if (name == null || name.isEmpty) return null;
+    return money.personAccount(name, currency, owesMe: template == EntryTemplate.lent);
+  }
+
   /// Asks which of [accounts] a message or a row belongs to; null when the
   /// person backs out.
   Future<String?> _pickAccount(BuildContext context, BookAccount current, List<BookAccount> accounts) {
@@ -533,8 +571,11 @@ class _ImportReviewScreenState extends State<ImportReviewScreen> {
         for (var i = 0; i < item.rows.length; i++) _edited['${item.id}:$i'] ?? item.rows[i],
       ];
 
-  String _categoryName(AppLocalizations l10n, BookAccount a) =>
-      a.side.onBalanceSheet ? l10n.importTransferWith(l10n.accountName(a)) : l10n.accountName(a);
+  String _categoryName(AppLocalizations l10n, BookAccount a, {required bool isIn}) {
+    final person = ImportPlanner.personTemplate(a, isIn: isIn);
+    if (person != null) return '${l10n.template(person)} · ${l10n.accountName(a)}';
+    return a.side.onBalanceSheet ? l10n.importTransferWith(l10n.accountName(a)) : l10n.accountName(a);
+  }
 
   /// Lets the person correct a row before it is added: its name, amount,
   /// date and direction, the card or account it was on, and what it is (a
@@ -564,7 +605,14 @@ class _ImportReviewScreenState extends State<ImportReviewScreen> {
         final others = ImportPlanner.counterparts(money.balanceAccounts, paidWith);
         // Money back from a shop keeps its spending category (a refund).
         final options = isIn ? [...cats, ...money.categories(AccountSide.spending)] : cats;
-        if (!options.any((a) => a.id == category) && !others.any((a) => a.id == category)) category = cats.firstOrNull?.id ?? category;
+        // People in the account's currency: who owes the person, and whom
+        // the person owes.
+        final people = [
+          for (final a in money.accounts)
+            if (!a.archived && a.currency == paidWith.currency && (a.type == AccountType.receivable || a.type == AccountType.payable)) a,
+        ];
+        final withPerson = people.where((a) => a.id == category).firstOrNull;
+        if (!options.any((a) => a.id == category) && !others.any((a) => a.id == category) && withPerson == null) category = cats.firstOrNull?.id ?? category;
         StatementRow? edited() {
           final minor = parseMinor(amount.text, currency);
           if (minor == null || minor <= 0) return null;
@@ -645,7 +693,7 @@ class _ImportReviewScreenState extends State<ImportReviewScreen> {
                   selected: {isIn},
                   onSelectionChanged: (v) => setSheet(() {
                     isIn = v.first;
-                    if (others.any((a) => a.id == category)) return;
+                    if (others.any((a) => a.id == category) || withPerson != null) return;
                     category = guessed();
                   }),
                 ),
@@ -674,6 +722,28 @@ class _ImportReviewScreenState extends State<ImportReviewScreen> {
               if (others.isNotEmpty) ...[
                 Padding(padding: const EdgeInsets.symmetric(horizontal: DS.spaceMD), child: Text(l10n.importBetweenAccounts, style: heading)),
                 for (final a in others) otherTile(a),
+                const SizedBox(height: DS.spaceSM),
+              ],
+              if (money.settings.has(MoneyFeature.people)) ...[
+                Padding(padding: const EdgeInsets.symmetric(horizontal: DS.spaceMD), child: Text(l10n.featPeople, style: heading)),
+                // Money out is lent or pays someone back; money in is
+                // borrowed or someone paying back. A repayment needs someone
+                // there is something open with.
+                for (final template in isIn ? const [EntryTemplate.borrowed, EntryTemplate.repaymentIn] : const [EntryTemplate.lent, EntryTemplate.repaymentOut])
+                  if (!_isRepayment(template) || people.any((a) => ImportPlanner.personTemplate(a, isIn: isIn) == template))
+                    ListTile(
+                      key: ValueKey('importPerson-${template.name}'),
+                      leading: Icon(MoneyIcons.template(template)),
+                      title: Text(l10n.template(template)),
+                      subtitle: withPerson != null && ImportPlanner.personTemplate(withPerson, isIn: isIn) == template ? Text(l10n.accountName(withPerson)) : null,
+                      trailing: withPerson != null && ImportPlanner.personTemplate(withPerson, isIn: isIn) == template ? Icon(Icons.check, color: sheet.colors.brandText) : null,
+                      onTap: () async {
+                        // Tapping the ticked one takes it back, as for a move.
+                        if (withPerson != null && ImportPlanner.personTemplate(withPerson, isIn: isIn) == template) return setSheet(() => category = guessed());
+                        final person = await _pickPerson(sheet, template, [for (final a in people) if (ImportPlanner.personTemplate(a, isIn: isIn) == template) a], paidWith.currency ?? currency);
+                        if (person != null && sheet.mounted) done(person.id);
+                      },
+                    ),
                 const SizedBox(height: DS.spaceSM),
               ],
               Padding(padding: const EdgeInsets.symmetric(horizontal: DS.spaceMD), child: Text(l10n.importCategory, style: heading)),
@@ -963,6 +1033,39 @@ class _ImportReviewScreenState extends State<ImportReviewScreen> {
 
 /// Owns the row editor's text fields for as long as the sheet is on
 /// screen, closing animation included.
+/// Asks for a person's name, offering the people already in the book.
+class _PersonNameDialog extends StatefulWidget {
+  final String title;
+
+  const _PersonNameDialog({required this.title});
+
+  @override
+  State<_PersonNameDialog> createState() => _PersonNameDialogState();
+}
+
+class _PersonNameDialogState extends State<_PersonNameDialog> {
+  final _name = TextEditingController();
+
+  @override
+  void dispose() {
+    _name.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    return AlertDialog(
+      title: Text(widget.title),
+      content: PersonField(key: const ValueKey('importPersonName'), controller: _name, label: l10n.entryPerson),
+      actions: [
+        TextButton(onPressed: () => Navigator.of(context).pop(), child: Text(l10n.commonCancel)),
+        FilledButton(key: const ValueKey('importPersonSave'), onPressed: () => Navigator.of(context).pop(_name.text.trim()), child: Text(l10n.commonDone)),
+      ],
+    );
+  }
+}
+
 class _SheetFields extends StatefulWidget {
   final String name;
   final String amount;
