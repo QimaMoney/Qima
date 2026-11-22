@@ -1623,6 +1623,37 @@ void main() {
       expect(find.text('Pets'), findsOneWidget, reason: 'the new category is the one picked');
     });
 
+    testWidgets('Budget has a New budget row first: it makes the category, then asks for its amount', (tester) async {
+      await tester.runAsync(seed);
+      final l10n = await AppLocalizations.delegate.load(const Locale('en'));
+      await tester.pumpWidget(wrap(const BudgetScreen(), const Locale('en')));
+      await tester.pumpAndSettle();
+      // Seen without scrolling.
+      expect(tester.getTopLeft(find.byKey(const ValueKey('budgetAdd'))).dy, lessThan(tester.getTopLeft(find.text('Groceries')).dy));
+      await tester.tap(find.byKey(const ValueKey('budgetAdd')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const ValueKey('categoryName')), 'Pets');
+      await tester.tap(find.text(l10n.holdingsSave).last);
+      for (var i = 0; i < 40 && !money.state.accounts.any((a) => a.name == 'Pets'); i++) {
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+        await tester.pump();
+      }
+      await tester.pumpAndSettle();
+      final pets = money.state.accounts.firstWhere((a) => a.name == 'Pets');
+      expect(pets.side, AccountSide.spending);
+      // The amount is asked for straight away.
+      expect(find.text(l10n.budgetFor('Pets')), findsOneWidget);
+      await tester.enterText(find.widgetWithText(TextField, l10n.budgetMonthly), '300');
+      await tester.tap(find.text(l10n.holdingsSave).last);
+      for (var i = 0; i < 40 && money.state.settings.budgets[pets.id] == null; i++) {
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+        await tester.pump();
+      }
+      await tester.pumpAndSettle();
+      expect(money.state.settings.budgets[pets.id], sar(300));
+      expect(tester.takeException(), isNull);
+    });
+
     testWidgets('Categories has a clear add row for each side', (tester) async {
       await tester.runAsync(seed);
       size(tester, const Size(390, 2000));

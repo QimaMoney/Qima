@@ -1236,6 +1236,7 @@
   "budgetMonthly": "شهريًا",
   "budgetZeroHelp": "الصفر يحذفها.",
   "budgetNone": "بلا ميزانية",
+  "budgetAdd": "ميزانية جديدة",
   "budgetOf": "الميزانية {amount}",
   "budgetSet": "حدد ميزانية",
   "budgetTotal": "ميزانية هذا الشهر",

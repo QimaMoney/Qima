@@ -7331,6 +7331,12 @@ abstract class AppLocalizations {
   /// **'No budget'**
   String get budgetNone;
 
+  /// No description provided for @budgetAdd.
+  ///
+  /// In en, this message translates to:
+  /// **'New budget'**
+  String get budgetAdd;
+
   /// No description provided for @budgetOf.
   ///
   /// In en, this message translates to:

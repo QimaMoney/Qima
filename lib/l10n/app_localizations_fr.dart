@@ -4267,6 +4267,9 @@ class AppLocalizationsFr extends AppLocalizations {
   String get budgetNone => 'Sans budget';
 
   @override
+  String get budgetAdd => 'Nouveau budget';
+
+  @override
   String budgetOf(String amount) {
     return 'Budget $amount';
   }

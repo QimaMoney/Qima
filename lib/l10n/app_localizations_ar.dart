@@ -4250,6 +4250,9 @@ class AppLocalizationsAr extends AppLocalizations {
   String get budgetNone => 'بلا ميزانية';
 
   @override
+  String get budgetAdd => 'ميزانية جديدة';
+
+  @override
   String budgetOf(String amount) {
     return 'الميزانية $amount';
   }

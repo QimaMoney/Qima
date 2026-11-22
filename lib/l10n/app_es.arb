@@ -1236,6 +1236,7 @@
   "budgetMonthly": "Cada mes",
   "budgetZeroHelp": "Cero lo elimina.",
   "budgetNone": "Sin presupuesto",
+  "budgetAdd": "Nuevo presupuesto",
   "budgetOf": "Presupuesto {amount}",
   "budgetSet": "Fijar presupuesto",
   "budgetTotal": "Presupuesto de este mes",

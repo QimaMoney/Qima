@@ -2759,6 +2759,7 @@
   "budgetMonthly": "Each month",
   "budgetZeroHelp": "Zero removes it.",
   "budgetNone": "No budget",
+  "budgetAdd": "New budget",
   "budgetOf": "Budget {amount}",
   "@budgetOf": {
     "placeholders": {
