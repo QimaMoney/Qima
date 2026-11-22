@@ -1,6 +1,6 @@
 import 'import_inbox.dart';
 
-ImportInbox createImportInbox() => _NoInbox();
+ImportInbox createImportInbox({Future<String?> Function()? extra}) => _NoInbox();
 
 class _NoInbox implements ImportInbox {
   @override

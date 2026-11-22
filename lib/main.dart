@@ -92,8 +92,9 @@ class _QimaAppState extends State<QimaApp> {
       baseCurrency: () => _cubit.state.baseCurrency,
       rates: () => _cubit.state.rates,
     );
+    _aiApps = AiApps(app: _cubit, money: _money);
     _import = ImportCubit(
-      inbox: createImportInbox(),
+      inbox: createImportInbox(extra: _aiApps.inboxPath),
       recognition: _cubit.textRecognition,
       wasImported: _money.wasImported,
       assist: () => _cubit.assist,
@@ -101,7 +102,7 @@ class _QimaAppState extends State<QimaApp> {
       languages: () => StatementFiles.languagesFor(
           _cubit.state.appLanguage.localeIdentifier ?? WidgetsBinding.instance.platformDispatcher.locale.languageCode),
     );
-    _aiApps = AiApps(app: _cubit, money: _money);
+    _aiApps.onAdded = () => unawaited(_import.checkInbox());
     _cubit.onBookChanged = (key) => key == null ? _money.load() : _money.adoptCloudChanges(key);
     _tapSubscription = notificationTapPayloads.stream.listen(_handleNotificationTap);
     // The money ledger loads after init, once the cloud backend is settled

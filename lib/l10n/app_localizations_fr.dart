@@ -5126,6 +5126,14 @@ class AppLocalizationsFr extends AppLocalizations {
       'Le connecteur n’est pas inclus dans cette copie de Qima. Installez Qima depuis le store ou le site pour l’utiliser.';
 
   @override
+  String get aiAppsAddToggle =>
+      'Autoriser les apps d’IA à ajouter des opérations';
+
+  @override
+  String get aiAppsAddFooter =>
+      'Une app d’IA peut transmettre des opérations à Qima. Elles attendent dans la vérification de l’import, et rien n’est enregistré tant que vous ne les avez pas vérifiées et choisi le compte. Désactiver cette option conserve ce qui attend déjà.';
+
+  @override
   String get setupWelcomeTitle => 'Préparons Qima pour vous';
 
   @override

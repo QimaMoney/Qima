@@ -5109,6 +5109,14 @@ class AppLocalizationsAr extends AppLocalizations {
       'الموصّل غير موجود في هذه النسخة من قيمة. ثبّت قيمة من المتجر أو من الموقع لاستخدامه.';
 
   @override
+  String get aiAppsAddToggle =>
+      'السماح لتطبيقات الذكاء الاصطناعي بإضافة معاملات';
+
+  @override
+  String get aiAppsAddFooter =>
+      'يمكن لتطبيق الذكاء الاصطناعي أن يسلّم معاملات إلى قيمة. تنتظر في مراجعة الاستيراد، ولا يُحفظ شيء حتى تراجعها وتختار الحساب. إيقاف هذا الخيار يُبقي ما ينتظر المراجعة.';
+
+  @override
   String get setupWelcomeTitle => 'لنجهّز قيمة لك';
 
   @override

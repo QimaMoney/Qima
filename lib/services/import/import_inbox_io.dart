@@ -8,7 +8,7 @@ import 'package:uuid/uuid.dart';
 
 import 'import_inbox.dart';
 
-ImportInbox createImportInbox() => FolderInbox();
+ImportInbox createImportInbox({Future<String?> Function()? extra}) => FolderInbox(extra: extra);
 
 /// Folders of `<id>/<file>` plus `<id>/meta.json` (`name`, `receivedAt`,
 /// and `kind: message` with an optional `sender` for a bank message that
@@ -22,7 +22,10 @@ class FolderInbox implements ImportInbox {
   /// For tests: the folders to use instead of the app's.
   final List<Directory>? folders;
 
-  FolderInbox({this.folders});
+  /// One more folder to read, beside the app's own; see [createImportInbox].
+  final Future<String?> Function()? extra;
+
+  FolderInbox({this.folders, this.extra});
 
   Future<Directory> _own() async {
     final f = folders;
@@ -45,6 +48,12 @@ class FolderInbox implements ImportInbox {
       } on PlatformException catch (e) {
         debugPrint('ShareInbox: $e');
       }
+    }
+    try {
+      final more = await extra?.call();
+      if (more != null) out.add(Directory(more));
+    } catch (e) {
+      debugPrint('ImportInbox: extra folder: $e');
     }
     return out;
   }
