@@ -156,9 +156,21 @@ enum DocumentReader {
 
   /// Whether a page's own text can't be trusted: some PDFs store Arabic as
   /// separate letter shapes (each one a "word"), or lay labels over values
-  /// so their letters interleave ("Accﻘﺎﻕ"). Figures read from such text
-  /// can be wrong, so the page is read from its picture instead.
+  /// so their letters interleave ("Accﻘﺎﻕ"), or store a whole column as one
+  /// word several lines tall with digits lost where its lines meet. Figures
+  /// read from such text can be wrong, so the page is read from its picture
+  /// instead.
   static func jumbled(_ tokens: [[String: Any]]) -> Bool {
+    // A word is one line tall: one that spans several lines and runs two
+    // figures together ("269.99159.99") is a column stored as a word.
+    let heights = tokens.compactMap { $0["h"] as? Double }.filter { $0 > 0 }.sorted()
+    if heights.count >= 10, let glued = try? NSRegularExpression(pattern: "\\d[.,]\\d+[.,]\\d") {
+      let median = heights[heights.count / 2]
+      for token in tokens {
+        guard let h = token["h"] as? Double, h > median * 3, let text = token["t"] as? String, !text.contains(" ") else { continue }
+        if glued.firstMatch(in: text, range: NSRange(location: 0, length: (text as NSString).length)) != nil { return true }
+      }
+    }
     let words = tokens.flatMap { (($0["t"] as? String) ?? "").split(separator: " ") }
     guard words.count >= 20 else { return false }
     func isArabic(_ u: Unicode.Scalar) -> Bool {

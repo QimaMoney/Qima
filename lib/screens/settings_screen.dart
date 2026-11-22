@@ -815,7 +815,23 @@ class _AiAppsSectionState extends State<_AiAppsSection> {
               padding: const EdgeInsets.only(bottom: DS.spaceSM),
               child: Text(l10n.aiAppsFooter, style: footnote),
             ),
-            if (on) ..._setup(ai, l10n, colors, footnote),
+            if (on) ...[
+              ValueListenableBuilder<bool>(
+                valueListenable: ai.adding,
+                builder: (context, adding, _) => SwitchListTile.adaptive(
+                  key: const Key('aiAppsAddToggle'),
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(l10n.aiAppsAddToggle, style: TextStyle(color: colors.textPrimary)),
+                  value: adding,
+                  onChanged: ai.setAdding,
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(bottom: DS.spaceSM),
+                child: Text(l10n.aiAppsAddFooter, style: footnote),
+              ),
+              ..._setup(ai, l10n, colors, footnote),
+            ],
           ],
         ),
       ),

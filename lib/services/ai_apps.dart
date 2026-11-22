@@ -11,6 +11,7 @@ import '../blocs/holdings_cubit.dart';
 import '../blocs/market_cubit.dart';
 import '../blocs/money_cubit.dart';
 import '../blocs/settings_cubit.dart';
+import '../mcp/ai_inbox.dart';
 import '../mcp/snapshot_location.dart';
 import '../models/ai_snapshot.dart';
 
@@ -20,10 +21,17 @@ import '../models/ai_snapshot.dart';
 /// answer questions about the person's money. The helper never sees Qima's
 /// own files, and turning this off deletes the copy.
 ///
-/// The setting is per computer and never syncs: sharing with an AI app on
+/// "Let AI apps add transactions" goes with it: while that is on, the
+/// helper may leave transactions in a folder beside the copy ([AiInbox]),
+/// which the import inbox reads like any shared statement. The person
+/// reviews them before anything is saved, and the helper still never
+/// touches the books.
+///
+/// The settings are per computer and never sync: sharing with an AI app on
 /// one Mac shouldn't turn it on for another.
 class AiApps {
   static const String _enabledKey = 'aiAppsEnabled';
+  static const String _addingKey = 'aiAppsAddEnabled';
   static const Duration _settle = Duration(seconds: 2);
   static const MethodChannel _macBridge = MethodChannel('com.devlabtechnologies.qima/widgets');
 
@@ -37,6 +45,17 @@ class AiApps {
   final ValueNotifier<bool> enabled = ValueNotifier(false);
 
   final List<StreamSubscription<Object?>> _subscriptions = [];
+
+  /// Whether AI apps may leave transactions for review. Only ever on while
+  /// [enabled] is.
+  final ValueNotifier<bool> adding = ValueNotifier(false);
+
+  /// Called when an AI app left transactions, so the import inbox is read
+  /// without waiting for the app to come back to the front.
+  void Function()? onAdded;
+
+  StreamSubscription<FileSystemEvent>? _inboxSub;
+  Timer? _addedSoon;
   Timer? _pending;
   String? _lastWritten;
 
@@ -65,14 +84,20 @@ class AiApps {
       _subscriptions.add(source.listen((_) => _schedule()));
     }
     if (enabled.value) _schedule();
+    adding.value = enabled.value && (settings.preferences.local.getBool(_addingKey) ?? false);
+    // Also when off, so a marker left by a crash never outlives the setting.
+    unawaited(_serial(() => _accept(adding.value)));
   }
 
   Future<void> dispose() async {
     _pending?.cancel();
+    _addedSoon?.cancel();
+    await _inboxSub?.cancel();
     for (final subscription in _subscriptions) {
       await subscription.cancel();
     }
     enabled.dispose();
+    adding.dispose();
   }
 
   Future<void> setEnabled(bool value) async {
@@ -83,7 +108,55 @@ class AiApps {
     if (value) {
       await writeNow();
     } else {
+      await setAdding(false);
       await _serial(_delete);
+    }
+  }
+
+  /// Lets AI apps leave transactions for review, or stops them. What they
+  /// already left stays in the import inbox for the person.
+  Future<void> setAdding(bool value) async {
+    if (!supported) return;
+    final on = value && enabled.value;
+    await settings.preferences.local.setBool(_addingKey, on);
+    adding.value = on;
+    await _serial(() => _accept(on));
+  }
+
+  /// The folder AI apps leave transactions in, whether or not they may
+  /// right now; null where Qima has no desktop app.
+  Future<String?> inboxPath() async {
+    final snapshot = await snapshotPath();
+    return snapshot == null ? null : AiInbox.folderFor(snapshot);
+  }
+
+  /// Puts the marker the helper looks for in place, or takes it away, and
+  /// watches the folder while it is there.
+  Future<void> _accept(bool on) async {
+    await _inboxSub?.cancel();
+    _inboxSub = null;
+    try {
+      final path = await inboxPath();
+      if (path == null) return;
+      final folder = Directory(path);
+      final marker = File('$path${Platform.pathSeparator}${AiInbox.marker}');
+      if (!on) {
+        if (await marker.exists()) await marker.delete();
+        return;
+      }
+      await folder.create(recursive: true);
+      await marker.writeAsString('', flush: true);
+      _inboxSub = folder.watch().listen((_) {
+        // A batch is a few files written and a rename; tell the app once.
+        _addedSoon?.cancel();
+        _addedSoon = Timer(const Duration(milliseconds: 500), () => onAdded?.call());
+      }, onError: (Object e) => debugPrint('AiApps: watching the folder failed: $e'));
+    } on FileSystemException catch (e) {
+      debugPrint('AiApps: could not ${on ? 'open' : 'close'} the folder for added transactions: ${e.message}');
+    } on UnsupportedError catch (e) {
+      // No folder watching here; the inbox is still read when Qima comes
+      // back to the front.
+      debugPrint('AiApps: $e');
     }
   }
 

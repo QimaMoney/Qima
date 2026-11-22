@@ -10,6 +10,7 @@ import 'package:qima/blocs/app_blocs.dart';
 import '../helpers/app_blocs.dart';
 import 'package:qima/blocs/money_cubit.dart';
 import 'package:qima/l10n/app_localizations.dart';
+import 'package:qima/mcp/ai_inbox.dart';
 import 'package:qima/mcp/snapshot_location.dart';
 import 'package:qima/models/book_account.dart';
 import 'package:qima/models/money_settings.dart';
@@ -92,10 +93,31 @@ void main() {
       expect(shared, isNot(contains('panda')));
       expect(SnapshotLocation.read(file.path).holdingsValue, 0);
 
+      // Adding is its own switch, off until asked for.
+      final folder = AiInbox.folderFor(file.path);
+      final addToggle = find.byKey(const Key('aiAppsAddToggle'));
+      await tester.scrollUntilVisible(addToggle, 300, scrollable: find.byType(Scrollable).first);
+      expect(tester.widget<SwitchListTile>(addToggle).value, isFalse);
+      expect(AiInbox.accepting(folder), isFalse);
+      expect(await tester.runAsync(ai.inboxPath), folder);
+
+      await tester.runAsync(() => ai.setAdding(true));
+      await tester.pumpAndSettle();
+      expect(tester.widget<SwitchListTile>(addToggle).value, isTrue);
+      expect(AiInbox.accepting(folder), isTrue);
+      await tester.runAsync(() async => AiInbox.leave(folder, 'AI app.csv', 'Date,Description,Amount\r\n', DateTime(2026, 11, 14)));
+
       await tester.runAsync(() => ai.setEnabled(false));
       await tester.pumpAndSettle();
       expect(await tester.runAsync(() => file.exists()), isFalse);
       expect(app.settings.preferences.local.getBool('aiAppsEnabled'), isFalse);
+      // Turning sharing off stops adding too, and keeps what waits for review.
+      expect(ai.adding.value, isFalse);
+      expect(app.settings.preferences.local.getBool('aiAppsAddEnabled'), isFalse);
+      expect(AiInbox.accepting(folder), isFalse);
+      expect(await tester.runAsync(() async => Directory(folder).listSync().whereType<Directory>().length), 1);
+      expect(find.byKey(const Key('aiAppsAddToggle')), findsNothing);
+      await tester.runAsync(ai.dispose);
     } finally {
       debugDefaultTargetPlatformOverride = null;
     }
