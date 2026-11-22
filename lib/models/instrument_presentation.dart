@@ -38,8 +38,9 @@ class InstrumentPresentation {
 
   bool get hasData => !series.isEmpty;
 
-  /// Trailing 3-month window used for the watchlist row sparkline.
-  List<DisplayPoint> sparklinePoints(DateTime now) => ChartRange.sparklineRange.filter(points, now);
+  /// The points a row's small chart draws: [range], which a list of prices
+  /// sets to the person's default range so its rows and its charts agree.
+  List<DisplayPoint> sparklinePoints(DateTime now, {ChartRange range = ChartRange.sparklineRange}) => range.filter(points, now);
 
   /// Change over [range]. Returns null when the window has fewer than 2
   /// points or a zero-valued first point (never fabricates a flat 0%).
@@ -54,7 +55,7 @@ class InstrumentPresentation {
     return RangeChange(absoluteValue: delta, percentValue: fraction, isUp: fraction >= 0);
   }
 
-  RangeChange? sparklineChange(DateTime now) => change(ChartRange.sparklineRange, now);
+  RangeChange? sparklineChange(DateTime now, {ChartRange range = ChartRange.sparklineRange}) => change(range, now);
 
   /// Whole-series (unbounded) trend, used by widgets/watch complications.
   bool get isTrendingUp {

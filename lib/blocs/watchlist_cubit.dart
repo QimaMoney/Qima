@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../models/chart_range.dart';
 import '../models/asset.dart';
 import '../models/custom_instrument.dart';
 import '../models/instrument_catalog.dart';
@@ -179,13 +180,14 @@ class WatchlistCubit extends Cubit<WatchlistState> with GuardedEmit<WatchlistSta
 
   /// Rewrites the watchlist order by [sort]. [nameOf] is the localized row
   /// name, which only the UI can resolve.
-  Future<void> sortWatchlist(WatchlistSort sort, {required String Function(WatchCard) nameOf}) async {
+  Future<void> sortWatchlist(WatchlistSort sort, {required String Function(WatchCard) nameOf, ChartRange range = ChartRange.sparklineRange}) async {
     final now = DateTime.now();
     final cards = sortWatchCards(
       state.cards,
       sort,
       nameOf: nameOf,
-      changeOf: (card) => _market.presentation(card).sparklineChange(now)?.percentValue,
+      // The change the rows show: over the person's default range.
+      changeOf: (card) => _market.presentation(card).sparklineChange(now, range: range)?.percentValue,
       assetClassOf: (card) => _market.presentation(card).instrument.assetClass,
     );
     await _saveOrder(cards);

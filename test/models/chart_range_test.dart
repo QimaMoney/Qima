@@ -31,6 +31,49 @@ void main() {
     expect(ChartRange.available(const [], now, includeExtended: true), [ChartRange.all]);
   });
 
+  group('one day is the last day the price moved', () {
+    DisplayPoint at(DateTime t, double v) => DisplayPoint(date: t, value: v);
+
+    test('while the market moves, it is the last 24 hours', () {
+      final now = DateTime(2026, 3, 11, 15);
+      final points = [at(DateTime(2026, 3, 9, 15), 10), at(DateTime(2026, 3, 10, 16), 11), at(DateTime(2026, 3, 11, 14, 45), 12)];
+      expect(ChartRange.day1.filter(points, now).map((p) => p.value), [11, 12]);
+    });
+
+    test('over a weekend the repeated price is not the day: the last session is, from the close before it', () {
+      // Thursday's close, Friday's session, then the same price repeated.
+      final points = [
+        at(DateTime(2026, 3, 5, 21), 100),
+        at(DateTime(2026, 3, 6, 14, 30), 101),
+        at(DateTime(2026, 3, 6, 18), 97),
+        at(DateTime(2026, 3, 6, 21), 98),
+        at(DateTime(2026, 3, 7, 9), 98),
+        at(DateTime(2026, 3, 8, 9), 98),
+      ];
+      final window = ChartRange.day1.filter(points, DateTime(2026, 3, 8, 10));
+      expect(window.first.value, 100);
+      expect(window.map((p) => p.value), [100, 101, 97, 98, 98, 98]);
+    });
+
+    test('a price that has stood still for longer than a long weekend is simply flat', () {
+      final now = DateTime(2026, 3, 20, 10);
+      final points = [at(DateTime(2026, 3, 1), 3.75), at(DateTime(2026, 3, 2), 3.76), at(DateTime(2026, 3, 19, 12), 3.76), at(DateTime(2026, 3, 20, 9), 3.76)];
+      expect(ChartRange.day1.filter(points, now).map((p) => p.date.day), [19, 20]);
+    });
+
+    test('other ranges still count back from now', () {
+      final now = DateTime(2026, 3, 8, 10);
+      final points = [at(DateTime(2026, 2, 28), 1), at(DateTime(2026, 3, 6, 21), 2), at(DateTime(2026, 3, 8, 9), 2)];
+      expect(ChartRange.day3.filter(points, now).map((p) => p.value), [2, 2]);
+    });
+
+    test('no points, or one, is no day at all', () {
+      final now = DateTime(2026, 3, 8, 10);
+      expect(ChartRange.day1.filter(const [], now), isEmpty);
+      expect(ChartRange.day1.filter([at(DateTime(2026, 3, 8, 9), 5)], now), hasLength(1));
+    });
+  });
+
   test('charts open on one day until the person picks a default, and sparklines keep three months', () {
     expect(ChartRange.fallbackDefault, ChartRange.day1);
     expect(ChartRange.portfolioDefault, ChartRange.day1);

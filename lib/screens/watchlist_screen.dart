@@ -391,7 +391,7 @@ class _WatchlistScreenState extends State<WatchlistScreen> with WidgetsBindingOb
             for (final entry in sorts.entries)
               ActionChip(
                 label: Text(entry.value),
-                onPressed: () => watchlist.sortWatchlist(entry.key, nameOf: nameOf),
+                onPressed: () => watchlist.sortWatchlist(entry.key, nameOf: nameOf, range: context.read<SettingsCubit>().state.preferredChartRange),
               ),
           ],
         ),

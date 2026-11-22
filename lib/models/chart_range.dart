@@ -145,9 +145,32 @@ enum ChartRange {
   }
 
   List<DisplayPoint> filter(List<DisplayPoint> points, DateTime now) {
-    final start = startDate(now);
+    final start = this == ChartRange.day1 ? _lastDayStart(points, now) : startDate(now);
     if (start == null) return points;
     return points.where((p) => !p.date.isBefore(start)).toList();
+  }
+
+  /// How long a market may have stood still for one day to still mean its
+  /// last day of trading: a weekend with a holiday on each side.
+  static const Duration _longestClosure = Duration(days: 4);
+
+  /// Where one day starts: 24 hours before the price last moved, not before
+  /// now. While a market is closed the price is repeated, sample after
+  /// sample, and the 24 hours before now would hold nothing but that
+  /// repetition: a flat line and no change, on every weekend. People asking
+  /// for a day then mean the last day it traded. A price that has not moved
+  /// for longer than [_longestClosure] (a pegged currency) is simply flat,
+  /// and its day is the last 24 hours.
+  static DateTime _lastDayStart(List<DisplayPoint> points, DateTime now) {
+    final day = now.subtract(const Duration(days: 1));
+    var i = points.length - 1;
+    while (i > 0 && points[i].value == points[i - 1].value) {
+      i--;
+    }
+    if (i <= 0) return day;
+    final moved = points[i].date;
+    if (!moved.isBefore(day) || now.difference(moved) > _longestClosure) return day;
+    return moved.subtract(const Duration(days: 1));
   }
 
   /// Ranges that are actually usable given the data in [points] — a range
