@@ -252,7 +252,7 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get settingsDefaultRangeFooter =>
-      'Se usa al abrir un activo por primera vez.';
+      'Los gráficos de Inicio y de un activo se abren con este rango. Elegir un rango en el gráfico de un activo lo actualiza.';
 
   @override
   String get settingsWidgetRefresh => 'Intervalo de actualización del widget';

@@ -150,7 +150,7 @@
   "settingsKarat": "Karat",
   "settingsBaseCurrencyFooter": "Used to total your portfolio value.",
   "settingsDefaultRange": "Default chart range",
-  "settingsDefaultRangeFooter": "Used when opening an asset for the first time.",
+  "settingsDefaultRangeFooter": "Charts on Home and on an asset open on this range. Choosing a range on an asset's chart updates it.",
   "settingsWidgetRefresh": "Widget refresh interval",
   "settingsWidgetRefreshFooter": "How often background widgets fetch new prices.",
   "settingsLanguage": "Language",

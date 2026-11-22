@@ -105,7 +105,7 @@
   "settingsKarat": "القيراط",
   "settingsBaseCurrencyFooter": "تُستخدم لحساب إجمالي قيمة محفظتك.",
   "settingsDefaultRange": "النطاق الزمني الافتراضي",
-  "settingsDefaultRangeFooter": "يُستخدم عند فتح أصل لأول مرة.",
+  "settingsDefaultRangeFooter": "تُفتح الرسوم البيانية في الرئيسية وفي صفحة الأصل على هذا النطاق. اختيار نطاق على رسم الأصل يحدّثه.",
   "settingsWidgetRefresh": "فاصل تحديث الودجة",
   "settingsWidgetRefreshFooter": "عدد مرات جلب الودجات في الخلفية للأسعار الجديدة.",
   "settingsLanguage": "اللغة",

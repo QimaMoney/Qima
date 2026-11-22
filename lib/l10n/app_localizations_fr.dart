@@ -252,7 +252,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get settingsDefaultRangeFooter =>
-      'Utilisée à la première ouverture d\'un actif.';
+      'Les graphiques de l\'accueil et d\'un actif s\'ouvrent sur cette période. Choisir une période sur le graphique d\'un actif la met à jour.';
 
   @override
   String get settingsWidgetRefresh => 'Intervalle d\'actualisation du widget';

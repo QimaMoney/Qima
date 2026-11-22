@@ -525,7 +525,7 @@ abstract class AppLocalizations {
   /// No description provided for @settingsDefaultRangeFooter.
   ///
   /// In en, this message translates to:
-  /// **'Used when opening an asset for the first time.'**
+  /// **'Charts on Home and on an asset open on this range. Choosing a range on an asset\'s chart updates it.'**
   String get settingsDefaultRangeFooter;
 
   /// No description provided for @settingsWidgetRefresh.

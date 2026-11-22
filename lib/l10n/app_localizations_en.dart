@@ -249,7 +249,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settingsDefaultRangeFooter =>
-      'Used when opening an asset for the first time.';
+      'Charts on Home and on an asset open on this range. Choosing a range on an asset\'s chart updates it.';
 
   @override
   String get settingsWidgetRefresh => 'Widget refresh interval';

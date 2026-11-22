@@ -61,6 +61,7 @@ enum ChartRange {
   /// portfolio series is computed on the fly rather than gated behind a
   /// "load history" action.
   static const List<ChartRange> portfolioSelectable = [
+    ChartRange.day1,
     ChartRange.week1,
     ChartRange.month1,
     ChartRange.month3,
@@ -68,11 +69,30 @@ enum ChartRange {
     ChartRange.all,
   ];
 
-  static const ChartRange portfolioDefault = ChartRange.all;
+  static const ChartRange portfolioDefault = ChartRange.day1;
+
+  /// The range the charts on Home and the portfolio chart open on, for a
+  /// person whose default in Settings is this range. Those charts offer
+  /// fewer ranges than a price chart does, so each default goes to the
+  /// nearest one they have: never a shorter one, so nothing the person
+  /// asked to see is cut off.
+  ChartRange get onHome => switch (this) {
+        ChartRange.day1 => ChartRange.day1,
+        ChartRange.day3 || ChartRange.day7 || ChartRange.week1 => ChartRange.week1,
+        ChartRange.month1 => ChartRange.month1,
+        ChartRange.month3 => ChartRange.month3,
+        ChartRange.month6 || ChartRange.ytd || ChartRange.year1 => ChartRange.year1,
+        ChartRange.year5 || ChartRange.all => ChartRange.all,
+      };
 
   bool get isExtended => extended.contains(this);
 
-  static const ChartRange fallbackDefault = ChartRange.month3;
+  /// The range charts open on until the person picks their own default in
+  /// Settings.
+  static const ChartRange fallbackDefault = ChartRange.day1;
+
+  /// The fixed window watchlist sparklines draw, whatever the default is.
+  static const ChartRange sparklineRange = ChartRange.month3;
 
   /// Start date for this range relative to [now], or null for "all" (no
   /// filtering).

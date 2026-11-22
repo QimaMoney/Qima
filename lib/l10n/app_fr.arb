@@ -105,7 +105,7 @@
   "settingsKarat": "Carat",
   "settingsBaseCurrencyFooter": "Utilisée pour totaliser la valeur de votre portefeuille.",
   "settingsDefaultRange": "Période par défaut du graphique",
-  "settingsDefaultRangeFooter": "Utilisée à la première ouverture d'un actif.",
+  "settingsDefaultRangeFooter": "Les graphiques de l'accueil et d'un actif s'ouvrent sur cette période. Choisir une période sur le graphique d'un actif la met à jour.",
   "settingsWidgetRefresh": "Intervalle d'actualisation du widget",
   "settingsWidgetRefreshFooter": "Fréquence à laquelle les widgets en arrière-plan récupèrent de nouveaux prix.",
   "settingsLanguage": "Langue",

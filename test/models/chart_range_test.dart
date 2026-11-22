@@ -31,7 +31,22 @@ void main() {
     expect(ChartRange.available(const [], now, includeExtended: true), [ChartRange.all]);
   });
 
-  test('kilogram gram-derived constant sanity: fallbackDefault is month3', () {
-    expect(ChartRange.fallbackDefault, ChartRange.month3);
+  test('charts open on one day until the person picks a default, and sparklines keep three months', () {
+    expect(ChartRange.fallbackDefault, ChartRange.day1);
+    expect(ChartRange.portfolioDefault, ChartRange.day1);
+    expect(ChartRange.sparklineRange, ChartRange.month3);
+  });
+
+  test('every default in Settings has a range on Home, never a shorter one', () {
+    final now = DateTime(2026, 11, 22);
+    for (final range in ChartRange.defaultSelectable) {
+      final home = range.onHome;
+      expect(ChartRange.portfolioSelectable, contains(home), reason: range.name);
+      final asked = range.startDate(now)!, shown = home.startDate(now);
+      expect(shown == null || !shown.isAfter(asked), isTrue, reason: '${range.name} opens on ${home.name}');
+    }
+    expect(ChartRange.day1.onHome, ChartRange.day1);
+    expect(ChartRange.day7.onHome, ChartRange.week1);
+    expect(ChartRange.ytd.onHome, ChartRange.year1);
   });
 }

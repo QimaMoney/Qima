@@ -105,7 +105,7 @@
   "settingsKarat": "Quilate",
   "settingsBaseCurrencyFooter": "Se usa para totalizar el valor de tu cartera.",
   "settingsDefaultRange": "Rango de gráfico predeterminado",
-  "settingsDefaultRangeFooter": "Se usa al abrir un activo por primera vez.",
+  "settingsDefaultRangeFooter": "Los gráficos de Inicio y de un activo se abren con este rango. Elegir un rango en el gráfico de un activo lo actualiza.",
   "settingsWidgetRefresh": "Intervalo de actualización del widget",
   "settingsWidgetRefreshFooter": "Con qué frecuencia los widgets en segundo plano obtienen nuevos precios.",
   "settingsLanguage": "Idioma",

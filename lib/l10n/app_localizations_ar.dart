@@ -248,7 +248,8 @@ class AppLocalizationsAr extends AppLocalizations {
   String get settingsDefaultRange => 'النطاق الزمني الافتراضي';
 
   @override
-  String get settingsDefaultRangeFooter => 'يُستخدم عند فتح أصل لأول مرة.';
+  String get settingsDefaultRangeFooter =>
+      'تُفتح الرسوم البيانية في الرئيسية وفي صفحة الأصل على هذا النطاق. اختيار نطاق على رسم الأصل يحدّثه.';
 
   @override
   String get settingsWidgetRefresh => 'فاصل تحديث الودجة';
