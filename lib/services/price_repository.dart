@@ -368,18 +368,26 @@ class PriceRepository {
       if (doTail || relevel) await _stamp(prefs, attemptedKey, effectiveNow);
       if (doIntraday) await _stamp(prefs, intradayKey, effectiveNow);
 
+      // A bar's high and low are converted exactly as its close; one that
+      // can't be converted is left out and the bar stands on its close.
+      double? usdOrNull(double? price, String currency) {
+        if (price == null) return null;
+        try {
+          final usd = usdFromPrice(price, currency, rates);
+          return usd.isNaN ? null : usd;
+        } catch (_) {
+          return null;
+        }
+      }
+
       List<Quote> quotesOf(List<Bar> bars) => [
             for (final bar in bars)
               Quote(
                 instrumentID: instrument.id,
                 timestamp: bar.date,
-                canonicalUSD: () {
-                  try {
-                    return usdFromPrice(bar.close, bar.currency, rates);
-                  } catch (_) {
-                    return double.nan;
-                  }
-                }(),
+                canonicalUSD: usdOrNull(bar.close, bar.currency) ?? double.nan,
+                high: usdOrNull(bar.high, bar.currency),
+                low: usdOrNull(bar.low, bar.currency),
               ),
           ].where((q) => !q.canonicalUSD.isNaN).toList();
 
@@ -407,7 +415,13 @@ class PriceRepository {
           ? quotes
           : [
               for (final q in quotes)
-                Quote(instrumentID: q.instrumentID, timestamp: q.timestamp, canonicalUSD: q.canonicalUSD * factor),
+                Quote(
+                  instrumentID: q.instrumentID,
+                  timestamp: q.timestamp,
+                  canonicalUSD: q.canonicalUSD * factor,
+                  high: q.high == null ? null : q.high! * factor,
+                  low: q.low == null ? null : q.low! * factor,
+                ),
             ];
 
       var merged = existing;

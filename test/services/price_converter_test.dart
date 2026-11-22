@@ -102,4 +102,34 @@ void main() {
   test('PriceUnit.kilogram is exactly 1000x gram (TC-U2)', () {
     expect(PriceUnit.kilogram.multiplier, PriceUnit.gram.multiplier * 1000);
   });
+
+  group('PriceConverter.points extremes', () {
+    final withExtremes = QuoteSeries(
+      instrumentID: 'metal.XAU',
+      quotes: [
+        Quote(instrumentID: 'metal.XAU', timestamp: DateTime(2024, 2, 15), canonicalUSD: 2030, high: 2100, low: 1950),
+        Quote(instrumentID: 'metal.XAU', timestamp: DateTime(2024, 4, 1), canonicalUSD: 2040),
+      ],
+    );
+
+    test('are converted like the value, by the flat multiplier in USD', () {
+      final converter = PriceConverter(rates: rates, currencyCode: 'USD', unit: PriceUnit.gram, history: history);
+      final result = converter.points(withExtremes);
+      final flat = PriceUnit.gram.multiplier;
+      expect(result.first.high, closeTo(2100 * flat, 1e-9));
+      expect(result.first.low, closeTo(1950 * flat, 1e-9));
+      expect(result.last.high, isNull);
+      expect(result.last.peak, result.last.value);
+      expect(result.last.trough, result.last.value);
+    });
+
+    test('are converted at the same rate as the value on the history walk', () {
+      final converter = PriceConverter(rates: rates, currencyCode: 'EUR', unit: PriceUnit.troyOunce, history: history);
+      final point = converter.points(withExtremes).first;
+      final rate = _naiveRate(history, 'EUR', DateTime(2024, 2, 15));
+      expect(point.value, closeTo(2030 * rate * PriceUnit.troyOunce.multiplier, 1e-9));
+      expect(point.high, closeTo(2100 * rate * PriceUnit.troyOunce.multiplier, 1e-9));
+      expect(point.low, closeTo(1950 * rate * PriceUnit.troyOunce.multiplier, 1e-9));
+    });
+  });
 }

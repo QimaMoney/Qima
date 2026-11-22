@@ -142,9 +142,13 @@ class YahooQuoteProvider implements QuoteProvider {
 class Bar {
   final DateTime date;
   final double close;
+
+  /// The bar's own extremes, when the feed has them.
+  final double? high;
+  final double? low;
   final String currency;
 
-  const Bar({required this.date, required this.close, required this.currency});
+  const Bar({required this.date, required this.close, required this.currency, this.high, this.low});
 }
 
 /// Historical bars via Yahoo Finance's unofficial chart endpoint. Never
@@ -170,14 +174,25 @@ class YahooHistoryProvider {
       final currency = meta['currency'] as String? ?? 'USD';
       final timestamps = (result['timestamp'] as List<dynamic>?)?.cast<num>() ?? const [];
       final quoteList = (result['indicators'] as Map<String, dynamic>)['quote'] as List<dynamic>;
-      final closes = (quoteList.first as Map<String, dynamic>)['close'] as List<dynamic>;
+      final series = quoteList.first as Map<String, dynamic>;
+      final closes = series['close'] as List<dynamic>;
+      final highs = series['high'] as List<dynamic>? ?? const [];
+      final lows = series['low'] as List<dynamic>? ?? const [];
 
       final out = <Bar>[];
       for (var i = 0; i < timestamps.length && i < closes.length; i++) {
         final close = closes[i];
         if (close == null) continue;
         final date = DateTime.fromMillisecondsSinceEpoch(timestamps[i].toInt() * 1000, isUtc: true);
-        out.add(Bar(date: date, close: (close as num).toDouble(), currency: currency));
+        final high = i < highs.length ? highs[i] : null;
+        final low = i < lows.length ? lows[i] : null;
+        out.add(Bar(
+          date: date,
+          close: (close as num).toDouble(),
+          high: high is num ? high.toDouble() : null,
+          low: low is num ? low.toDouble() : null,
+          currency: currency,
+        ));
       }
       return out;
     } catch (_) {
