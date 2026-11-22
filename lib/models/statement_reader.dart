@@ -310,9 +310,10 @@ class StatementReader {
   };
   static final String _ccyAlt = (_currencyWords.keys.toList()..sort((a, b) => b.length - a.length)).map(RegExp.escape).join('|');
   static final _amount = RegExp(
-    '(?<![\\p{L}\\d.,*])(\\()?\\s*([-+])?\\s*(?:($_ccyAlt)\\s?)?([-+])?\\s*'
+    // A Latin currency code written straight after an Arabic word ("بSAR").
+    '(?:(?<![\\p{L}\\d.,*])|(?<=[ء-يـ])(?=[A-Za-z]))(\\()?\\s*([-+])?\\s*(?:($_ccyAlt)\\s?)?([-+])?\\s*'
     r'(\d{1,3}(?:[,\s.]\d{3})+(?:[.,]\d{1,3})?|\d+(?:[.,]\d{1,3})?)'
-    '(?:\\s?($_ccyAlt))?\\s*(\\))?\\s*(-|cr\\b|dr\\b|db\\b|مدين|دائن)?(?![\\p{L}\\d])',
+    '(?:\\s?($_ccyAlt))?\\s*(\\))?\\s*(-|\\+|cr\\b|dr\\b|db\\b|مدين|دائن)?(?![\\p{L}\\d])',
     caseSensitive: false,
     unicode: true,
   );
@@ -449,6 +450,7 @@ class StatementReader {
     var text = text0;
     final out = <_Found<DateTime>>[];
     final taken = <_Span>[];
+    final eitherWay = <(RegExpMatch, DateTime?, DateTime)>[];
     bool free(int s, int e) => !taken.any((t) => s < t.end && e > t.start);
     void take(RegExpMatch m, DateTime? d, {bool hijri = false, bool loose = false}) {
       if (!free(m.start, m.end)) return;
@@ -469,7 +471,21 @@ class StatementReader {
       final month = _months[m[2]!.toLowerCase()];
       if (month == null) continue;
       final day = int.parse(m[1]!);
-      take(m, _day(_year(m[3], month, day), month, day));
+      var date = _day(_year(m[3], month, day), month, day);
+      // Right to left, "19-أكتوبر-26" comes out of a picture as
+      // "26-أكتوبر-19": when only the other reading is a recent day, it is
+      // the one written.
+      final year = m[3];
+      if (year != null && year.length == 2 && m[1]!.length == 2 && RegExp(r'[ء-ي]').hasMatch(m[2]!)) {
+        final other = int.parse(year);
+        final swapped = _day(_year(m[1], month, other), month, other);
+        if (swapped != null && swapped != date) {
+          // Decided once the line's other dates are read.
+          if (free(m.start, m.end)) eitherWay.add((m, date, swapped));
+          continue;
+        }
+      }
+      take(m, date);
     }
     for (final m in _monthDay.allMatches(text)) {
       final month = _months[m[1]!.toLowerCase()];
@@ -496,6 +512,13 @@ class StatementReader {
       final today = DateTime(received.year, received.month, received.day);
       final isToday = const {'today', 'اليوم', "aujourd'hui", 'aujourd’hui', 'hoy'}.contains(w);
       take(m, isToday ? today : today.subtract(const Duration(days: 1)));
+    }
+    // The same day written beside it in Latin letters settles it; else
+    // the reading that is a recent day.
+    bool recent(DateTime? d) => d != null && !d.isAfter(received.add(const Duration(days: 1))) && d.isAfter(received.subtract(const Duration(days: 800)));
+    for (final (m, written, swapped) in eitherWay) {
+      final beside = out.any((f) => f.value == swapped) && !out.any((f) => f.value == written);
+      take(m, beside || (!recent(written) && recent(swapped)) ? swapped : written);
     }
     out.sort((a, b) => a.span.start - b.span.start);
     return (out, taken);
@@ -531,6 +554,8 @@ class StatementReader {
     final out = <_Found<_Money>>[];
     for (final m in _amount.allMatches(text)) {
       if (notHere.any((t) => m.start < t.end && m.end > t.start)) continue;
+      // A rate ("18.75%", or "%2.65" right to left) is not money.
+      if (_percentAfter.hasMatch(text.substring(m.end)) || _percentBefore.hasMatch(text.substring(0, m.start))) continue;
       final digits = m[5]!;
       final ccy = _currencyOf(m[3]) ?? _currencyOf(m[6]);
       final hasDecimals = RegExp(r'[.,]\d{1,3}$').hasMatch(digits) && !RegExp(r'^\d{1,3}[.,]\d{3}$').hasMatch(digits);
@@ -548,7 +573,7 @@ class StatementReader {
         sign = 1;
       } else if (m[2] == '-' || m[4] == '-' || marker == '-' || (m[1] != null && m[7] != null) || marker == 'dr' || marker == 'db' || marker == 'مدين') {
         sign = -1;
-      } else if (m[2] == '+' || m[4] == '+' || marker == 'cr' || marker == 'دائن') {
+      } else if (m[2] == '+' || m[4] == '+' || marker == '+' || marker == 'cr' || marker == 'دائن') {
         sign = 1;
       }
       out.add(_Found(_Money(value, sign, ccy, bare: bare), _Span(m.start, m.end), 0));
@@ -556,7 +581,21 @@ class StatementReader {
     return out;
   }
 
+  static final _markerCell = RegExp(r'^(?:cr|dr|db|مدين|دائن)$', caseSensitive: false);
+  static final _percentAfter = RegExp(r'^\s?[%٪]');
+  static final _percentBefore = RegExp(r'[%٪]\s?$');
+
   // ---------------------------------------------------------- lines
+
+  static final _latinThenArabic = RegExp(r'^([^ء-ي]+?)\s+([ء-ي][ء-يـ\s:]*)$');
+
+  /// A picture's line in reading order: text recognition gives a
+  /// right-to-left line left to right, so a label that ends the line
+  /// ("35510.39 الرصيد المتبقي") is put back before what it names.
+  static String _logical(String line) {
+    final m = _latinThenArabic.firstMatch(line.trim());
+    return m == null ? line : '${m[2]!.trim()} ${m[1]}';
+  }
 
   /// Tokens grouped into lines: a token joins a line when its middle is
   /// within half a line's height of the line's middle.
@@ -664,6 +703,7 @@ class StatementReader {
   /// message bubble.
   (List<StatementRow>, Set<int>) _readPages(List<List<_Line>> allLines) {
     final bubbleLines = <int>{};
+    _edgeDated.clear();
     final texts = [for (final ls in allLines) for (final l in ls) normalize(l.text)];
     _decideOrder(texts);
     _decideTrailingMinus(texts);
@@ -695,6 +735,9 @@ class StatementReader {
     var datesUnder = 0;
     String pendingText = '';
     double? pendingBottom;
+    // A name whose date line came between it and its amount.
+    String? stackedName;
+    double? stackedBottom;
     // Tables whose cells centre their lines on the dated one: a row's
     // reference sits on the line above its date, so a line between two
     // rows belongs to the nearer one. Decided by the table's first row.
@@ -724,7 +767,7 @@ class StatementReader {
         final bubble = messages[lines.indexOf(line)];
         if (bubble != null) {
           skip.addAll(bubble);
-          final row = _message([for (final l in bubble) normalize(l.text)]);
+          final row = _message([for (final l in bubble) _logical(normalize(l.text))], visual: true, day: sectionDate);
           bubbleLines.add(base + lines.indexOf(line));
           if (row != null) rows.add(row.copyWithLine(base + lines.indexOf(line)));
           pendingText = '';
@@ -746,6 +789,7 @@ class StatementReader {
         final amounts = <(_Found<_Money>, _Column?)>[];
         final words = <String>[];
         String? lineCurrency;
+        var lineSign = 0;
         for (final cell in line.cells) {
           final text = normalize(cell.text);
           final column = header == null ? null : _columnAt(header, cell.x + cell.w / 2);
@@ -773,7 +817,11 @@ class StatementReader {
           if (i < text.length) rest.write(text.substring(i));
           final cleaned = _clean(rest.toString());
           final asCurrency = _currencyOf(cleaned);
-          if (asCurrency != null) {
+          final marker = _markerCell.firstMatch(cleaned)?[0]?.toLowerCase();
+          if (marker != null) {
+            // "CR" or "DR" beside the amount, read as a piece of its own.
+            lineSign = marker == 'cr' || marker == 'دائن' ? 1 : -1;
+          } else if (asCurrency != null) {
             lineCurrency = asCurrency;
           } else if (cleaned.isNotEmpty && column != _Column.balance) {
             words.add(cleaned);
@@ -800,7 +848,32 @@ class StatementReader {
           continue;
         }
 
+        // A line that only says what is left (a balance, a limit) gives
+        // the balance after the row above it, and is never a transaction.
+        if (header == null && amounts.isNotEmpty) {
+          final whole = _logical(normalize(line.text));
+          final figures = _amounts(whole, [..._dates(whole).$2, for (final m in _time.allMatches(whole)) _Span(m.start, m.end)]);
+          if (figures.isNotEmpty) {
+            final label = whole.substring(0, figures.first.span.start);
+            // Up to the first digit too: a misread figure still follows its label.
+            final digit = whole.indexOf(RegExp(r'\d'));
+            final sure = _leftSure.hasMatch(label) || (digit > 0 && _leftSure.hasMatch(whole.substring(0, digit)));
+            final above = rows.isEmpty ? null : rows.last;
+            final takes = above != null && pendingText.isEmpty && above.balance == null && above.line != null && above.line! >= base;
+            if (sure || (takes && _leftLabel.hasMatch(label))) {
+              if (takes) {
+                final f = figures.first.value;
+                rows.last = above.copyWith(balance: f.major * (f.sign < 0 ? -1 : 1));
+              }
+              pendingText = '';
+              continue;
+            }
+          }
+        }
+
         if (amounts.isEmpty) {
+          // A chevron or an icon read as a character is nothing.
+          if (dates.isEmpty && description.isNotEmpty && !_letterOrDigit.hasMatch(description)) continue;
           if (dates.isNotEmpty && description.length < 3) {
             final prev = rowLines.isEmpty ? null : rowLines.last;
             final close = prev != null && rows.isNotEmpty && line.top - prev.bottom < prev.height * 1.5;
@@ -821,7 +894,12 @@ class StatementReader {
               datesUnder++;
               rowLines.last = line;
             } else {
-              // A date on its own heads a group of rows (banking apps).
+              // A date on its own heads a group of rows (banking apps). Right
+              // under a name it is that name's: a record stacked on lines
+              // of its own (name, date, amount), read when the amount comes.
+              final underName = pendingText.isNotEmpty && pendingBottom != null && line.top - pendingBottom < line.height * 1.5;
+              stackedName = underName ? pendingText : null;
+              stackedBottom = line.bottom;
               sectionDate = heading(dates) ?? sectionDate;
             }
             pendingText = '';
@@ -902,6 +980,7 @@ class StatementReader {
             if (xOf(list[1]) case final x?) flipX[at] = x;
           }
         }
+        if (sign == 0 && lineSign != 0 && !(lineSign < 0 && _trailingMinusIsCredit)) sign = lineSign;
         final balanceOnly = money == null && balance != null && byColumn;
         if (money == null && !balanceOnly) continue;
 
@@ -948,13 +1027,18 @@ class StatementReader {
           text = '$pendingText $text';
         } else if (text.isEmpty && pendingText.isNotEmpty) {
           text = pendingText;
+        } else if (text.isEmpty && stackedName != null && stackedBottom != null && line.top - stackedBottom < line.height * 1.5) {
+          text = stackedName;
         }
+        stackedName = null;
         pendingText = '';
 
         // The statement's summary (limit, minimum payment, what is still
         // owed) is not a transaction, nor an undated line of bare figures.
         // A dated row stays even when its name came out unreadable.
-        if (_summaryWords.hasMatch(text) || (ownDates.isEmpty && text.isEmpty)) continue;
+        // Nor is a figure under its own label of what is left ("Available
+        // balance" over the figure).
+        if (_summaryWords.hasMatch(text) || (ownDates.isEmpty && text.isEmpty) || (header == null && _leftSure.hasMatch('$text '))) continue;
 
         var signGuessed = false;
         if (sign == 0) {
@@ -973,6 +1057,18 @@ class StatementReader {
         if (flip != null) balanceFirst[rows.length] = flip;
         if (balanceOnly) fromBalance.add(rows.length);
         if (date != null && paired.length < 2 && ownDates.isEmpty) datedBySection.add(rows.length);
+        if (ownDates.isNotEmpty) {
+          final whole = normalize(line.text);
+          // The date begins or ends the line, or has a cell to itself.
+          final apart = line.cells.any((c) {
+            final t = normalize(c.text);
+            final spans = _dates(t).$2;
+            if (spans.isEmpty) return false;
+            final rest = spans.fold(t, (r, d) => r.replaceRange(d.start, d.end, ' '.padRight(d.end - d.start)));
+            return !_letterOrDigit.hasMatch(rest);
+          });
+          if (apart || _dates(whole).$2.any((d) => d.start <= 3 || d.end >= whole.length - 3)) _edgeDated.add(base + lines.indexOf(line));
+        }
         rows.add(StatementRow(
           date: date ?? DateTime(received.year, received.month, received.day),
           dateGuessed: date == null,
@@ -1158,10 +1254,50 @@ class StatementReader {
     void close(int end) {
       final block = lines.sublist(start, end);
       final words = block.fold(0, (n, l) => n + l.text.trim().split(RegExp(r'\s+')).length);
-      if (block.length < 2 || words < 12) return;
+      if (block.length < 2) return;
+      // A block set apart that says what happened and holds one figure
+      // that moved is a message however briefly it is written ("Purchase /
+      // SAR 41.00 / from X / remaining 350.00"), and so is a one-time code
+      // that quotes the amount it is for.
+      // A list sets the amount apart, across the row from the name; a
+      // message is one column of text.
+      // (A gap between words is only a piece the recognition missed.)
+      bool figureOnly(DocToken c) {
+        final t = normalize(c.text);
+        final found = _amounts(t, const []);
+        if (found.isEmpty) return false;
+        final rest = found.fold(t, (r, a) => r.replaceRange(a.span.start, a.span.end, ' '.padRight(a.span.end - a.span.start)));
+        return !_hasWord.hasMatch(rest);
+      }
+
+      final oneColumn = block.every((l) {
+        var right = l.cells.first.right;
+        var before = l.cells.first;
+        for (final c in l.cells.skip(1)) {
+          if (c.x - right > 0.12 && (figureOnly(c) || figureOnly(before))) return false;
+          if (c.right > right) {
+            right = c.right;
+            before = c;
+          }
+        }
+        return true;
+      });
+      final flat = [for (final l in block) _logical(normalize(l.text))].join(' ');
+      if (oneColumn && messageIntent(flat) != MessageIntent.unknown) {
+        final figures = _amounts(flat, [..._dates(flat).$2, for (final m in _time.allMatches(flat)) _Span(m.start, m.end)]);
+        final moved = figures.where((a) => !_leftLabel.hasMatch(flat.substring(math.max(0, a.span.start - 40), a.span.start))).length;
+        if (moved == 1) {
+          out[start] = block;
+          return;
+        }
+      }
+      if (words < 12) return;
       var inSentence = false;
-      for (final cell in block.expand((l) => l.cells)) {
-        final text = normalize(cell.text);
+      // In one column of text a line is read whole: text recognition cuts
+      // a line of two scripts into pieces wherever the script changes.
+      final pieces = oneColumn ? [for (final l in block) l.text] : [for (final c in block.expand((l) => l.cells)) c.text];
+      for (final piece in pieces) {
+        final text = normalize(piece);
         final found = _amounts(text, _dates(text).$2);
         if (found.isEmpty) continue;
         final rest = found.fold(text, (t, a) => t.replaceRange(a.span.start, a.span.end, ' '.padRight(a.span.end - a.span.start)));
@@ -1507,7 +1643,7 @@ class StatementReader {
     // Only when the rows found are that one transaction read in pieces; a
     // short list with a "Total" line under it keeps its rows.
     if (single != null && (rows.isEmpty || rows.any((r) => _same(r.amount.abs(), single.$1.single.amount.abs())))) return single;
-    rows = _beforeOpeningDoubtful(_undatedDoubtful(rows, bubbles), pageLines);
+    rows = _beforeOpeningDoubtful(_undatedDoubtful(rows, bubbles, table: hasTable), pageLines);
     var facts = this.facts(pages, rows);
     final settled = _lastFromClosing(rows, facts);
     if (!identical(settled, rows)) {
@@ -1573,14 +1709,35 @@ class StatementReader {
   static final _broughtForward = RegExp(r'\bb/f\b', caseSensitive: false);
   static final _carriedForward = RegExp(r'carried forward|\bc/f\b', caseSensitive: false);
   static final _hasWord = RegExp(r'\p{L}{2,}', unicode: true);
+  static final _letterOrDigit = RegExp(r'[\p{L}\d]', unicode: true);
 
-  static List<StatementRow> _undatedDoubtful(List<StatementRow> rows, Set<int> bubbles) {
+  /// The lines of rows that begin or end with their own date, or give it a
+  /// cell of its own, as a statement's rows do.
+  final _edgeDated = <int>{};
+
+  /// In a statement whose rows begin or end with their date, a figure dated
+  /// only by a sentence around it or by a heading above it is the bank's
+  /// own text (terms, a worked example, a tax breakdown): unticked too.
+  ///
+  /// Also kept unticked: a row dated after the day the document was
+  /// received (a due date or a maturity date, not something that happened),
+  /// and a figure with no date, no sign and no word saying money moved (an
+  /// account's balance, a deposit held, points earned on a screen that
+  /// lists no transactions).
+  List<StatementRow> _undatedDoubtful(List<StatementRow> rows, Set<int> bubbles, {bool table = false}) {
     final dated = rows.where((r) => !r.dateGuessed).length;
     final undatedDoubtful = dated >= 5 && dated > rows.length / 2;
+    final tomorrow = DateTime(received.year, received.month, received.day + 2);
+    bool saysNothing(StatementRow r) =>
+        r.dateGuessed && r.signGuessed && !bubbles.contains(r.line) && messageIntent('${r.description} ${r.detail}') == MessageIntent.unknown;
+    // (A table with named columns already drops what isn't one of its rows.)
+    final byDate = !table && rows.where((r) => _edgeDated.contains(r.line)).length >= 5;
     final seen = <String>{};
     return [
       for (final r in rows)
-        if (undatedDoubtful && r.dateGuessed && !bubbles.contains(r.line))
+        if ((undatedDoubtful && r.dateGuessed && !bubbles.contains(r.line)) || (byDate && r.line != null && !_edgeDated.contains(r.line)))
+          r.copyWith(doubtful: true)
+        else if ((!r.dateGuessed && !r.date.isBefore(tomorrow)) || saysNothing(r))
           r.copyWith(doubtful: true)
         else if (r.balance != null && !seen.add('${_dayKey(r.date)}|${r.amount}|${r.balance}'))
           r.copyWith(doubtful: true)
