@@ -5,16 +5,20 @@ import 'dart:io';
 // the app's plugins: everything under lib/mcp and lib/models it reaches is
 // pure Dart.
 // ignore: avoid_relative_lib_imports
+import '../../../lib/mcp/ai_inbox.dart';
+// ignore: avoid_relative_lib_imports
 import '../../../lib/mcp/mcp_server.dart';
 // ignore: avoid_relative_lib_imports
 import '../../../lib/mcp/snapshot_location.dart';
 
-/// `qima-mcp`: Qima's read-only MCP server for AI apps on the desktop
+/// `qima-mcp`: Qima's MCP server for AI apps on the desktop
 /// (Claude Desktop, VS Code, Cursor and others), over stdio.
 ///
 ///     qima-mcp [--snapshot <path>]
 ///
-/// It reads only the copy Qima writes when "Let AI apps read Qima" is on.
+/// It reads only the copy Qima writes when "Let AI apps read Qima" is on,
+/// and with "Let AI apps add transactions" on it leaves transactions in the
+/// folder beside that copy for the person to review in Qima.
 /// Built with `dart compile exe` and shipped inside the desktop app.
 const String _version = String.fromEnvironment('QIMA_VERSION', defaultValue: 'dev');
 
@@ -28,7 +32,7 @@ Future<void> main(List<String> args) async {
         stdout.writeln('qima-mcp $_version');
         return;
       case '--help' || '-h':
-        stdout.writeln('Usage: qima-mcp [--snapshot <path>]\nQima\'s read-only MCP server, over stdio.');
+        stdout.writeln('Usage: qima-mcp [--snapshot <path>]\nQima\'s MCP server for AI apps, over stdio.');
         return;
       default:
         stderr.writeln('qima-mcp: unknown argument ${args[i]}');
@@ -43,7 +47,12 @@ Future<void> main(List<String> args) async {
     return;
   }
   final snapshot = path;
-  final server = McpServer(loadSnapshot: () => SnapshotLocation.read(snapshot), version: _version);
+  final inbox = AiInbox.folderFor(snapshot);
+  final server = McpServer(
+    loadSnapshot: () => SnapshotLocation.read(snapshot),
+    leaveFile: (name, contents) => AiInbox.leave(inbox, name, contents, DateTime.now()),
+    version: _version,
+  );
 
   // stdout carries protocol messages only; anything else goes to stderr.
   await for (final line in stdin.transform(utf8.decoder).transform(const LineSplitter())) {

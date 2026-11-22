@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:qima/mcp/ai_inbox.dart';
 import 'package:qima/mcp/mcp_server.dart';
 import 'package:qima/mcp/qima_tools.dart';
 import 'package:qima/mcp/snapshot_location.dart';
@@ -12,7 +13,10 @@ import 'package:qima/models/entry_builder.dart';
 import 'package:qima/models/minor_units.dart';
 import 'package:qima/models/money.dart';
 import 'package:qima/models/money_settings.dart';
+import 'package:qima/models/statement_reader.dart';
 import 'package:qima/services/ai_apps.dart';
+import 'package:qima/services/csv/csv_reader.dart';
+import 'package:qima/services/import/import_inbox_io.dart';
 
 BookAccount own(String id, String name, AccountType type, [String ccy = 'SAR']) =>
     BookAccount(id: id, name: name, side: AccountSide.own, type: type, currency: ccy);
@@ -251,11 +255,12 @@ void main() {
       expect(server().handleLine('   '), isNull);
     });
 
-    test('lists every tool as read-only', () {
+    test('lists every tool as read-only, but the one that adds', () {
       final tools = call(server(), {'jsonrpc': '2.0', 'id': 1, 'method': 'tools/list'})['result']['tools'] as List;
       expect([for (final t in tools) t['name']], [for (final t in QimaTools.all) t.name]);
       for (final t in tools) {
-        expect(t['annotations']['readOnlyHint'], isTrue);
+        expect(t['annotations']['readOnlyHint'], t['name'] != QimaTools.addTransactions);
+        expect(t['annotations']['destructiveHint'], isFalse);
         expect(t['inputSchema']['type'], 'object');
       }
     });
@@ -299,6 +304,107 @@ void main() {
       expect(call(server(), {'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call', 'params': {'name': 'drop_tables'}})['error']['code'], -32602);
       expect(call(server(), {'id': 1, 'method': 'ping'})['error']['code'], -32600);
       expect(call(server(), {'jsonrpc': '2.0', 'id': 1, 'method': 'ping'})['result'], isEmpty);
+    });
+  });
+
+  group('add_transactions', () {
+    late Directory dir;
+    late String folder;
+
+    setUp(() {
+      dir = Directory.systemTemp.createTempSync('qima_mcp_add');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      folder = AiInbox.folderFor('${dir.path}${Platform.pathSeparator}${SnapshotLocation.fileName}');
+    });
+
+    void allow() => File('$folder${Platform.pathSeparator}${AiInbox.marker}').createSync(recursive: true);
+
+    Map<String, dynamic> add(Map<String, dynamic> arguments, {bool wired = true}) {
+      final s = McpServer(
+        loadSnapshot: () => throw const SnapshotUnavailable('not needed to add'),
+        leaveFile: wired ? (name, contents) => AiInbox.leave(folder, name, contents, now) : null,
+        version: 'test',
+        clock: () => now,
+      );
+      final reply = jsonDecode(s.handleLine(jsonEncode({
+        'jsonrpc': '2.0',
+        'id': 1,
+        'method': 'tools/call',
+        'params': {'name': QimaTools.addTransactions, 'arguments': arguments},
+      }))!) as Map<String, dynamic>;
+      return reply['result'] as Map<String, dynamic>;
+    }
+
+    const rows = [
+      {'date': '2026-11-03', 'amount': -45.5, 'description': 'Lemon Mart, "Olaya" branch'},
+      {'date': '2026-11-05', 'amount': 3000, 'description': 'Salary\nNovember'},
+      {'date': '2026-11-09', 'amount': -12.1, 'description': 'متجر الورق'},
+    ];
+
+    test('writes nothing until the person allows it in Qima', () {
+      final r = add({'transactions': rows});
+      expect(r['isError'], isTrue);
+      expect(r['content'][0]['text'], contains('Let AI apps add transactions'));
+      expect(Directory(folder).existsSync(), isFalse);
+      expect(add({'transactions': rows}, wired: false)['isError'], isTrue);
+    });
+
+    test('leaves the transactions where the import inbox reads them, for review', () async {
+      allow();
+      final r = add({'title': 'Al Rajhi: November/2026', 'currency': 'sar', 'transactions': rows});
+      expect(r['isError'], isFalse);
+      expect(r['structuredContent']['handed_to_qima'], 3);
+      expect(r['structuredContent']['saved'], isFalse);
+
+      final inbox = FolderInbox(folders: [Directory(folder)]);
+      final file = (await inbox.pending()).single;
+      expect(file.name, 'Al Rajhi  November 2026 2026-11-14.csv');
+      expect(file.receivedAt, now);
+      expect(file.message, isFalse);
+
+      final table = CsvReader.parse(utf8.decode(await inbox.bytes(file)));
+      final (read, _) = StatementReader(received: now).read([DocPage.fromTable(table.rows)]);
+      expect([for (final t in read) (t.date, t.amount, t.currency, t.description, t.doubtful)], [
+        (DateTime(2026, 11, 3), -45.5, 'SAR', 'Lemon Mart, "Olaya" branch', false),
+        (DateTime(2026, 11, 5), 3000.0, 'SAR', 'Salary November', false),
+        (DateTime(2026, 11, 9), -12.1, 'SAR', 'متجر الورق', false),
+      ]);
+
+      await inbox.remove(file.id);
+      expect(await inbox.pending(), isEmpty);
+
+      // A currency with three decimals keeps them; one without is refused
+      // a third rather than rounded.
+      expect(add({'currency': 'KWD', 'transactions': [{'date': '2026-11-10', 'amount': 850.125, 'description': 'Salary'}]})['isError'], isFalse);
+      final kwd = (await inbox.pending()).single;
+      final (dinars, _) = StatementReader(received: now).read([DocPage.fromTable(CsvReader.parse(utf8.decode(await inbox.bytes(kwd))).rows)]);
+      expect((dinars.single.amount, dinars.single.currency), (850.125, 'KWD'));
+      await inbox.remove(kwd.id);
+      final refused = add({'currency': 'SAR', 'transactions': [{'date': '2026-11-10', 'amount': -12.125, 'description': 'x'}]});
+      expect(refused['content'][0]['text'], contains('at most 2 decimals in SAR'));
+      // Nothing half-written is left behind either.
+      expect([for (final e in Directory(folder).listSync()) e.uri.pathSegments.lastWhere((s) => s.isNotEmpty)], [AiInbox.marker]);
+    });
+
+    test('explains a transaction it cannot take, and takes none of the list', () {
+      allow();
+      String error(Map<String, dynamic> arguments) {
+        final r = add(arguments);
+        expect(r['isError'], isTrue);
+        return r['content'][0]['text'] as String;
+      }
+
+      Map<String, dynamic> second(Map<String, dynamic> row) => {
+            'transactions': [rows.first, row],
+          };
+      expect(error({'transactions': []}), contains('at least one'));
+      expect(error(second({'date': '2026-02-30', 'amount': -1, 'description': 'x'})), startsWith('Transaction 2: "date" is not a real date'));
+      expect(error(second({'date': '2026-11-01', 'amount': 0, 'description': 'x'})), contains('other than zero'));
+      expect(error(second({'date': '2026-11-01', 'amount': '12', 'description': 'x'})), contains('"amount" must be a number'));
+      expect(error(second({'date': '2026-11-01', 'amount': -1, 'description': '  '})), contains('"description" is missing'));
+      expect(error({'currency': 'riyal', 'transactions': rows}), contains('three-letter'));
+      expect(error({'transactions': List.filled(QimaTools.maxRows + 1, rows.first)}), contains('At most'));
+      expect(Directory(folder).listSync(), hasLength(1));
     });
   });
 

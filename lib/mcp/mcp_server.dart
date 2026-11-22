@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import '../models/ai_snapshot.dart';
+import 'ai_inbox.dart';
 import 'qima_tools.dart';
 
 /// Why the snapshot could not be read, in words the AI app can pass on to
@@ -16,7 +17,8 @@ class SnapshotUnavailable implements Exception {
 /// A Model Context Protocol server over newline-delimited JSON-RPC 2.0, as
 /// the stdio transport defines it. It offers only [QimaTools]: read-only
 /// tools over the snapshot that [loadSnapshot] returns, read again on every
-/// call so answers follow the app.
+/// call so answers follow the app, and one that hands transactions to
+/// [leaveFile] for the person to review in Qima.
 ///
 /// Pure Dart and transport-free so tests can drive it line by line;
 /// `bin/qima_mcp.dart` wires it to stdin and stdout.
@@ -24,11 +26,19 @@ class McpServer {
   static const List<String> protocolVersions = ['2025-06-18', '2025-03-26', '2024-11-05'];
 
   final AiSnapshot Function() loadSnapshot;
+
+  /// Leaves a file of transactions for Qima (`AiInbox.leave`), or throws
+  /// [AddingUnavailable] when the person has not allowed it.
+  final LeaveFile leaveFile;
   final String version;
   final DateTime Function() clock;
 
-  McpServer({required this.loadSnapshot, required this.version, DateTime Function()? clock})
-      : clock = clock ?? DateTime.now;
+  McpServer({required this.loadSnapshot, required this.version, LeaveFile? leaveFile, DateTime Function()? clock})
+      : leaveFile = leaveFile ?? _cannotAdd,
+        clock = clock ?? DateTime.now;
+
+  static void _cannotAdd(String name, String contents) =>
+      throw const AddingUnavailable('This copy of Qima\'s connector cannot add transactions.');
 
   /// Answers one line from the client: the reply line, or null for a
   /// notification (which gets none).
@@ -74,10 +84,12 @@ class McpServer {
             'tools': {'listChanged': false},
           },
           'serverInfo': {'name': 'qima', 'title': 'Qima', 'version': version},
-          'instructions': 'Read-only access to the person\'s Qima books: net worth, accounts, transactions, '
+          'instructions': 'Read access to the person\'s Qima books: net worth, accounts, transactions, '
               'spending, planned payments, people and holdings. Amounts are in each currency\'s major unit. '
               'Qima saves this copy while it is open, so mention saved_by_qima_at when figures may be old. '
-              'Report figures as they are; Qima is a tracking tool, not financial advice.',
+              'Report figures as they are; Qima is a tracking tool, not financial advice. '
+              'add_transactions, when the person has allowed it in Qima, hands transactions over for them to '
+              'review in Qima; it never saves anything itself.',
         });
       case 'ping':
         return _result(id, {});
@@ -97,7 +109,8 @@ class McpServer {
     final args = params['arguments'] ?? const <String, dynamic>{};
     if (args is! Map<String, dynamic>) return _error(id, -32602, 'arguments must be an object');
     try {
-      final result = tool.run(loadSnapshot(), args, clock());
+      final add = tool.add;
+      final result = add == null ? tool.run(loadSnapshot(), args, clock()) : add(leaveFile, args, clock());
       return _result(id, {
         'content': [
           {'type': 'text', 'text': const JsonEncoder.withIndent(' ').convert(result)},
@@ -108,6 +121,8 @@ class McpServer {
     } on ToolInputError catch (e) {
       return _toolError(id, e.message);
     } on SnapshotUnavailable catch (e) {
+      return _toolError(id, e.message);
+    } on AddingUnavailable catch (e) {
       return _toolError(id, e.message);
     } on FormatException catch (e) {
       return _toolError(id, 'Qima\'s saved copy could not be read: ${e.message}');

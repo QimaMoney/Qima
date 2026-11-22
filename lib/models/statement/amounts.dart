@@ -41,9 +41,10 @@ mixin _Amounts on _ReaderCore {
   };
   static final String _ccyAlt = (_currencyWords.keys.toList()..sort((a, b) => b.length - a.length)).map(RegExp.escape).join('|');
   static final _amount = RegExp(
-    '(?<![\\p{L}\\d.,*])(\\()?\\s*([-+])?\\s*(?:($_ccyAlt)\\s?)?([-+])?\\s*'
+    // A Latin currency code written straight after an Arabic word ("بSAR").
+    '(?:(?<![\\p{L}\\d.,*])|(?<=[ء-يـ])(?=[A-Za-z]))(\\()?\\s*([-+])?\\s*(?:($_ccyAlt)\\s?)?([-+])?\\s*'
     r'(\d{1,3}(?:[,\s.]\d{3})+(?:[.,]\d{1,3})?|\d+(?:[.,]\d{1,3})?)'
-    '(?:\\s?($_ccyAlt))?\\s*(\\))?\\s*(-|cr\\b|dr\\b|db\\b|مدين|دائن)?(?![\\p{L}\\d])',
+    '(?:\\s?($_ccyAlt))?\\s*(\\))?\\s*(-|\\+|cr\\b|dr\\b|db\\b|مدين|دائن)?(?![\\p{L}\\d])',
     caseSensitive: false,
     unicode: true,
   );
@@ -78,6 +79,8 @@ mixin _Amounts on _ReaderCore {
     final out = <_Found<_Money>>[];
     for (final m in _amount.allMatches(text)) {
       if (notHere.any((t) => m.start < t.end && m.end > t.start)) continue;
+      // A rate ("18.75%", or "%2.65" right to left) is not money.
+      if (_percentAfter.hasMatch(text.substring(m.end)) || _percentBefore.hasMatch(text.substring(0, m.start))) continue;
       final digits = m[5]!;
       final ccy = _currencyOf(m[3]) ?? _currencyOf(m[6]);
       final hasDecimals = RegExp(r'[.,]\d{1,3}$').hasMatch(digits) && !RegExp(r'^\d{1,3}[.,]\d{3}$').hasMatch(digits);
@@ -95,11 +98,15 @@ mixin _Amounts on _ReaderCore {
         sign = 1;
       } else if (m[2] == '-' || m[4] == '-' || marker == '-' || (m[1] != null && m[7] != null) || marker == 'dr' || marker == 'db' || marker == 'مدين') {
         sign = -1;
-      } else if (m[2] == '+' || m[4] == '+' || marker == 'cr' || marker == 'دائن') {
+      } else if (m[2] == '+' || m[4] == '+' || marker == '+' || marker == 'cr' || marker == 'دائن') {
         sign = 1;
       }
       out.add(_Found(_Money(value, sign, ccy, bare: bare), _Span(m.start, m.end), 0));
     }
     return out;
   }
+
+  static final _markerCell = RegExp(r'^(?:cr|dr|db|مدين|دائن)$', caseSensitive: false);
+  static final _percentAfter = RegExp(r'^\s?[%٪]');
+  static final _percentBefore = RegExp(r'[%٪]\s?$');
 }

@@ -1455,6 +1455,8 @@
   "aiAppsCopied": "Copié",
   "aiAppsFreshness": "La copie se met à jour tant que Qima est ouverte.",
   "aiAppsNoHelper": "Le connecteur n’est pas inclus dans cette copie de Qima. Installez Qima depuis le store ou le site pour l’utiliser.",
+  "aiAppsAddToggle": "Autoriser les apps d’IA à ajouter des opérations",
+  "aiAppsAddFooter": "Une app d’IA peut transmettre des opérations à Qima. Elles attendent dans la vérification de l’import, et rien n’est enregistré tant que vous ne les avez pas vérifiées et choisi le compte. Désactiver cette option conserve ce qui attend déjà.",
   "setupWelcomeTitle": "Préparons Qima pour vous",
   "setupWelcomeBody": "Répondez à quelques questions et Qima n’affichera que ce dont vous avez besoin. Cela prend environ une minute.",
   "setupWelcomeNoAccount": "Aucun compte requis",

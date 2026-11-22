@@ -132,21 +132,41 @@ final _intentWords = <(MessageIntent, RegExp)>[
   ),
 ];
 
-/// The label of a figure that is only what is left after a transaction.
+/// The label of a figure that is only what is left after a transaction. It
+/// is named by its qualifier ("remaining", "available"), whatever that
+/// qualifies (a limit, a balance, the spend left), or by a balance or limit
+/// named right before the figure ("Balance SAR 640.00", "Balance after the
+/// transaction"). "Balance transfer of SAR 2,000" is neither.
+const _leftSaid = r'(?:remaining|avail(?:able)?\.?|المتبقي|المتبقى|المتاح|المتاحة|المتوفر|disponible|restante?)[^\d]{0,20}'
+    r'|(?:limit|bal(?:ance)?\.?)\s*left[^\d]{0,20}'
+    r'|\bbal(?:ance)?\.?\s*(?:after|is|now|:)[^\d]{0,20}'
+    r'|(?:الرصيد|رصيدك|المتبقي)\s*(?:بعد|الحالي|هو|:)[^\d]{0,20}';
+
 final _leftLabel = RegExp(
-  r'(?:(?:remaining|avail(?:able)?\.?|left)\s*(?:credit\s*)?(?:limit|bal(?:ance)?\.?)|(?:limit|bal(?:ance)?\.?)\s*(?:left|remaining|avail(?:able)?\.?)|'
-  r'available credit|\bbal(?:ance)?\.?\s*:|'
-  r'(?:الحد|الرصيد)\s*(?:الائتماني\s*)?(?:المتبقي|المتاح|المتوفر)|(?:الرصيد|المتبقي)\s*:|'
-  r'solde disponible|plafond restant|saldo disponible|límite disponible)'
-  r'[^\d]{0,20}$',
+  '(?:$_leftSaid'
+  '|(?:\\bbal(?:ance)?|\\blimit|الرصيد|رصيدك|الحد|\\bsolde|\\bsaldo|\\bplafond|\\blímite)\\.?[^\\p{L}\\d]*(?:(?:${_Amounts._ccyAlt})[^\\p{L}\\d]*)?'
+  r')$',
   caseSensitive: false,
+  unicode: true,
 );
+
+/// [_leftLabel] without the bare noun: in a list "Top up balance 50.00" is
+/// a transaction, so a bare "Balance" only names what is left where a row
+/// above can take it.
+final _leftSure = RegExp('(?:$_leftSaid)\$', caseSensitive: false, unicode: true);
 
 final _noticeWords = RegExp(
   r'statement (?:has been |is |was )?(?:issued|generated|ready|available)|minimum (?:due|payment|amount)|'
   r'payment due|due date|amount due|due on|'
   r'تم إصدار كشف|كشف الحساب|كشف حساب|الحد الأدنى|تاريخ الاستحقاق|المبلغ المستحق|مستحق السداد|'
   r'relevé|paiement minimum|date d.échéance|extracto|pago mínimo|fecha de vencimiento',
+  caseSensitive: false,
+);
+
+/// Paying, as a notice says it of a payment still to come ("the minimum to
+/// pay before 05/12"). Only "was paid" says money moved.
+final _owedWords = RegExp(
+  r'(?<!تم )(?<!تم ال)(?:bill payment|\bpayment\b|السداد|للسداد|سداد|الدفع|للدفع|دفع|paiement|pago)',
   caseSensitive: false,
 );
 
@@ -158,7 +178,7 @@ MessageIntent messageIntent(String text) {
   // A notice talks about paying ("payment due"); only a word that money
   // already moved overrides it.
   if (_noticeWords.hasMatch(text)) {
-    final moved = text.replaceAll(_noticeWords, ' ');
+    final moved = text.replaceAll(_noticeWords, ' ').replaceAll(_owedWords, ' ');
     final strong = [
       for (final (intent, words) in _intentWords)
         if (intent.transaction && words.hasMatch(moved)) intent
@@ -210,8 +230,11 @@ Map<_Field, String> _messageFields(List<String> lines) {
 }
 
 extension _BankMessages on _Rows {
-  /// One message as a row, or null when it isn't money moving.
-  StatementRow? _message(List<String> lines) {
+  /// One message as a row, or null when it isn't money moving. [visual]
+  /// lines are a picture's (a sentence wraps where the bubble does); a
+  /// shared text's lines end where the bank ended them. [day] dates a
+  /// message that carries no date of its own.
+  StatementRow? _message(List<String> lines, {bool visual = false, DateTime? day}) {
     if (lines.isEmpty) return null;
     final flat = lines.join(' ');
 
@@ -242,8 +265,11 @@ extension _BankMessages on _Rows {
     // amount line cut off in a screenshot) is not a transaction, but
     // "balance transfer of SAR 2,000" is.
     if (fromField == null && amounts.every(onlyLeft)) return null;
+    // What is left is never the amount while another figure could be,
+    // with or without a currency beside it.
     final main = fromField ??
         amounts.where((a) => a.value.currency != null && !left(a)).firstOrNull ??
+        amounts.where((a) => !left(a)).firstOrNull ??
         amounts.where((a) => a.value.currency != null).firstOrNull ??
         amounts.first;
     final currency = main.value.currency ??
@@ -258,10 +284,10 @@ extension _BankMessages on _Rows {
     }
 
     // Who: the other side, never the person's own card or account.
-    final description = _counterparty(lines, flat, fields, sign);
+    final description = _counterparty(lines, flat, fields, sign, wraps: visual);
 
     final dateField = fields[_Field.date];
-    final date = (dateField == null ? null : _dates(dateField).$1.firstOrNull?.value) ?? dates.firstOrNull?.value;
+    final date = (dateField == null ? null : _dates(dateField).$1.firstOrNull?.value) ?? dates.firstOrNull?.value ?? day;
     return StatementRow(
       date: date ?? DateTime(received.year, received.month, received.day),
       dateGuessed: date == null,
@@ -275,12 +301,17 @@ extension _BankMessages on _Rows {
     );
   }
 
-  String _counterparty(List<String> lines, String flat, Map<_Field, String> fields, int sign) {
+  /// [wraps]: the lines are a picture's, so a name may run on past the end
+  /// of one; a shared text's name ends with its line.
+  String _counterparty(List<String> lines, String flat, Map<_Field, String> fields, int sign, {bool wraps = false}) {
     bool own(String s) =>
         StatementReader._accountWords.hasMatch(s) || _Facts._masked.hasMatch(s) || RegExp(r'^\W*\d{4,}').hasMatch(s);
+    // A name ends where the person's own masked card or account starts.
     String named(String raw) {
-      final n = _Text._clean(raw.replaceAll(StatementReader._nameEnd, ''));
-      return n.length >= 2 && !own(raw) ? n : '';
+      final mask = _Facts._masked.firstMatch(raw);
+      final head = mask == null || mask.start == 0 ? raw : raw.substring(0, mask.start);
+      final n = _Text._clean(head.replaceAll(StatementReader._nameEnd, ''));
+      return n.length >= 2 && !own(head) ? n : '';
     }
 
     // Labelled fields first, in the order this direction names the other side.
@@ -301,9 +332,11 @@ extension _BankMessages on _Rows {
 
     // Free text: "at X", then "to X" or "from X" by direction.
     String inText(RegExp re) {
-      for (final m in re.allMatches(flat)) {
-        final n = named(m[1]!);
-        if (n.isNotEmpty) return n;
+      for (final text in [lines.join(' · '), if (wraps) flat]) {
+        for (final m in re.allMatches(text)) {
+          final n = named(m[1]!);
+          if (n.isNotEmpty) return n;
+        }
       }
       return '';
     }

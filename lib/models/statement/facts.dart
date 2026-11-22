@@ -188,7 +188,7 @@ mixin _Facts on _ReaderCore, _Dates, _Amounts, _Layout, _Reconcile, _Rows {
     // Only when the rows found are that one transaction read in pieces; a
     // short list with a "Total" line under it keeps its rows.
     if (single != null && (rows.isEmpty || rows.any((r) => _Reconcile._same(r.amount.abs(), single.$1.single.amount.abs())))) return single;
-    rows = _beforeOpeningDoubtful(_undatedDoubtful(rows, bubbles), pageLines);
+    rows = _beforeOpeningDoubtful(_undatedDoubtful(rows, bubbles, table: hasTable), pageLines);
     var facts = this.facts(pages, rows);
     final settled = _lastFromClosing(rows, facts);
     if (!identical(settled, rows)) {
@@ -255,13 +255,29 @@ mixin _Facts on _ReaderCore, _Dates, _Amounts, _Layout, _Reconcile, _Rows {
   static final _carriedForward = RegExp(r'carried forward|\bc/f\b', caseSensitive: false);
   static final _hasWord = RegExp(r'\p{L}{2,}', unicode: true);
 
-  static List<StatementRow> _undatedDoubtful(List<StatementRow> rows, Set<int> bubbles) {
+  /// In a statement whose rows begin or end with their date, a figure dated
+  /// only by a sentence around it or by a heading above it is the bank's
+  /// own text (terms, a worked example, a tax breakdown): unticked too.
+  ///
+  /// Also kept unticked: a row dated after the day the document was
+  /// received (a due date or a maturity date, not something that happened),
+  /// and a figure with no date, no sign and no word saying money moved (an
+  /// account's balance, a deposit held, points earned on a screen that
+  /// lists no transactions).
+  List<StatementRow> _undatedDoubtful(List<StatementRow> rows, Set<int> bubbles, {bool table = false}) {
     final dated = rows.where((r) => !r.dateGuessed).length;
     final undatedDoubtful = dated >= 5 && dated > rows.length / 2;
+    final tomorrow = DateTime(received.year, received.month, received.day + 2);
+    bool saysNothing(StatementRow r) =>
+        r.dateGuessed && r.signGuessed && !bubbles.contains(r.line) && messageIntent('${r.description} ${r.detail}') == MessageIntent.unknown;
+    // (A table with named columns already drops what isn't one of its rows.)
+    final byDate = !table && rows.where((r) => _edgeDated.contains(r.line)).length >= 5;
     final seen = <String>{};
     return [
       for (final r in rows)
-        if (undatedDoubtful && r.dateGuessed && !bubbles.contains(r.line))
+        if ((undatedDoubtful && r.dateGuessed && !bubbles.contains(r.line)) || (byDate && r.line != null && !_edgeDated.contains(r.line)))
+          r.copyWith(doubtful: true)
+        else if ((!r.dateGuessed && !r.date.isBefore(tomorrow)) || saysNothing(r))
           r.copyWith(doubtful: true)
         else if (r.balance != null && !seen.add('${_dayKey(r.date)}|${r.amount}|${r.balance}'))
           r.copyWith(doubtful: true)
