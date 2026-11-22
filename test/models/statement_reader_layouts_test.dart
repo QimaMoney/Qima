@@ -151,6 +151,233 @@ void main() {
     });
   });
 
+  group('a picture of a thread of messages', () {
+    // The share day, 21 November 2026, is a Saturday.
+    test('the line between two days names the day of the messages under it', () {
+      final page = DocPage([
+        ...line(0.10, [('Monday 1:12 PM', 0.39, 0.22)], h: 0.013),
+        ...line(0.14, [('Please note that an amount of', 0.09, 0.6)]),
+        ...line(0.165, [('EGP 310.00 was debited from your', 0.09, 0.6)]),
+        ...line(0.19, [('account ending 4471 to Lemon Mart', 0.09, 0.6)]),
+        ...line(0.215, [('with reference AB12CD on 13:1', 0.09, 0.6)]),
+        ...line(0.30, [('Saturday', 0.44, 0.12), ('9:05', 0.57, 0.05), ('AM', 0.63, 0.04)], h: 0.013),
+        ...line(0.34, [('Your card ending 4471 was charged', 0.09, 0.6)]),
+        ...line(0.365, [('for EGP 75.50 at Paper House. Your', 0.09, 0.6)]),
+        ...line(0.39, [('available limit is 1,204.10', 0.09, 0.5)]),
+      ]);
+      final rows = reader.readPages([page]);
+      expect(rows.map((r) => r.amount), [-310, -75.5]);
+      // The Monday before the share day; today's own name is last week's.
+      expect(rows.map((r) => r.date), [DateTime(2026, 11, 16), DateTime(2026, 11, 14)]);
+      expect(rows.any((r) => r.dateGuessed), isFalse);
+      // The day's name is the heading, not part of a name.
+      expect(rows.any((r) => r.description.contains('Monday') || r.detail.contains('Monday')), isFalse);
+    });
+
+    test('a day named in a sentence, or with no time beside it, heads nothing', () {
+      for (final above in ['Branches are closed on Friday', 'Friday']) {
+        final page = DocPage([
+          ...line(0.10, [(above, 0.09, 0.6)]),
+          ...line(0.20, [('Garden Cafe', 0.07, 0.3), ('-45.00 SAR', 0.75, 0.18)]),
+        ]);
+        expect(reader.readPages([page]).single.dateGuessed, isTrue, reason: above);
+      }
+    });
+
+    test('a bubble is one message even when a piece of its line was lost and the figure sits apart', () {
+      final page = DocPage([
+        // Right to left: the figure comes out far from its words, the
+        // currency between them lost.
+        ...line(0.10, [('75.25', 0.20, 0.08), ('حوالة صادرة محلية', 0.43, 0.29)]),
+        ...line(0.125, [('N. OMAR 2002*K', 0.33, 0.39)]),
+        ...line(0.15, [('17/11/26 11:40', 0.08, 0.25)]),
+        ...line(0.21, [('Tuesday 3:10 PM', 0.39, 0.22)], h: 0.013),
+        ...line(0.25, [('POS-شراء', 0.4, 0.17)]),
+        ...line(0.275, [('SAR 52.00-', 0.36, 0.21)]),
+        ...line(0.30, [('Dune Club من', 0.3, 0.27)]),
+        ...line(0.325, [('في 14:05 17/11/26', 0.27, 0.3)]),
+        ...line(0.35, [('2718.60', 0.07, 0.08), ('الصرف المتبقي', 0.34, 0.23)]),
+      ]);
+      final rows = reader.readPages([page]);
+      expect(rows.map((r) => r.amount), [-75.25, -52]);
+      expect(rows.any((r) => r.signGuessed || r.dateGuessed), isFalse);
+      expect(rows.map((r) => r.date).toSet(), {DateTime(2026, 11, 17)});
+      expect(rows.last.description, 'Dune Club');
+    });
+
+    test('the same lines with no line between days stay a list: the figure set apart is a column', () {
+      final page = DocPage([
+        ...line(0.10, [('75.25', 0.20, 0.08), ('حوالة محلية', 0.43, 0.29)]),
+        ...line(0.125, [('N. OMAR 2002*K', 0.33, 0.39)]),
+        ...line(0.15, [('17/11/26 11:40', 0.08, 0.25)]),
+      ]);
+      final row = reader.readPages([page]).single;
+      expect(row.amount.abs(), 75.25);
+      expect(row.signGuessed, isTrue);
+    });
+
+    test('the bubble cut off by the top of the screen does not spoil the first whole one', () {
+      final page = DocPage([
+        ...line(0.075, [('<', 0.07, 0.03), ('16.40 15/11', 0.24, 0.19)]),
+        ...line(0.098, [('المتبقي 302.15', 0.18, 0.24)]),
+        ...line(0.13, [('Bank Name ›', 0.39, 0.23)]),
+        ...line(0.157, [('POS-شراء', 0.4, 0.16)]),
+        ...line(0.18, [('SAR 37.00-', 0.36, 0.2)]),
+        ...line(0.205, [('Lemon Mart من', 0.3, 0.27)]),
+        ...line(0.23, [('في 10:20 18/11/26', 0.25, 0.31)]),
+        ...line(0.255, [('9510.39', 0.07, 0.08), ('الصرف المتبقي', 0.34, 0.23)]),
+        ...line(0.32, [('Yesterday 8:40 PM', 0.38, 0.24)], h: 0.013),
+        ...line(0.36, [('POS-شراء', 0.4, 0.16)]),
+        ...line(0.385, [('SAR 24.75-', 0.36, 0.2)]),
+        ...line(0.41, [('Garden Cafe من', 0.3, 0.27)]),
+        ...line(0.435, [('في 20:39 20/11/26', 0.25, 0.31)]),
+      ]);
+      final rows = reader.readPages([page]);
+      final whole = rows.where((r) => r.amount == -37).single;
+      expect(whole.date, DateTime(2026, 11, 18));
+      expect(whole.dateGuessed, isFalse);
+      expect(whole.signGuessed, isFalse);
+      expect(whole.description, 'Lemon Mart');
+      expect(rows.last.amount, -24.75);
+      expect(rows.last.date, DateTime(2026, 11, 20));
+      // What is left of the cut-off one never claims a direction.
+      expect(rows.where((r) => r.amount.abs() == 16.4).every((r) => r.signGuessed), isTrue);
+    });
+
+    test('the end of a date whose day was misread is no date of its own', () {
+      // "on 13/09/26" with its day read as letters leaves "09/26".
+      final page = DocPage([
+        ...line(0.08, [('212.40', 0.21, 0.13), ('at', 0.34, 0.04), ('PAPER HOUSE', 0.4, 0.3)]),
+        ...line(0.105, [('olz/09/26 at 07:12 the limit left', 0.08, 0.6)]),
+        ...line(0.13, [('to use is 1,480.25 and the limit', 0.08, 0.6)]),
+        ...line(0.155, [('abroad is EGP 6200', 0.08, 0.5)]),
+      ]);
+      final row = reader.readPages([page]).single;
+      expect(row.amount.abs(), 212.4);
+      expect(row.dateGuessed, isTrue);
+      // Two dates joined by a dash are still two dates.
+      final range = DocPage([...line(0.1, [('01/11-15/11', 0.05, 0.2), ('Garden Cafe', 0.3, 0.3), ('-45.00 SAR', 0.75, 0.18)])]);
+      expect(reader.readPages([range]).single.dateGuessed, isFalse);
+    });
+  });
+
+  group('a picture of an account or card screen', () {
+    test('a balance under a bare label is the newest row\'s running balance, and a row\'s second line says its direction', () {
+      final page = DocPage([
+        ...line(0.25, [('Balance', 0.08, 0.1)], h: 0.012),
+        ...line(0.275, [('412.30 SAR', 0.08, 0.25)], h: 0.03),
+        ...line(0.67, [('Spending history', 0.07, 0.28)]),
+        ...line(0.715, [('Oct 27, 2026', 0.1, 0.16)]),
+        ...line(0.75, [('Cloud Storage', 0.16, 0.22), ('64.20 SAR', 0.8, 0.13)]),
+        ...line(0.77, [('Online purchase', 0.19, 0.3), ('Balance SAR 412.30', 0.7, 0.23)], h: 0.014),
+        ...line(0.807, [('Oct 04, 2026', 0.1, 0.16)]),
+        ...line(0.84, [('TEXT SERVICE RE', 0.17, 0.42), ('2.75 SAR', 0.83, 0.1)]),
+        // The app prints the same balance under two rows: no link there.
+        ...line(0.86, [('Online purchase', 0.19, 0.3), ('Balance SAR 500.00', 0.7, 0.23)], h: 0.014),
+        ...line(0.897, [('Sep 28, 2026', 0.1, 0.17)]),
+        ...line(0.93, [('Music Plan', 0.17, 0.28), ('22.00 SAR', 0.82, 0.11)]),
+        ...line(0.95, [('Online purchase', 0.19, 0.3), ('Balance SAR 500.00', 0.7, 0.23)], h: 0.014),
+      ]);
+      final (rows, facts) = reader.read([page]);
+      expect(rows.map((r) => r.amount), [-64.2, -2.75, -22]);
+      expect(rows.any((r) => r.signGuessed || r.dateGuessed || r.doubtful), isFalse);
+      expect(rows.map((r) => r.detail).toSet(), {'Online purchase'});
+      expect(facts.closing, 412.3);
+    });
+
+    test('words in the label\'s own piece of the line are the label\'s, not the row\'s', () {
+      final page = DocPage([
+        ...line(0.10, [('Lemon Mart', 0.07, 0.3), ('120.00 SAR', 0.8, 0.15)]),
+        ...line(0.125, [('Purchase limit remaining SAR 900.00', 0.07, 0.5)], h: 0.014),
+        ...line(0.15, [('19/11/2026', 0.07, 0.18)], h: 0.013),
+      ]);
+      final row = reader.readPages([page]).single;
+      expect(row.balance, 900);
+      expect(row.detail, isEmpty);
+      expect(row.signGuessed, isTrue);
+    });
+
+    test('miles and points earned are a count, not money', () {
+      final page = DocPage([
+        ...line(0.37, [('18,240', 0.16, 0.09), ('TRAVEL MILES EARNED', 0.25, 0.33)]),
+        ...line(0.66, [('AVAILABLE LIMIT', 0.1, 0.26)]),
+        ...line(0.69, [('SAR 6,407.15', 0.1, 0.26)], h: 0.028),
+      ]);
+      expect(reader.read([page]).$1, isEmpty);
+      // A shop called after them, with a price, is a row.
+      final shop = DocPage([
+        ...line(0.10, [('Miles Cafe', 0.07, 0.3), ('25.00 SAR', 0.8, 0.13)]),
+        ...line(0.125, [('19/11/2026', 0.07, 0.18)], h: 0.013),
+      ]);
+      expect(reader.readPages([shop]).single.amount.abs(), 25);
+    });
+
+    test('a list with no sign, no word and no balance leaves every direction a guess', () {
+      final page = DocPage([
+        ...line(0.08, [('My Cards', 0.14, 0.16)]),
+        for (var i = 0; i < 4; i++) ...[
+          ...line(0.14 + i * 0.08, [('SHOP NUMBER $i~~CITY~', 0.035, 0.6), ('${30 + i}.80 SAR', 0.8, 0.17)]),
+          ...line(0.163 + i * 0.08, [('${10 + i}/11/2026', 0.035, 0.18)], h: 0.013),
+        ],
+      ]);
+      final rows = reader.readPages([page]);
+      expect(rows.length, 4);
+      expect(rows.every((r) => r.signGuessed && !r.dateGuessed), isTrue);
+    });
+
+    test('a row\'s own name says its direction only when it says it outright', () {
+      StatementRow named(String name) => reader.readPages([
+            DocPage([
+              ...line(0.10, [(name, 0.07, 0.5), ('120.00 SAR', 0.8, 0.15)]),
+              ...line(0.125, [('19/11/2026', 0.07, 0.18)], h: 0.013),
+            ]),
+          ]).single;
+      for (final out in ['Online purchase', 'POS Lemon Mart', 'Cash withdrawal', 'حوالة صادرة محلية', 'شراء عبر الإنترنت', 'Achat en ligne', 'Retrait', 'Compra en tienda']) {
+        expect(named(out).amount, -120, reason: out);
+        expect(named(out).signGuessed, isFalse, reason: out);
+      }
+      for (final back in ['Refund Lemon Mart', 'Purchase refund', 'POS reversal', 'POS PURCHASE REV', 'Incoming transfer', 'حوالة واردة', 'استرداد مبلغ', 'Remboursement', 'Reembolso']) {
+        expect(named(back).amount, 120, reason: back);
+        expect(named(back).signGuessed, isFalse, reason: back);
+      }
+      // Said both ways, or not said: the person is asked.
+      for (final unclear in [
+        'Lemon Mart',
+        'Transfer',
+        'Card payment',
+        'Purchase return',
+        'Purchase cancelled',
+        'ATM cash deposit withdrawal',
+        'Payment reversal',
+        'Refund reversal',
+        'Incoming transfer fee',
+        'تحويل',
+        'سداد بطاقة',
+      ]) {
+        expect(named(unclear).signGuessed, isTrue, reason: unclear);
+      }
+    });
+
+    test('a date with a small word beside it closes the row above; a date under its own label does not', () {
+      final closed = DocPage([
+        ...line(0.10, [('Garden Cafe', 0.3, 0.3)]),
+        ...line(0.125, [('SAR 33.00', 0.33, 0.21)]),
+        ...line(0.15, [('(Tap to pay) 4471**', 0.2, 0.4)]),
+        // Read twice, the second time with a stray letter.
+        ...line(0.175, [('في 14:05 18/11/26', 0.23, 0.31), ('18/11/26 Li', 0.34, 0.2)]),
+      ]);
+      final row = reader.readPages([closed]).single;
+      expect(row.date, DateTime(2026, 11, 18));
+      expect(row.dateGuessed, isFalse);
+      final held = DocPage([
+        ...line(0.50, [('CD00112233', 0.16, 0.26)]),
+        ...line(0.535, [('12,500.00 EGP', 0.16, 0.25)]),
+        ...line(0.56, [('Maturity date: 09/03/2026', 0.16, 0.33)], h: 0.015),
+      ]);
+      expect(reader.readPages([held]).single.dateGuessed, isTrue);
+    });
+  });
+
   group('a statement', () {
     test('a row dated after the day it was received is a due date, kept unticked', () {
       final page = DocPage([

@@ -436,6 +436,59 @@ void main() {
       expect(Reconciliation.of(facts, rows)!.addsUp, isTrue);
     });
 
+    test('a card\'s summary box: what the last statement left is the opening, and a cashback balance is not the card\'s', () {
+      final page = DocPage([
+        ...line(0.20, [('Transaction Date', 0.05, 0.12), ('Posting Date', 0.20, 0.12), ('Description', 0.36, 0.2), ('Amount', 0.80, 0.1)]),
+        ...line(0.24, [('01/09/2026', 0.05, 0.09), ('03/09/2026', 0.20, 0.09), ('Coffee House SAU', 0.36, 0.25), ('230.00', 0.80, 0.08)]),
+        ...line(0.26, [('05/09/2026', 0.05, 0.09), ('05/09/2026', 0.20, 0.09), ('PAYMENT RECEIVED THANK YOU', 0.36, 0.25), ('500.00 CR', 0.80, 0.1)]),
+        ...line(0.28, [('06/09/2026', 0.05, 0.09), ('08/09/2026', 0.20, 0.09), ('Corner Grocer', 0.36, 0.2), ('120.00', 0.80, 0.08)]),
+        ...line(0.40, [('Previous Statement Due ( )', 0.05, 0.2), ('Purchase/Cash Advance ( )', 0.28, 0.2), ('Payment/Credits ( )', 0.52, 0.15), ('Current Balance ( )', 0.76, 0.17)]),
+        ...line(0.42, [('1,000.00', 0.08, 0.1), ('350.00', 0.33, 0.08), ('500.00', 0.55, 0.08), ('850.00', 0.80, 0.1)]),
+        ...line(0.50, [('Cashback Opening Balance', 0.05, 0.2), ('Cashback Earned', 0.30, 0.15), ('Cashback Redeemed', 0.52, 0.15), ('Cashback Closing Balance', 0.74, 0.2)]),
+        ...line(0.52, [('1,420', 0.10, 0.06), ('35', 0.35, 0.03), ('600', 0.57, 0.04), ('855', 0.80, 0.04)]),
+      ]);
+      final (rows, facts) = reader.read([page]);
+      expect(rows.map((r) => r.amount), [-230, 500, -120]);
+      expect(facts.opening, 1000);
+      expect(facts.closing, 850);
+      expect(Reconciliation.of(facts, rows)!.addsUp, isTrue);
+    });
+
+    test('a card printed on a form with no labels: the balance brought forward opens it and the total balance closes it', () {
+      final page = DocPage([
+        ...line(0.10, [('B/F AS OF 12/10/26', 0.30, 0.25), ('3,280.50', 0.85, 0.1)]),
+        ...line(0.14, [('15-OCT-26', 0.05, 0.09), ('16-OCT-26', 0.16, 0.09), ('INT. E-COMMERCE Cloud Tools', 0.30, 0.35), ('84.60', 0.87, 0.08)]),
+        ...line(0.17, [('19-OCT-26', 0.05, 0.09), ('20-OCT-26', 0.16, 0.09), ('LOCAL E-COMM Music Plan', 0.30, 0.35), ('31.40', 0.88, 0.07)]),
+        ...line(0.20, [('05-NOV-26', 0.05, 0.09), ('05-NOV-26', 0.16, 0.09), ('DIRECT DEBIT PAYMENT', 0.30, 0.3), ('640.00-', 0.87, 0.09)]),
+      ]);
+      // The next page carries the balance on and adds the totals up.
+      final last = DocPage([
+        ...line(0.10, [('B/F AS OF PREVIOUS PAGE', 0.30, 0.3), ('2,756.50', 0.85, 0.1)]),
+        ...line(0.30, [('TOTAL REGULAR BALANCE =', 0.30, 0.3), ('116.00', 0.87, 0.08)]),
+        ...line(0.33, [('TOTAL PLAN BALANCE =', 0.30, 0.3), ('2,640.50', 0.85, 0.1)]),
+        ...line(0.36, [('TOTAL BALANCE =', 0.30, 0.2), ('2,756.50', 0.85, 0.1)]),
+      ]);
+      final (rows, facts) = reader.read([page, last]);
+      expect(facts.opening, 3280.5);
+      expect(facts.closing, 2756.5);
+      expect(rows.map((r) => r.amount.abs()), [84.6, 31.4, 640]);
+      // The payment is marked; nothing marks the purchases, so they stay
+      // for the person to confirm.
+      expect(rows.last.amount, 640);
+      expect(rows.take(2).every((r) => r.signGuessed), isTrue);
+    });
+
+    test('a date written year first does not make the document month first', () {
+      final page = DocPage([
+        ...line(0.05, [('From: 2025-10-17 To 17-10-2026', 0.05, 0.5)]),
+        for (var i = 0; i < 3; i++) ...line(0.20 + i * 0.03, [('2026-0${3 + i}-2${i + 1}', 0.05, 0.12), ('Shop number $i', 0.3, 0.3), ('-${10 + i}.50 SAR', 0.8, 0.15)]),
+      ]);
+      final (rows, facts) = reader.read([page]);
+      expect(rows.length, 3);
+      expect(facts.from, DateTime(2025, 10, 17));
+      expect(facts.to, DateTime(2026, 10, 17));
+    });
+
     test('cells centred on their date: the line above a date is its row\'s, even across a page', () {
       final header = line(0.20, [('Posting Date', 0.07, 0.08), ('Value Date', 0.17, 0.08), ('Description', 0.28, 0.2), ('Debit', 0.64, 0.06), ('Credit', 0.75, 0.06), ('Balance', 0.85, 0.08)]);
       final first = DocPage([

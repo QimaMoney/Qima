@@ -45,17 +45,51 @@ mixin _Dates on _ReaderCore {
   static final _relative = RegExp(r"(?<![\p{L}])(today|yesterday|اليوم|أمس|امس|aujourd'hui|aujourd’hui|hier|hoy|ayer)(?![\p{L}])", caseSensitive: false, unicode: true);
   static final _time = RegExp(r'(?<!\d)\d{1,2}:\d{2}(?::\d{2})?(?:\s?(?:am|pm|ص|م))?(?![\d])', caseSensitive: false);
 
+  // Days of the week, Monday first. A messaging app heads a day's messages
+  // with the day's name alone ("Tuesday 3:10 PM") for the week before.
+  static const _weekdayNames = [
+    'monday|lundi|lunes|الاثنين|الإثنين',
+    'tuesday|mardi|martes|الثلاثاء',
+    'wednesday|mercredi|miércoles|miercoles|الأربعاء|الاربعاء',
+    'thursday|jeudi|jueves|الخميس',
+    'friday|vendredi|viernes|الجمعة',
+    'saturday|samedi|sábado|sabado|السبت',
+    'sunday|dimanche|domingo|الأحد|الاحد',
+  ];
+  static final Map<String, int> _weekdays = {
+    for (var i = 0; i < 7; i++)
+      for (final n in _weekdayNames[i].split('|')) n: i + 1,
+  };
+  static final _weekday = RegExp('(?<![\\p{L}])(${_weekdays.keys.join('|')})(?![\\p{L}])', caseSensitive: false, unicode: true);
+  // What else a line that only names a day may hold: the day's short name
+  // beside its date ("Wed, 7 Oct at 1:15 PM") and the word joining the
+  // day to the time. Short names never give the day themselves: "mar" is
+  // also March, "sat" and "sun" are words.
+  static final _dayFiller = RegExp(
+    r'(?<![\p{L}])(?:mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun|lun|mer|jeu|ven|sam|dim|mié|mie|jue|vie|sáb|sab|dom|at|à|a las|في|الساعة)(?![\p{L}])',
+    caseSensitive: false,
+    unicode: true,
+  );
+
   // ---------------------------------------------------------- dates
 
   /// Whether dates written as numbers put the day first. Decided once per
   /// document from any date whose first or second number is over 12.
   bool _dayFirst = true;
 
+  /// Whether a day and month with no year is only the end of something
+  /// longer: "13/09/26" with its day misread into letters ("olz/09/26")
+  /// leaves "09/26", which is no day and month of its own. The mark before
+  /// it is the date's own: "01/11-15/11" is two dates.
+  static bool _tail(String text, RegExpMatch m) =>
+      m[3] == null && m.start >= 2 && text[m.start - 1] == text[m.start + m[1]!.length] && _Text._letterOrDigit.hasMatch(text[m.start - 2]);
+
   void _decideOrder(Iterable<String> texts) {
     var day = 0, month = 0;
     for (final t in texts) {
       for (final m in _numDate.allMatches(t)) {
         if (m[3] == null && t.substring(m.start, m.end).contains('.')) continue;
+        if (_tail(t, m)) continue;
         final a = int.parse(m[1]!), b = int.parse(m[2]!);
         if (a > 12 && b <= 12) day++;
         if (b > 12 && a <= 12) month++;
@@ -134,6 +168,30 @@ mixin _Dates on _ReaderCore {
     return raw.length == 2 ? 2000 + v : v;
   }
 
+  /// The day a line names when it holds nothing but a day and perhaps a
+  /// time, as the line between two days' messages does: its date, "Today",
+  /// or a day of the week on its own, which is the latest such day before
+  /// the one the file was shared on. [timed] when the line gives a time
+  /// too. Null for any other line: "closed on Friday" names no day.
+  ({DateTime day, bool timed})? _dayLine(String text) {
+    final (found, spans) = _dates(text);
+    final times = [for (final m in _time.allMatches(text)) _Span(m.start, m.end)];
+    var rest = text;
+    for (final s in [...spans, ...times]) {
+      rest = rest.replaceRange(s.start, s.end, ' ' * (s.end - s.start));
+    }
+    final named = _weekday.firstMatch(rest);
+    rest = rest.replaceAll(_weekday, ' ').replaceAll(_dayFiller, ' ');
+    if (_Text._letterOrDigit.hasMatch(rest)) return null;
+    final written = found.where((d) => !d.hijri).firstOrNull?.value;
+    if (written != null) return (day: written, timed: times.isNotEmpty);
+    if (named == null) return null;
+    final today = DateTime(received.year, received.month, received.day);
+    // Today's own name is last week's: today is headed "Today".
+    final back = (today.weekday - _weekdays[named[1]!.toLowerCase()]! + 6) % 7 + 1;
+    return (day: DateTime(today.year, today.month, today.day - back), timed: times.isNotEmpty);
+  }
+
   /// The dates in [text], and every span that looked like one (a far year
   /// included), so those digits aren't read as money.
   (List<_Found<DateTime>>, List<_Span>) _dates(String text0) {
@@ -189,6 +247,11 @@ mixin _Dates on _ReaderCore {
       // "12.50" is money, not a date: a date without a year needs a slash
       // or a dash.
       if (m[3] == null && text.substring(m.start, m.end).contains('.')) continue;
+      // The end of a misread date is no date, and its digits no money.
+      if (_tail(text, m)) {
+        take(m, null);
+        continue;
+      }
       final y = _year(m[3], mo, d);
       take(m, _day(y, mo, d), hijri: _isHijriYear(y), loose: m[3] == null);
     }
