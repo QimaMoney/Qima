@@ -203,6 +203,11 @@ class StatementReader extends _ReaderCore with _Dates, _Amounts, _Layout, _Recon
   static double? parseNumber(String raw, {String? currency}) => _Amounts.parseNumber(raw, currency: currency);
   static DateTime hijriToGregorian(int y, int m, int d) => _Dates.hijriToGregorian(y, m, d);
 
+  /// How many neighbouring pairs of [rows] the running balance links, read
+  /// oldest first and newest first. For measuring a reading (the reader
+  /// bench), not for making one.
+  static (int, int) balanceLinks(List<StatementRow> rows) => _Reconcile._balanceFits(rows);
+
   /// One row per message: shared text such as a bank SMS. Messages are
   /// separated by blank lines.
   List<StatementRow> readMessages(String text) {
