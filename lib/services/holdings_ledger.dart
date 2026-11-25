@@ -100,6 +100,35 @@ class HoldingsLedger {
 
   Future<List<HoldingTransaction>> delete(String id) => deleteAll([id]);
 
+  /// Rewrites the trades among [ids] with [change] in one commit: a split
+  /// restated in today's shares. Unlike [upsert], each keeps the cash it
+  /// moved, as well as its source, status and payee, since nothing about the
+  /// money changed. An id that is not a live trade is ignored. Throws
+  /// [HoldingRejected], writing nothing, when any result would not be sound.
+  Future<List<HoldingTransaction>> restate(Iterable<String> ids, HoldingTransaction Function(HoldingTransaction) change) async {
+    final wanted = ids.toSet();
+    final changed = <BookEntry>[];
+    for (final r in await book.entries.exportRecords()) {
+      final stored = r.item;
+      if (r.deleted || !wanted.contains(stored.id) || !stored.template.isHoldingEntry) continue;
+      final trade = HoldingEntryCodec.tryFromEntry(stored);
+      if (trade == null) continue;
+      final leg = HoldingEntryCodec.cashLegOf(stored);
+      final cash = leg == null
+          ? null
+          : CashLeg(accountId: leg.accountId, currency: leg.currency, amount: leg.amount.abs(), baseAmount: leg.baseAmount.abs());
+      final entry = HoldingEntryCodec.toEntry(change(trade), cash: cash, baseCurrency: stored.baseCurrency, merchant: stored.merchant);
+      changed.add(_checked(entry).copyWith(
+        source: stored.source,
+        postedDate: stored.postedDate,
+        status: stored.status,
+        rawMerchant: stored.rawMerchant,
+      ));
+    }
+    if (changed.isEmpty) return load();
+    return _trades(await book.entries.upsertAll(changed));
+  }
+
   BookEntry _checked(BookEntry entry) {
     final issues = entry.issues;
     if (issues.isNotEmpty) throw HoldingRejected(issues);

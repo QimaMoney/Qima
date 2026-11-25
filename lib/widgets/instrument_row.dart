@@ -6,6 +6,7 @@ import '../models/chart_range.dart';
 
 import '../l10n/app_localizations.dart';
 import '../models/instrument_presentation.dart';
+import '../models/market_hours.dart';
 import '../theme/design_system.dart';
 import '../theme/price_chart.dart';
 import '../theme/qima_colors.dart';
@@ -72,6 +73,7 @@ class InstrumentRow extends StatelessWidget {
                       accent: QimaColors.trendColor(change?.isUp ?? presentation.isTrendingUp, colors),
                       showsAxes: false,
                       lineWidth: 1.5,
+                      market: MarketHours.marketOf(presentation.instrument),
                     )
                   : const SizedBox.shrink(),
             ),

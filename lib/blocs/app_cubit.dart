@@ -89,6 +89,7 @@ class AppCubit extends Cubit<AppState> with GuardedEmit<AppState> {
     await _alerts.load(preferences: preferences, pipeline: _pipeline(preferences, _sync.backupService));
 
     await _holdings.load();
+    await _holdings.loadSplits(preferences);
     await _sync.load();
     await _market.loadCached();
 

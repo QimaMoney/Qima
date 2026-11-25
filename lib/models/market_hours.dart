@@ -91,15 +91,37 @@ class MarketHours {
   static MarketStatus status(Market market, DateTime now) {
     if (market == Market.always) return const MarketStatus(open: true);
     final at = now.toUtc();
-    final local = at.add(_offset(market, at));
-    // Sessions from yesterday to two weeks ahead, joined where one runs into
-    // the next (metals and currencies run across midnight).
+    for (final (start, end) in _spans(market, at, at.add(const Duration(days: 14)))) {
+      if (at.isBefore(start)) return MarketStatus(open: false, next: start);
+      if (at.isBefore(end)) return MarketStatus(open: true, next: end);
+    }
+    return const MarketStatus(open: false);
+  }
+
+  /// The UTC spans [market] is open between [from] and [to], in order and
+  /// clipped to them. A market that never closes is one span.
+  static List<(DateTime, DateTime)> openSpans(Market market, DateTime from, DateTime to) {
+    final a = from.toUtc(), b = to.toUtc();
+    if (!a.isBefore(b)) return const [];
+    if (market == Market.always) return [(a, b)];
+    return [
+      for (final (start, end) in _spans(market, a, b))
+        if (end.isAfter(a) && start.isBefore(b)) (start.isBefore(a) ? a : start, end.isAfter(b) ? b : end),
+    ];
+  }
+
+  /// Sessions from the local day before [from] to the one after [to], joined
+  /// where one runs into the next (metals and currencies run across
+  /// midnight).
+  static List<(DateTime, DateTime)> _spans(Market market, DateTime from, DateTime to) {
+    final local = from.add(_offset(market, from));
+    final days = to.difference(from).inDays + 2;
     final spans = <(DateTime, DateTime)>[];
-    for (var d = -1; d <= 14; d++) {
+    for (var d = -1; d <= days; d++) {
       final day = DateTime.utc(local.year, local.month, local.day + d);
       if (_holiday(market, day)) continue;
-      for (final (from, to) in _sessions(market, day.weekday)) {
-        final start = _toUtc(market, day, from), end = _toUtc(market, day, to);
+      for (final (open, close) in _sessions(market, day.weekday)) {
+        final start = _toUtc(market, day, open), end = _toUtc(market, day, close);
         if (spans.isNotEmpty && !start.isAfter(spans.last.$2)) {
           spans.last = (spans.last.$1, end);
         } else {
@@ -107,11 +129,7 @@ class MarketHours {
         }
       }
     }
-    for (final (start, end) in spans) {
-      if (at.isBefore(start)) return MarketStatus(open: false, next: start);
-      if (at.isBefore(end)) return MarketStatus(open: true, next: end);
-    }
-    return const MarketStatus(open: false);
+    return spans;
   }
 
   // Minutes after local midnight.

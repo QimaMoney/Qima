@@ -9,6 +9,7 @@ import '../models/holding.dart';
 import '../models/holding_entry_codec.dart';
 import '../models/holding_totals.dart';
 import '../models/holding_transaction.dart';
+import '../models/instrument_facts.dart';
 import '../models/instrument_catalog.dart';
 import '../models/ledger.dart';
 import '../models/metal_breakdown.dart';
@@ -19,6 +20,7 @@ import '../models/quote.dart';
 import '../models/chart_range.dart';
 import '../services/book_store.dart';
 import '../services/holdings_ledger.dart';
+import '../services/preferences.dart';
 import 'guarded_emit.dart';
 import 'holdings_state.dart';
 import 'market_cubit.dart';
@@ -47,6 +49,9 @@ class HoldingsCubit extends Cubit<HoldingsState> with GuardedEmit<HoldingsState>
   /// changed under it. Called with [BookStore.entriesKey] after a trade is
   /// saved or deleted here, since a trade is an entry in that ledger.
   Future<void> Function(String? key)? onBookChanged;
+
+  /// Assigned by [loadSplits], at start-up.
+  Preferences? _preferences;
 
   HoldingsCubit({
     required this.ledgerStore,
@@ -90,6 +95,20 @@ class HoldingsCubit extends Cubit<HoldingsState> with GuardedEmit<HoldingsState>
   /// restore) changed the book.
   void adopt(List<HoldingTransaction> transactions) {
     if (transactions != state.transactions) emit(state.copyWith(transactions: transactions));
+  }
+
+  /// Start-up: the splits the person has answered.
+  Future<void> loadSplits(Preferences preferences) async {
+    _preferences = preferences;
+    adoptSplits(await readSplits());
+  }
+
+  /// The answered splits as stored, after another device changed them; what
+  /// is shown when start-up has not reached the preferences yet.
+  Future<Set<String>> readSplits() async => await _preferences?.handledSplits ?? state.handledSplits;
+
+  void adoptSplits(Set<String> handled) {
+    if (!setEquals(handled, state.handledSplits)) emit(state.copyWith(handledSplits: handled));
   }
 
   // ---------------------------------------------------------------------
@@ -158,6 +177,27 @@ class HoldingsCubit extends Cubit<HoldingsState> with GuardedEmit<HoldingsState>
       total = total.add(p.realised);
     }
     return any ? total.inCurrency(_baseCurrency(), _market.state.rates) : null;
+  }
+
+  /// Realised gains and losses for each calendar year, newest first: each
+  /// sale's result in the year it was sold, and each standalone fee in the
+  /// year it was charged.
+  List<(int, Money)> get realisedByYear {
+    final byYear = <int, CurrencyAmounts>{};
+    for (final t in state.transactions) {
+      final CurrencyAmounts amount;
+      if (t.kind == TransactionKind.fee) {
+        amount = CurrencyAmounts({t.currency: -t.fee});
+      } else {
+        final effect = state.ledger[t.instrumentID]?.disposals[t.id];
+        if (effect == null || effect.realised.isZero) continue;
+        amount = effect.realised;
+      }
+      final year = t.date.toLocal().year;
+      byYear[year] = (byYear[year] ?? CurrencyAmounts.zero).add(amount);
+    }
+    final years = byYear.keys.toList()..sort((a, b) => b.compareTo(a));
+    return [for (final y in years) (y, byYear[y]!.inCurrency(_baseCurrency(), _market.state.rates))];
   }
 
   /// Instruments with transactions but nothing left held — sold or moved
@@ -289,6 +329,54 @@ class HoldingsCubit extends Cubit<HoldingsState> with GuardedEmit<HoldingsState>
     await _notifyBook();
     unawaited(_markDataChanged());
     return null;
+  }
+
+  // ---------------------------------------------------------------------
+  // Splits
+  // ---------------------------------------------------------------------
+
+  /// Splits of [instrument] the person hasn't answered yet that touch their
+  /// trades: some share-moving transaction is dated before the split day.
+  List<StockSplit> pendingSplitsFor(Instrument instrument) {
+    final splits = _market.state.factsByID[instrument.id]?.splits ?? const <StockSplit>[];
+    if (splits.isEmpty) return const [];
+    final trades = state.transactions.where((t) => t.instrumentID == instrument.id && t.kind.movesQuantity);
+    return [
+      for (final split in splits)
+        if (!state.handledSplits.contains(split.keyFor(instrument.id)) && trades.any((t) => t.date.isBefore(split.date)))
+          split,
+    ];
+  }
+
+  /// Restates every share-moving trade of [instrument] before [split] in
+  /// today's shares: quantity times the ratio, price per share divided by
+  /// it, so each trade's total and the cash it moved stay the same. One
+  /// write, then the split is marked answered.
+  Future<void> applySplit(Instrument instrument, StockSplit split) async {
+    final ids = [
+      for (final t in state.transactions)
+        if (t.instrumentID == instrument.id && t.kind.movesQuantity && t.date.isBefore(split.date)) t.id,
+    ];
+    if (ids.isNotEmpty) {
+      final transactions = await ledgerStore.restate(
+        ids,
+        (t) => t.copyWith(quantity: t.quantity * split.ratio, unitPrice: t.unitPrice / split.ratio),
+      );
+      if (isClosed) return;
+      emit(state.copyWith(transactions: transactions));
+      await _notifyBook();
+      unawaited(_markDataChanged());
+    }
+    await _markSplitHandled(instrument, split);
+  }
+
+  /// The person's trades were already in today's shares; leaves them.
+  Future<void> keepSplit(Instrument instrument, StockSplit split) => _markSplitHandled(instrument, split);
+
+  Future<void> _markSplitHandled(Instrument instrument, StockSplit split) async {
+    final handled = {...state.handledSplits, split.keyFor(instrument.id)};
+    emit(state.copyWith(handledSplits: handled));
+    await _preferences?.setHandledSplits(handled);
   }
 
   // ---------------------------------------------------------------------

@@ -2,9 +2,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/asset.dart';
 import '../models/fx_history.dart';
+import '../models/instrument_facts.dart';
+import '../models/instrument_fundamentals.dart';
 import '../models/metal_breakdown.dart';
 import '../models/money.dart';
 import '../models/quote.dart';
+import 'facts_provider.dart';
 import 'fx_history_store.dart';
 import 'fx_rate_store.dart';
 import 'price_converter.dart';
@@ -21,6 +24,8 @@ class PriceRepository {
   static const Duration quoteTailRefreshInterval = Duration(hours: 12);
   static const Duration quoteRetryBackoff = Duration(minutes: 10);
   static const Duration intradayRefreshInterval = Duration(minutes: 15);
+  static const Duration factsRefreshInterval = Duration(minutes: 15);
+  static const Duration eventsRefreshInterval = Duration(hours: 24);
 
   /// The widest gap between the live price and the latest history bar that
   /// is still the same market (gold futures sit within a percent or two of
@@ -40,6 +45,8 @@ class PriceRepository {
   final FXRateStore fxRateStore;
   final FXHistoryStore fxHistoryStore;
   final QuoteHistoryStore quoteHistoryStore;
+  final YahooFactsProvider factsProvider;
+  final FactsStore factsStore;
   final Future<SharedPreferences> Function() prefsProvider;
 
   /// Must be false when this repository runs inside a widget extension —
@@ -55,6 +62,8 @@ class PriceRepository {
     FXRateStore? fxRateStore,
     FXHistoryStore? fxHistoryStore,
     QuoteHistoryStore? quoteHistoryStore,
+    YahooFactsProvider? factsProvider,
+    FactsStore? factsStore,
     Future<SharedPreferences> Function()? prefsProvider,
     this.reloadsWidgets = true,
   })  : metalCryptoProvider = metalCryptoProvider ?? GoldAPIProvider(),
@@ -63,6 +72,8 @@ class PriceRepository {
         fxRateStore = fxRateStore ?? FXRateStore(),
         fxHistoryStore = fxHistoryStore ?? FXHistoryStore(),
         quoteHistoryStore = quoteHistoryStore ?? QuoteHistoryStore(),
+        factsProvider = factsProvider ?? YahooFactsProvider(),
+        factsStore = factsStore ?? FactsStore(),
         prefsProvider = prefsProvider ?? SharedPreferences.getInstance;
 
   /// Routes an instrument to the provider responsible for its asset class.
@@ -98,6 +109,8 @@ class PriceRepository {
     final history = await cachedFXHistory();
     return PriceConverter(rates: rates, currencyCode: currency, unit: unit, karat: karat, history: history);
   }
+
+  Future<Map<String, InstrumentFacts>> cachedFacts() => factsStore.load();
 
   // ---- Rates ----
 
@@ -471,6 +484,60 @@ class PriceRepository {
     } catch (_) {
       return null;
     }
+  }
+
+  // ---- Facts ----
+
+  /// Whether the exchange publishes facts for [instrument]: stocks and
+  /// indices, through Yahoo.
+  static bool hasFacts(Instrument instrument) =>
+      instrument.assetClass == AssetClass.stock || instrument.assetClass == AssetClass.indices;
+
+  /// Refreshes the day's figures for [instruments] at most every
+  /// [factsRefreshInterval], and a stock's dividends, splits, valuation and
+  /// financials at most every [eventsRefreshInterval]. A failed fetch keeps what [current] holds.
+  Future<Map<String, InstrumentFacts>> refreshFacts(
+    List<Instrument> instruments,
+    Map<String, InstrumentFacts> current, {
+    DateTime? now,
+  }) async {
+    final at = now ?? DateTime.now();
+    final next = {...current};
+    var changed = false;
+    for (final instrument in instruments) {
+      if (!hasFacts(instrument)) continue;
+      final old = current[instrument.id];
+      final eventsAt = old?.eventsFetchedAt;
+      // Facts cached before valuation was fetched are due at once.
+      final eventsDue = instrument.assetClass == AssetClass.stock &&
+          (eventsAt == null || old?.fundamentals == null || at.difference(eventsAt) > eventsRefreshInterval);
+      if (old != null && !eventsDue && at.difference(old.fetchedAt) < factsRefreshInterval) continue;
+      final symbol = instrument.sourceSymbol;
+      final today = await factsProvider.today(symbol, at);
+      if (today == null) continue;
+      final events = eventsDue ? await factsProvider.events(symbol) : null;
+      // An empty record marks a stock with none, so it isn't asked again
+      // until the next daily fetch.
+      final fundamentals = eventsDue
+          ? await factsProvider.fundamentals(symbol, today.currency, at) ?? old?.fundamentals ?? InstrumentFundamentals(fetchedAt: at)
+          : null;
+      next[instrument.id] = events != null
+          ? today.withEvents(
+              dividends: events.dividends,
+              splits: events.splits,
+              at: at,
+              fundamentals: fundamentals ?? old?.fundamentals,
+            )
+          : today.withEvents(
+              dividends: old?.dividends ?? const [],
+              splits: old?.splits ?? const [],
+              at: eventsAt,
+              fundamentals: fundamentals ?? old?.fundamentals,
+            );
+      changed = true;
+    }
+    if (changed) await factsStore.save(next);
+    return next;
   }
 
   /// Force-repulls FX history for [currency]/[baseCurrency] (+ the

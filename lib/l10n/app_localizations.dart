@@ -9377,6 +9377,330 @@ abstract class AppLocalizations {
   /// **'Answer the setup questions again. Nothing you use is turned off.'**
   String get settingsHelpRunSetupSubtitle;
 
+  /// Scrub callout: change from the first price in view to the touched one.
+  ///
+  /// In en, this message translates to:
+  /// **'{change} since {date}'**
+  String chartSince(String change, String date);
+
+  /// Pill on a zoomed price chart that shows the whole range again.
+  ///
+  /// In en, this message translates to:
+  /// **'Reset zoom'**
+  String get chartResetZoom;
+
+  /// Menu item that draws another price against this one.
+  ///
+  /// In en, this message translates to:
+  /// **'Compare with {name}'**
+  String chartCompareWith(String name);
+
+  /// Removes the comparison line from the price chart.
+  ///
+  /// In en, this message translates to:
+  /// **'Stop comparing'**
+  String get chartStopComparing;
+
+  /// Shown over the chart while older prices download.
+  ///
+  /// In en, this message translates to:
+  /// **'Loading older prices'**
+  String get chartLoadingOlder;
+
+  /// Key stat: yesterday's closing price.
+  ///
+  /// In en, this message translates to:
+  /// **'Previous close'**
+  String get statPreviousClose;
+
+  /// Key stat: dividends over the past year against today's price.
+  ///
+  /// In en, this message translates to:
+  /// **'Dividend yield'**
+  String get statDividendYield;
+
+  /// Bar showing the lowest and highest price over 52 weeks.
+  ///
+  /// In en, this message translates to:
+  /// **'52-week range'**
+  String get statYearRange;
+
+  /// Bar showing today's lowest and highest price.
+  ///
+  /// In en, this message translates to:
+  /// **'Day range'**
+  String get statDayRange;
+
+  /// Warning under the price when the exchange hasn't traded it for over a week.
+  ///
+  /// In en, this message translates to:
+  /// **'Last traded {date}. This price may be out of date.'**
+  String factsStale(String date);
+
+  /// How a split reads, like 11-for-10.
+  ///
+  /// In en, this message translates to:
+  /// **'{numerator}-for-{denominator}'**
+  String splitRatio(String numerator, String denominator);
+
+  /// Notice title when a stock the person holds was split.
+  ///
+  /// In en, this message translates to:
+  /// **'{ratio} split on {date}'**
+  String splitTitle(String ratio, String date);
+
+  /// Notice body under the split title.
+  ///
+  /// In en, this message translates to:
+  /// **'Your trades before then are in the old shares, so the quantity held and its average cost are off. Restate them in today\'s shares? Each trade\'s total stays the same.'**
+  String get splitBody;
+
+  /// Button that restates trades before a split in today's shares.
+  ///
+  /// In en, this message translates to:
+  /// **'Adjust my trades'**
+  String get splitAdjust;
+
+  /// Button saying the trades already use today's shares.
+  ///
+  /// In en, this message translates to:
+  /// **'Already in today\'s shares'**
+  String get splitAlreadyAdjusted;
+
+  /// Chart mark label for a dividend paid on that day.
+  ///
+  /// In en, this message translates to:
+  /// **'Dividend {amount}'**
+  String chartDividendMark(String amount);
+
+  /// Holding stat: everything gained, with sales, dividends and fees.
+  ///
+  /// In en, this message translates to:
+  /// **'Total return'**
+  String get holdingsTotalReturn;
+
+  /// Holding stat: the total return as a yearly rate.
+  ///
+  /// In en, this message translates to:
+  /// **'Per year'**
+  String get holdingsPerYear;
+
+  /// Line on a holding: dividends received and the yearly estimate.
+  ///
+  /// In en, this message translates to:
+  /// **'Dividends: {received} so far · about {yearly} a year'**
+  String holdingsDividendsLine(String received, String yearly);
+
+  /// Section title: realised gains and losses for each year.
+  ///
+  /// In en, this message translates to:
+  /// **'Realised by year'**
+  String get realisedByYear;
+
+  /// Line on the net worth card: what changed net worth this month.
+  ///
+  /// In en, this message translates to:
+  /// **'This month {change}: saved {saved}, prices and other {other}'**
+  String netWorthThisMonth(String change, String saved, String other);
+
+  /// Row title: the share of income kept this month.
+  ///
+  /// In en, this message translates to:
+  /// **'Savings rate'**
+  String get savingsRate;
+
+  /// Subtitle under the savings rate.
+  ///
+  /// In en, this message translates to:
+  /// **'Average {percent} over {months} months'**
+  String savingsRateAverage(String percent, int months);
+
+  /// Row title: how long cash lasts at usual spending.
+  ///
+  /// In en, this message translates to:
+  /// **'Cash runway'**
+  String get cashRunway;
+
+  /// Cash runway figure in months.
+  ///
+  /// In en, this message translates to:
+  /// **'About {months} months'**
+  String cashRunwayValue(String months);
+
+  /// Subtitle under cash runway.
+  ///
+  /// In en, this message translates to:
+  /// **'At your usual {amount} a month'**
+  String cashRunwaySubtitle(String amount);
+
+  /// Under a category: its average over the previous three months.
+  ///
+  /// In en, this message translates to:
+  /// **'Usual {amount}'**
+  String categoryUsual(String amount);
+
+  /// Line on the balance sheet: what is owed against what is owned.
+  ///
+  /// In en, this message translates to:
+  /// **'You owe {percent} of what you own'**
+  String debtRatio(String percent);
+
+  /// Key stat: today's opening price.
+  ///
+  /// In en, this message translates to:
+  /// **'Open'**
+  String get statOpen;
+
+  /// Key stat: shares traded today.
+  ///
+  /// In en, this message translates to:
+  /// **'Volume'**
+  String get statVolume;
+
+  /// Key stat: average daily shares traded over three months.
+  ///
+  /// In en, this message translates to:
+  /// **'Avg. volume (3 mo)'**
+  String get statAverageVolume;
+
+  /// Key stat: when the company next reports results.
+  ///
+  /// In en, this message translates to:
+  /// **'Earnings date'**
+  String get statEarningsDate;
+
+  /// An earnings date the company hasn't confirmed.
+  ///
+  /// In en, this message translates to:
+  /// **'{date} (estimated)'**
+  String statEarningsEstimated(String date);
+
+  /// Card title: how the market values the company.
+  ///
+  /// In en, this message translates to:
+  /// **'Valuation'**
+  String get valuationTitle;
+
+  /// Valuation: the value of all the company's shares.
+  ///
+  /// In en, this message translates to:
+  /// **'Market cap'**
+  String get statMarketCap;
+
+  /// Valuation: market cap plus debt minus cash.
+  ///
+  /// In en, this message translates to:
+  /// **'Enterprise value'**
+  String get statEnterpriseValue;
+
+  /// Valuation: price over the past year's earnings per share.
+  ///
+  /// In en, this message translates to:
+  /// **'P/E'**
+  String get statPeRatio;
+
+  /// Valuation: price over next year's expected earnings per share.
+  ///
+  /// In en, this message translates to:
+  /// **'Forward P/E'**
+  String get statForwardPe;
+
+  /// Valuation: P/E against expected earnings growth.
+  ///
+  /// In en, this message translates to:
+  /// **'PEG ratio'**
+  String get statPegRatio;
+
+  /// Valuation: market cap over revenue.
+  ///
+  /// In en, this message translates to:
+  /// **'Price/sales'**
+  String get statPriceToSales;
+
+  /// Valuation: price over book value per share.
+  ///
+  /// In en, this message translates to:
+  /// **'Price/book'**
+  String get statPriceToBook;
+
+  /// Valuation: enterprise value over EBITDA.
+  ///
+  /// In en, this message translates to:
+  /// **'EV/EBITDA'**
+  String get statEvToEbitda;
+
+  /// Valuation: how much the price moves with the market, over 5 years of months.
+  ///
+  /// In en, this message translates to:
+  /// **'Beta (5Y monthly)'**
+  String get statBeta;
+
+  /// Card title: the company's latest reported results.
+  ///
+  /// In en, this message translates to:
+  /// **'Financials'**
+  String get financialsTitle;
+
+  /// Under the financials title: the date of the latest report.
+  ///
+  /// In en, this message translates to:
+  /// **'Latest report {date}'**
+  String financialsAsOf(String date);
+
+  /// Financials: revenue over the past twelve months.
+  ///
+  /// In en, this message translates to:
+  /// **'Revenue (12 mo)'**
+  String get statRevenue;
+
+  /// Financials: net income over the past twelve months.
+  ///
+  /// In en, this message translates to:
+  /// **'Net income (12 mo)'**
+  String get statNetIncome;
+
+  /// Financials: net income as a share of revenue.
+  ///
+  /// In en, this message translates to:
+  /// **'Profit margin'**
+  String get statProfitMargin;
+
+  /// Financials: earnings per share over the past twelve months.
+  ///
+  /// In en, this message translates to:
+  /// **'EPS (12 mo)'**
+  String get statEps;
+
+  /// Financials: net income over shareholders' equity.
+  ///
+  /// In en, this message translates to:
+  /// **'Return on equity'**
+  String get statReturnOnEquity;
+
+  /// Financials: net income over total assets.
+  ///
+  /// In en, this message translates to:
+  /// **'Return on assets'**
+  String get statReturnOnAssets;
+
+  /// Financials: cash at the latest quarter's end.
+  ///
+  /// In en, this message translates to:
+  /// **'Cash'**
+  String get statCash;
+
+  /// Financials: total debt over shareholders' equity.
+  ///
+  /// In en, this message translates to:
+  /// **'Debt/equity'**
+  String get statDebtToEquity;
+
+  /// Financials: free cash flow over the past twelve months.
+  ///
+  /// In en, this message translates to:
+  /// **'Free cash flow (12 mo)'**
+  String get statFreeCashFlow;
+
   /// No description provided for @settingsNeedsAttention.
   ///
   /// In en, this message translates to:

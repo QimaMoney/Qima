@@ -58,11 +58,12 @@ class MarketCubit extends Cubit<MarketState> with GuardedEmit<MarketState> {
   Future<void> loadCached() async {
     final rates = await repository.cachedRates();
     final fxHistory = await repository.cachedFXHistory();
+    final factsByID = await repository.cachedFacts();
     final seriesByID = <String, QuoteSeries>{};
     for (final instrument in _tracked()) {
       seriesByID[instrument.id] = await repository.cachedSeries(instrument);
     }
-    emit(state.copyWith(rates: rates, fxHistory: fxHistory, seriesByID: seriesByID));
+    emit(state.copyWith(rates: rates, fxHistory: fxHistory, seriesByID: seriesByID, factsByID: factsByID));
   }
 
   /// The ones of [instruments] that have no price in the state yet.
@@ -160,7 +161,25 @@ class MarketCubit extends Cubit<MarketState> with GuardedEmit<MarketState> {
     }
     // Fire-and-forget: history is larger and shouldn't block live prices.
     unawaited(backfillHistoryIfNeeded());
+    unawaited(refreshFacts());
     unawaited(_notifyZakatIfDue());
+  }
+
+  bool _refreshingFacts = false;
+
+  /// Refreshes the exchange's facts for tracked stocks and indices, on the
+  /// repository's own cadence. Never fails loudly: facts are extra.
+  Future<void> refreshFacts() async {
+    if (_refreshingFacts) return;
+    _refreshingFacts = true;
+    try {
+      final next = await repository.refreshFacts(_tracked(), state.factsByID);
+      if (!mapEquals(next, state.factsByID)) emit(state.copyWith(factsByID: next));
+    } catch (e, st) {
+      debugPrint('MarketCubit: refreshFacts failed: $e\n$st');
+    } finally {
+      _refreshingFacts = false;
+    }
   }
 
   Future<void> backfillHistoryIfNeeded() async {
@@ -224,6 +243,8 @@ class MarketCubit extends Cubit<MarketState> with GuardedEmit<MarketState> {
       if (isClosed) return;
       emit(state.copyWith(phase: RefreshPhase.failed, errorMessage: _refreshFailedKey));
     }
+    // A newly added stock gets its facts now, not at the next full refresh.
+    unawaited(refreshFacts());
   }
 
   /// The nisab is priced off gold and silver even for someone who holds
