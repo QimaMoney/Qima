@@ -1554,5 +1554,10 @@
   "startTaskAlert": "Créez une alerte de prix",
   "startTaskBankMessages": "Configurez les messages bancaires",
   "settingsHelpRunSetup": "Relancer la configuration",
-  "settingsHelpRunSetupSubtitle": "Répondez de nouveau aux questions. Rien de ce que vous utilisez n’est désactivé."
+  "settingsHelpRunSetupSubtitle": "Répondez de nouveau aux questions. Rien de ce que vous utilisez n’est désactivé.",
+  "chartSince": "{change} depuis le {date}",
+  "chartResetZoom": "Réinitialiser le zoom",
+  "chartCompareWith": "Comparer avec {name}",
+  "chartStopComparing": "Arrêter la comparaison",
+  "chartLoadingOlder": "Chargement des prix plus anciens"
 }

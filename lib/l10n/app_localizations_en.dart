@@ -5434,4 +5434,23 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get settingsHelpRunSetupSubtitle =>
       'Answer the setup questions again. Nothing you use is turned off.';
+
+  @override
+  String chartSince(String change, String date) {
+    return '$change since $date';
+  }
+
+  @override
+  String get chartResetZoom => 'Reset zoom';
+
+  @override
+  String chartCompareWith(String name) {
+    return 'Compare with $name';
+  }
+
+  @override
+  String get chartStopComparing => 'Stop comparing';
+
+  @override
+  String get chartLoadingOlder => 'Loading older prices';
 }

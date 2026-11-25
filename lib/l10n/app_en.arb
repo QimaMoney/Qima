@@ -3371,5 +3371,15 @@
   "startTaskAlert": "Set a price alert",
   "startTaskBankMessages": "Set up bank messages",
   "settingsHelpRunSetup": "Run setup again",
-  "settingsHelpRunSetupSubtitle": "Answer the setup questions again. Nothing you use is turned off."
+  "settingsHelpRunSetupSubtitle": "Answer the setup questions again. Nothing you use is turned off.",
+  "chartSince": "{change} since {date}",
+  "@chartSince": {"description": "Scrub callout: change from the first price in view to the touched one.", "placeholders": {"change": {"type": "String"}, "date": {"type": "String"}}},
+  "chartResetZoom": "Reset zoom",
+  "@chartResetZoom": {"description": "Pill on a zoomed price chart that shows the whole range again."},
+  "chartCompareWith": "Compare with {name}",
+  "@chartCompareWith": {"description": "Menu item that draws another price against this one.", "placeholders": {"name": {"type": "String"}}},
+  "chartStopComparing": "Stop comparing",
+  "@chartStopComparing": {"description": "Removes the comparison line from the price chart."},
+  "chartLoadingOlder": "Loading older prices",
+  "@chartLoadingOlder": {"description": "Shown over the chart while older prices download."}
 }

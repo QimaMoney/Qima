@@ -9244,6 +9244,36 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Answer the setup questions again. Nothing you use is turned off.'**
   String get settingsHelpRunSetupSubtitle;
+
+  /// Scrub callout: change from the first price in view to the touched one.
+  ///
+  /// In en, this message translates to:
+  /// **'{change} since {date}'**
+  String chartSince(String change, String date);
+
+  /// Pill on a zoomed price chart that shows the whole range again.
+  ///
+  /// In en, this message translates to:
+  /// **'Reset zoom'**
+  String get chartResetZoom;
+
+  /// Menu item that draws another price against this one.
+  ///
+  /// In en, this message translates to:
+  /// **'Compare with {name}'**
+  String chartCompareWith(String name);
+
+  /// Removes the comparison line from the price chart.
+  ///
+  /// In en, this message translates to:
+  /// **'Stop comparing'**
+  String get chartStopComparing;
+
+  /// Shown over the chart while older prices download.
+  ///
+  /// In en, this message translates to:
+  /// **'Loading older prices'**
+  String get chartLoadingOlder;
 }
 
 class _AppLocalizationsDelegate

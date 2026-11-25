@@ -5476,4 +5476,23 @@ class AppLocalizationsEs extends AppLocalizations {
   @override
   String get settingsHelpRunSetupSubtitle =>
       'Vuelve a responder las preguntas. No se desactiva nada que uses.';
+
+  @override
+  String chartSince(String change, String date) {
+    return '$change desde el $date';
+  }
+
+  @override
+  String get chartResetZoom => 'Restablecer zoom';
+
+  @override
+  String chartCompareWith(String name) {
+    return 'Comparar con $name';
+  }
+
+  @override
+  String get chartStopComparing => 'Dejar de comparar';
+
+  @override
+  String get chartLoadingOlder => 'Cargando precios anteriores';
 }

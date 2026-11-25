@@ -7,7 +7,11 @@ import '../blocs/app_state.dart';
 import '../l10n/app_localizations.dart';
 import '../models/asset.dart';
 import '../models/chart_range.dart';
+import '../models/display_point.dart';
+import '../models/holding_transaction.dart';
+import '../models/instrument_catalog.dart';
 import '../models/instrument_presentation.dart';
+import '../models/market_hours.dart';
 import '../models/watch_card.dart';
 import '../theme/design_system.dart';
 import '../theme/help_topics.dart';
@@ -24,6 +28,7 @@ import '../widgets/range_selector.dart';
 import '../widgets/unit_price_carousel.dart';
 import 'currency_picker.dart';
 import 'holdings_card.dart';
+import 'holdings_screen.dart';
 import 'share_asset_sheet.dart';
 
 /// Chart-first ranges offered on the instrument detail screen. Every range
@@ -42,6 +47,10 @@ const List<ChartRange> _detailRanges = [
   ChartRange.all,
 ];
 
+/// What the price can be drawn against: gold, the US dollar (in the card's
+/// currency, so a falling local currency shows) and the S&P 500.
+const List<String> _benchmarkIDs = ['metal.XAU', 'fx.USD', 'index.GSPC'];
+
 /// The main instrument screen: an open (no-card) price header, a full-width
 /// chart with range chips, key stats, a price-per-unit carousel (metals
 /// only), and a compact holdings summary. Mirrors
@@ -58,6 +67,13 @@ class InstrumentDetailScreen extends StatefulWidget {
 class _InstrumentDetailScreenState extends State<InstrumentDetailScreen> {
   late WatchCard _card;
   late ChartRange _range;
+
+  /// The benchmark drawn against the price, if any.
+  Instrument? _compare;
+
+  /// Benchmark history already asked for, per range, so a failed download
+  /// isn't retried on every rebuild.
+  final Set<String> _compareRequested = {};
 
   @override
   void initState() {
@@ -102,6 +118,61 @@ class _InstrumentDetailScreenState extends State<InstrumentDetailScreen> {
     _ensureHistoryFor(range);
   }
 
+  List<Instrument> _benchmarks(Instrument instrument) => [
+        for (final id in _benchmarkIDs)
+          if (InstrumentCatalog.instrument(id) case final benchmark?)
+            if (benchmark.id != instrument.id && !(benchmark.id == 'fx.USD' && _card.currency == 'USD')) benchmark,
+      ];
+
+  /// [benchmark]'s prices in the card's currency.
+  List<DisplayPoint> _comparePoints(AppCubit cubit, Instrument benchmark) => cubit
+      .presentation(WatchCard(
+        id: 'compare.${benchmark.id}',
+        instrumentID: benchmark.id,
+        currency: _card.currency,
+        unit: benchmark.quotation.defaultUnit,
+      ))
+      .points;
+
+  /// Downloads the benchmark's history once per range when what's cached
+  /// doesn't reach back far enough. Waits while another download runs, since
+  /// the cubit takes one at a time.
+  void _ensureCompareHistory() {
+    final benchmark = _compare;
+    if (benchmark == null || !mounted) return;
+    final cubit = context.read<AppCubit>();
+    if (cubit.state.isLoadingHistory) return;
+    final points = _comparePoints(cubit, benchmark);
+    final start = _range.startDate(DateTime.now());
+    final reachesBack = points.length >= 2 && (start == null || !points.first.date.isAfter(start));
+    if (reachesBack || !_compareRequested.add('${benchmark.id}|${_range.name}')) return;
+    cubit.loadHistory(benchmark, _card.currency);
+  }
+
+  void _setCompare(Instrument? benchmark) {
+    setState(() => _compare = benchmark);
+    _ensureCompareHistory();
+  }
+
+  /// The person's own transactions on this instrument, for the chart.
+  List<ChartMark> _marks(BuildContext context, AppCubit cubit, Instrument instrument) {
+    final l10n = AppLocalizations.of(context)!;
+    return [
+      for (final t in cubit.transactionsFor(instrument))
+        ChartMark(
+          date: t.date,
+          kind: switch (t.kind) {
+            TransactionKind.buy => ChartMarkKind.buy,
+            TransactionKind.sell => ChartMarkKind.sell,
+            _ => ChartMarkKind.other,
+          },
+          label: t.kind.movesQuantity
+              ? '${transactionKindLabel(l10n, t.kind)} · ${quantityWithUnitKaratLabel(context, t.quantity, t.unit, t.karat)}'
+              : transactionKindLabel(l10n, t.kind),
+        ),
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
     final cubit = context.read<AppCubit>();
@@ -116,6 +187,9 @@ class _InstrumentDetailScreenState extends State<InstrumentDetailScreen> {
         final windowChange = presentation.change(_range, now);
         final accent = InstrumentTheme.accentColor(instrument, colors);
         final lastQuoteTime = presentation.series.latest?.timestamp.toLocal();
+        if (_compare != null && !state.isLoadingHistory) {
+          WidgetsBinding.instance.addPostFrameCallback((_) => _ensureCompareHistory());
+        }
 
         return ScreenBackground(
           child: Scaffold(
@@ -145,6 +219,8 @@ class _InstrumentDetailScreenState extends State<InstrumentDetailScreen> {
                         setState(() => _card = updated);
                         await cubit.updateCard(updated);
                       }
+                    } else if (value.startsWith('compare:')) {
+                      _setCompare(InstrumentCatalog.instrument(value.substring(8)));
                     } else if (value.startsWith('unit:')) {
                       final unit = PriceUnit.values.byName(value.substring(5));
                       final updated = _card.copyWith(unit: unit);
@@ -159,6 +235,21 @@ class _InstrumentDetailScreenState extends State<InstrumentDetailScreen> {
                         value: 'unit:${unit.name}',
                         child: Text(l10n.detailShowPerUnit(displayLabel(context, unit.labelKey))),
                       ),
+                    if (presentation.hasData) ...[
+                      const PopupMenuDivider(),
+                      for (final benchmark in _benchmarks(instrument))
+                        // A plain item, so its text lines up with the ones above.
+                        PopupMenuItem(
+                          value: 'compare:${benchmark.id}',
+                          child: Row(
+                            children: [
+                              Expanded(child: Text(l10n.chartCompareWith(displayLabel(context, benchmark.nameKey)))),
+                              if (_compare?.id == benchmark.id) Icon(Icons.check, size: 18, color: colors.textSecondary),
+                            ],
+                          ),
+                        ),
+                      if (_compare != null) PopupMenuItem(value: 'compare:', child: Text(l10n.chartStopComparing)),
+                    ],
                   ],
                 ),
                 // Alerts are added from the Alerts card's +, and prices refresh
@@ -243,6 +334,12 @@ class _InstrumentDetailScreenState extends State<InstrumentDetailScreen> {
                       child: _buildChart(context, colors, presentation, _range, now, windowChange, accent, state),
                     ),
                   ),
+                  if (_compare case final benchmark?)
+                    _CompareLegend(
+                      name: displayLabel(context, benchmark.nameKey),
+                      change: _windowChange(_range.filter(_comparePoints(cubit, benchmark), now)),
+                      onClose: () => _setCompare(null),
+                    ),
                   const SizedBox(height: DS.spaceMD),
                   KeyStatsGrid(
                     windowed: _range.filter(presentation.points, now),
@@ -316,12 +413,89 @@ class _InstrumentDetailScreenState extends State<InstrumentDetailScreen> {
         ),
       );
     }
-    return PriceChartView(
+    final cubit = context.read<AppCubit>();
+    final benchmark = _compare;
+    final chart = PriceChartView(
       points: windowed,
       isTrendingUp: windowChange?.isUp ?? presentation.isTrendingUp,
       accent: QimaColors.trendColor(windowChange?.isUp ?? presentation.isTrendingUp, colors),
       isInteractive: true,
       currencyCode: presentation.displayCurrency,
+      market: MarketHours.marketOf(presentation.instrument),
+      marks: _marks(context, cubit, presentation.instrument),
+      compare: benchmark == null
+          ? null
+          : ChartCompare(label: displayLabel(context, benchmark.nameKey), points: _comparePoints(cubit, benchmark)),
+    );
+    if (!state.isLoadingHistory) return chart;
+    // What's cached shows at once; a thin bar says older prices are on the way.
+    return Stack(
+      children: [
+        Positioned.fill(child: chart),
+        Positioned(
+          top: 0,
+          left: 0,
+          right: 0,
+          child: Semantics(
+            label: AppLocalizations.of(context)!.chartLoadingOlder,
+            child: LinearProgressIndicator(minHeight: 2, color: accent, backgroundColor: Colors.transparent),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// The change across [points], or null with fewer than two.
+  static double? _windowChange(List<DisplayPoint> points) {
+    if (points.length < 2 || points.first.value == 0) return null;
+    return points.last.value / points.first.value - 1;
+  }
+}
+
+/// The key under the chart while a benchmark is drawn: a dashed swatch like
+/// its line, its name and change over the range, and a button to remove it.
+class _CompareLegend extends StatelessWidget {
+  final String name;
+  final double? change;
+  final VoidCallback onClose;
+
+  const _CompareLegend({required this.name, required this.change, required this.onClose});
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final l10n = AppLocalizations.of(context)!;
+    final change = this.change;
+    return Padding(
+      padding: const EdgeInsets.only(top: DS.spaceXS),
+      child: Row(
+        children: [
+          for (var i = 0; i < 3; i++)
+            Container(
+              width: 4,
+              height: 1.5,
+              margin: const EdgeInsetsDirectional.only(end: 2),
+              color: colors.textSecondary,
+            ),
+          const SizedBox(width: DS.spaceXS),
+          Expanded(
+            child: Text(
+              change == null
+                  ? name
+                  : '$name ${signedFigure(percentLabel(context, double.parse((change * 100).toStringAsFixed(2))), isUp: change >= 0)}',
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: colors.textSecondary, fontSize: 12),
+            ),
+          ),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            iconSize: 16,
+            tooltip: l10n.chartStopComparing,
+            icon: Icon(Icons.close, color: colors.textTertiary),
+            onPressed: onClose,
+          ),
+        ],
+      ),
     );
   }
 }

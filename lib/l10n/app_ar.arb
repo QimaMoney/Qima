@@ -1554,5 +1554,10 @@
   "startTaskAlert": "اضبط تنبيه سعر",
   "startTaskBankMessages": "جهّز رسائل البنك",
   "settingsHelpRunSetup": "إعادة التجهيز",
-  "settingsHelpRunSetupSubtitle": "أجب عن أسئلة التجهيز مرة أخرى. لا يُعطَّل شيء تستخدمه."
+  "settingsHelpRunSetupSubtitle": "أجب عن أسئلة التجهيز مرة أخرى. لا يُعطَّل شيء تستخدمه.",
+  "chartSince": "{change} منذ {date}",
+  "chartResetZoom": "إلغاء التكبير",
+  "chartCompareWith": "قارن مع {name}",
+  "chartStopComparing": "إيقاف المقارنة",
+  "chartLoadingOlder": "جارٍ تحميل الأسعار الأقدم"
 }

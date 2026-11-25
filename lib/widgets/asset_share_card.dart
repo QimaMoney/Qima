@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../l10n/app_localizations.dart';
 import '../models/asset.dart';
 import '../models/display_point.dart';
+import '../models/market_hours.dart';
 import '../models/share_format.dart';
 import '../theme/app_theme.dart';
 import '../theme/design_system.dart';
@@ -247,6 +248,7 @@ class AssetShareCard extends StatelessWidget {
       accent: QimaColors.trendColor(data.isUp, colors),
       showsAxes: false,
       lineWidth: 3,
+      market: MarketHours.marketOf(data.instrument),
     );
   }
 

@@ -5477,4 +5477,23 @@ class AppLocalizationsFr extends AppLocalizations {
   @override
   String get settingsHelpRunSetupSubtitle =>
       'Répondez de nouveau aux questions. Rien de ce que vous utilisez n’est désactivé.';
+
+  @override
+  String chartSince(String change, String date) {
+    return '$change depuis le $date';
+  }
+
+  @override
+  String get chartResetZoom => 'Réinitialiser le zoom';
+
+  @override
+  String chartCompareWith(String name) {
+    return 'Comparer avec $name';
+  }
+
+  @override
+  String get chartStopComparing => 'Arrêter la comparaison';
+
+  @override
+  String get chartLoadingOlder => 'Chargement des prix plus anciens';
 }

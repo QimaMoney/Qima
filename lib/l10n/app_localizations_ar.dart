@@ -5457,4 +5457,23 @@ class AppLocalizationsAr extends AppLocalizations {
   @override
   String get settingsHelpRunSetupSubtitle =>
       'أجب عن أسئلة التجهيز مرة أخرى. لا يُعطَّل شيء تستخدمه.';
+
+  @override
+  String chartSince(String change, String date) {
+    return '$change منذ $date';
+  }
+
+  @override
+  String get chartResetZoom => 'إلغاء التكبير';
+
+  @override
+  String chartCompareWith(String name) {
+    return 'قارن مع $name';
+  }
+
+  @override
+  String get chartStopComparing => 'إيقاف المقارنة';
+
+  @override
+  String get chartLoadingOlder => 'جارٍ تحميل الأسعار الأقدم';
 }
