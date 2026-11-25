@@ -1,6 +1,7 @@
-Qima 4.0.0
-• Toca + para añadir a tu seguimiento o añadir una posición
-• Registra una compra con tus palabras: escríbela o díctala. Se lee en tu teléfono y solo se guarda cuando confirmas
-• Busca activos en español, inglés, árabe o francés
-• Un resumen claro de tu último mes
-• Elegir la moneda es más claro al añadir un activo o una transacción
+Qima 5.0.0
+• El inicio muestra tu patrimonio neto a lo largo del tiempo, con tus cuentas, inversiones, gastos y zakat
+• Añade cuentas bancarias, efectivo, tarjetas y préstamos
+• Gastos por categoría, presupuesto mensual y pagos recurrentes
+• Los SMS del banco y los extractos se convierten en movimientos que revisas, leídos en tu teléfono
+• Sigue el dinero que prestaste y te prestaron, y divide cuentas
+• El zakat cuenta todo tu balance
