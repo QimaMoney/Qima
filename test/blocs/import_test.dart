@@ -300,6 +300,25 @@ void main() {
       expect(plan.map((c) => c.flag), [null, null, ImportFlag.repeated, ImportFlag.repeated, null]);
     });
 
+    test('a row can be money lent or borrowed, or its repayment, by the way it went', () async {
+      await money.addAccount(bank, opening: sar(5000), openedOn: DateTime(2026, 10, 1));
+      final owesMe = await money.personAccount('Sami', 'SAR', owesMe: true);
+      final iOwe = await money.personAccount('Nour', 'SAR', owesMe: false);
+      StatementRow row(double amount) => StatementRow(date: DateTime(2026, 11, 5), description: 'TRANSFER', amount: amount);
+      BookEntry made(BookAccount person, double amount) =>
+          ImportPlanner.entryFor(builder: money.builder, account: bank, category: person, row: row(amount), isIn: amount > 0);
+      final entries = [made(owesMe, -300), made(owesMe, 100), made(iOwe, 800), made(iOwe, -250)];
+      expect(entries.map((e) => e.template), [EntryTemplate.lent, EntryTemplate.repaymentIn, EntryTemplate.borrowed, EntryTemplate.repaymentOut]);
+      expect(ImportPlanner.personTemplate(owesMe, isIn: false), EntryTemplate.lent);
+      expect(ImportPlanner.personTemplate(bank, isIn: false), isNull);
+      await money.importEntries(entries);
+      expect(money.state.book.balanceOf(bank.id), sar(5000 - 300 + 100 + 800 - 250));
+      expect(money.state.book.balanceOf(owesMe.id), sar(200));
+      expect(money.state.book.balanceOf(iOwe.id), sar(550));
+      // None of it is spending or income.
+      expect(money.state.book.spending(from: DateTime(2026, 11), to: DateTime(2026, 12)), isEmpty);
+    });
+
     test('a row can be a transfer or a card payment, which the other statement then finds', () async {
       await money.addAccount(bank, opening: sar(5000), openedOn: DateTime(2026, 10, 1));
       await money.addAccount(card);

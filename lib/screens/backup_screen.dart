@@ -2,8 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:intl/intl.dart';
 
-import '../blocs/app_cubit.dart';
-import '../blocs/app_state.dart';
+import '../blocs/holdings_cubit.dart';
+import '../blocs/sync_cubit.dart';
+import '../blocs/sync_state.dart';
 import '../l10n/app_localizations.dart';
 import '../services/backup/backup_service.dart';
 import '../theme/design_system.dart';
@@ -23,7 +24,7 @@ class BackupScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cubit = context.read<AppCubit>();
+    final cubit = context.read<SyncCubit>();
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
 
@@ -35,7 +36,7 @@ class BackupScreen extends StatelessWidget {
           title: Text(l10n.backupTitle),
           actions: const [HelpButton(topic: HelpTopicId.backup)],
         ),
-        body: BlocBuilder<AppCubit, AppState>(
+        body: BlocBuilder<SyncCubit, SyncState>(
           builder: (context, state) {
             return ListView(
               padding: const EdgeInsets.all(DS.spaceMD),
@@ -144,15 +145,15 @@ class BackupScreen extends StatelessWidget {
   }
 
   Future<void> _exportCsv(BuildContext context) async {
-    final cubit = context.read<AppCubit>();
+    final cubit = context.read<SyncCubit>();
     final l10n = AppLocalizations.of(context)!;
     final box = context.findRenderObject() as RenderBox?;
     final origin = box == null ? null : (box.localToGlobal(Offset.zero) & box.size);
-    await cubit.backupService.exportHoldingsCsv(transactions: cubit.state.transactions, l10n: l10n, sharePositionOrigin: origin);
+    await cubit.backupService.exportHoldingsCsv(transactions: context.read<HoldingsCubit>().state.transactions, l10n: l10n, sharePositionOrigin: origin);
   }
 
   Future<void> _pickCsv(BuildContext context) async {
-    final picked = await context.read<AppCubit>().backupService.pickCsvFile();
+    final picked = await context.read<SyncCubit>().backupService.pickCsvFile();
     if (picked == null || !context.mounted) return;
     await Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => CsvImportScreen(fileName: picked.name, text: picked.raw)),
@@ -160,7 +161,7 @@ class BackupScreen extends StatelessWidget {
   }
 
   Future<void> _pickAndPreview(BuildContext context) async {
-    final cubit = context.read<AppCubit>();
+    final cubit = context.read<SyncCubit>();
     final picked = await cubit.backupService.pickBackupFile();
     if (picked == null || !context.mounted) return;
     await Navigator.of(context).push(
@@ -212,7 +213,7 @@ class _ReminderCard extends StatelessWidget {
 }
 
 /// The "Remind me to back up" switch. [BackupService.reminderEnabled] is a
-/// local `SharedPreferences` flag, not part of [AppState] — kept as its own
+/// local `SharedPreferences` flag, not part of any cubit state — kept as its own
 /// small stateful widget (rather than threading it through the cubit's
 /// state) so flipping it rebuilds only this row, and reads back the
 /// just-written value directly rather than relying on a whole-screen
@@ -230,7 +231,7 @@ class _ReminderToggleCardState extends State<_ReminderToggleCard> {
   @override
   void initState() {
     super.initState();
-    _enabled = context.read<AppCubit>().backupServiceOrNull?.reminderEnabled ?? true;
+    _enabled = context.read<SyncCubit>().backupServiceOrNull?.reminderEnabled ?? true;
   }
 
   @override
@@ -245,7 +246,7 @@ class _ReminderToggleCardState extends State<_ReminderToggleCard> {
         value: _enabled,
         onChanged: (value) async {
           setState(() => _enabled = value);
-          await context.read<AppCubit>().backupService.setReminderEnabled(value);
+          await context.read<SyncCubit>().backupService.setReminderEnabled(value);
         },
       ),
     );

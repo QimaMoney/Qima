@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:uuid/uuid.dart';
 
-import '../blocs/app_cubit.dart';
-import '../blocs/app_state.dart';
+import '../blocs/holdings_cubit.dart';
+import '../blocs/settings_cubit.dart';
 import '../l10n/app_localizations.dart';
 import '../models/holding_transaction.dart';
 import '../models/instrument_catalog.dart';
@@ -21,13 +21,13 @@ import 'transaction_editor_screen.dart';
 /// What [TransactionCapture] needs from the running app: the catalog with
 /// names in the user's language, the base currency and the currencies the
 /// app can convert.
-CaptureContext captureContextOf(BuildContext context, AppState state) {
+CaptureContext captureContextOf(BuildContext context, {required String baseCurrency, required FXRates rates}) {
   final now = DateTime.now();
   return CaptureContext(
     catalog: InstrumentCatalog.all,
     displayName: (i) => displayLabel(context, i.nameKey),
-    baseCurrency: state.baseCurrency,
-    currencies: {...state.rates.availableCurrencies, state.baseCurrency},
+    baseCurrency: baseCurrency,
+    currencies: {...rates.availableCurrencies, baseCurrency},
     today: DateTime(now.year, now.month, now.day),
   );
 }
@@ -55,7 +55,8 @@ class _CaptureReviewScreenState extends State<CaptureReviewScreen> {
   TransactionDraft get _draft => widget.draft;
 
   Future<void> _confirm() async {
-    final cubit = context.read<AppCubit>();
+    final cubit = context.read<HoldingsCubit>();
+    final settings = context.read<SettingsCubit>().state;
     final transaction = _draft.toTransaction(_id);
     final messenger = ScaffoldMessenger.of(context);
     final l10n = AppLocalizations.of(context)!;
@@ -78,12 +79,12 @@ class _CaptureReviewScreenState extends State<CaptureReviewScreen> {
 
     // Captured before navigating away tears this context down.
     final navigator = Navigator.of(context);
-    final summary = transactionSummary(context, transaction, hidden: cubit.state.hideBalances);
+    final summary = transactionSummary(context, transaction, hidden: settings.hideBalances);
     navigator.pushAndRemoveUntil(
       MaterialPageRoute(
         builder: (_) => HoldingsScreen(
           instrument: _draft.instrument.value,
-          displayCurrency: cubit.state.baseCurrency,
+          displayCurrency: settings.baseCurrency,
           refUnit: transaction.unit,
           refKarat: transaction.karat,
         ),

@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
-import '../blocs/app_cubit.dart';
-import '../blocs/app_state.dart';
+import '../blocs/holdings_cubit.dart';
+import '../blocs/market_cubit.dart';
 import '../blocs/money_cubit.dart';
+import '../blocs/settings_cubit.dart';
+import '../blocs/zakat_cubit.dart';
+import '../blocs/zakat_state.dart';
 import '../l10n/app_localizations.dart';
 import '../models/asset.dart';
 import '../models/hijri_date.dart';
@@ -48,12 +51,13 @@ class _ZakatScreenState extends State<ZakatScreen> {
     super.initState();
     // The nisab needs gold and silver prices even if the user tracks
     // neither.
-    context.read<AppCubit>().ensureNisabPrices();
+    context.read<MarketCubit>().ensureNisabPrices();
   }
 
   @override
   Widget build(BuildContext context) {
-    final cubit = context.read<AppCubit>();
+    final zakat = context.read<ZakatCubit>();
+    final market = context.read<MarketCubit>();
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
 
@@ -73,13 +77,17 @@ class _ZakatScreenState extends State<ZakatScreen> {
             ),
           ],
         ),
-        body: BlocBuilder<AppCubit, AppState>(
+        body: BlocBuilder<ZakatCubit, ZakatState>(
           builder: (context, state) {
-            final assessment = cubit.zakatAssessment;
+            // The assessment values what is held at today's prices.
+            context.watch<HoldingsCubit>();
+            final rates = context.watch<MarketCubit>().state.rates;
+            final settings = context.watch<SettingsCubit>().state;
+            final assessment = zakat.assessment;
             final money = context.watch<MoneyCubit>().state;
-            final z = ZakatOnBook.of(book: money.book, holdings: assessment, currency: state.baseCurrency, rates: state.rates);
-            final schedule = HawlSchedule.of(state.zakatSettings, DateTime.now());
-            final hidden = state.hideBalances;
+            final z = ZakatOnBook.of(book: money.book, holdings: assessment, currency: settings.baseCurrency, rates: rates);
+            final schedule = HawlSchedule.of(state.settings, DateTime.now());
+            final hidden = settings.hideBalances;
 
             if (assessment.status == NisabStatus.noHoldings && z.base == 0 && !money.hasBook) {
               return ListView(
@@ -106,8 +114,8 @@ class _ZakatScreenState extends State<ZakatScreen> {
 
             return RefreshIndicator(
               onRefresh: () async {
-                await cubit.refreshAll();
-                await cubit.ensureNisabPrices();
+                await market.refreshAll();
+                await market.ensureNisabPrices();
               },
               child: ListView(
                 padding: const EdgeInsets.all(DS.spaceMD),
@@ -115,7 +123,7 @@ class _ZakatScreenState extends State<ZakatScreen> {
                   _DueHero(assessment: assessment, z: z, schedule: schedule, hidden: hidden),
                   const SizedBox(height: DS.spaceLG),
                   SectionHeader(l10n.zakatNisabSection),
-                  _NisabCard(assessment: assessment, z: z, settings: state.zakatSettings, schedule: schedule, hidden: hidden),
+                  _NisabCard(assessment: assessment, z: z, settings: state.settings, schedule: schedule, hidden: hidden),
                   const SizedBox(height: DS.spaceLG),
                   SectionHeader(l10n.zakatWhatCountsSection),
                   _PartsCard(z: z, hidden: hidden),
@@ -221,7 +229,7 @@ class _DueHero extends StatelessWidget {
             OutlinedButton.icon(
               icon: const Icon(Icons.refresh, size: 18),
               label: Text(l10n.zakatRetry),
-              onPressed: () => context.read<AppCubit>().ensureNisabPrices(),
+              onPressed: () => context.read<MarketCubit>().ensureNisabPrices(),
             ),
           ],
           if (assessment.hasUnpricedHoldings) ...[
@@ -254,7 +262,7 @@ class _NisabCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cubit = context.read<AppCubit>();
+    final cubit = context.read<ZakatCubit>();
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
     final basis = assessment.basis;
@@ -358,7 +366,7 @@ class _NisabCard extends StatelessWidget {
             valueColor: start == null ? colors.brandText : null,
             onTap: () async {
               final picked = await pickHawlStart(context, calendar: settings.calendar, initial: start);
-              if (picked != null) await cubit.updateZakatSettings((s) => s.copyWith(hawlStart: picked));
+              if (picked != null) await cubit.updateSettings((s) => s.copyWith(hawlStart: picked));
             },
           ),
         ],
@@ -433,7 +441,7 @@ class _WhatCountsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cubit = context.read<AppCubit>();
+    final cubit = context.read<ZakatCubit>();
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
 
@@ -446,7 +454,7 @@ class _WhatCountsCard extends StatelessWidget {
             _LineRow(
               line: assessment.lines[i],
               hidden: hidden,
-              onToggle: () => cubit.updateZakatSettings((s) => s.toggleHolding(assessment.lines[i].instrument)),
+              onToggle: () => cubit.updateSettings((s) => s.toggleHolding(assessment.lines[i].instrument)),
             ),
           ],
           const SizedBox(height: DS.spaceXS),

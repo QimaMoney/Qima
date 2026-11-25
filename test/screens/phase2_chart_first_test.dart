@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
+import '../helpers/app_blocs.dart';
 import '../helpers/money_provider.dart';
-import 'package:qima/blocs/app_cubit.dart';
+import 'package:qima/blocs/app_blocs.dart';
 import 'package:qima/l10n/app_localizations.dart';
 import 'package:qima/models/asset.dart';
 import 'package:qima/models/fx_history.dart';
@@ -28,8 +29,8 @@ void main() {
   final silver = InstrumentCatalog.instrument('metal.XAG')!;
   final btc = InstrumentCatalog.instrument('crypto.BTC')!;
 
-  AppCubit populatedCubit() {
-    final cubit = AppCubit();
+  AppBlocs populatedCubit() {
+    final blocs = AppBlocs();
     final now = DateTime(2024, 6, 10);
     final cards = [
       WatchCard(id: 'c1', instrumentID: gold.id, currency: 'USD', unit: PriceUnit.troyOunce),
@@ -70,7 +71,7 @@ void main() {
       ]),
     };
 
-    cubit.emit(cubit.state.copyWith(
+    blocs.seed(
       initialized: true,
       cards: cards,
       lots: lots,
@@ -78,13 +79,13 @@ void main() {
       rates: FXRates(base: 'USD', rates: const {'USD': 1}, updatedAt: now),
       fxHistory: FXHistory.empty,
       baseCurrency: 'USD',
-    ));
-    return cubit;
+    );
+    return blocs;
   }
 
-  Widget harness({required Widget home, required Brightness brightness, AppCubit? cubit}) {
-    final app = cubit ?? populatedCubit();
-    return MultiBlocProvider(providers: [BlocProvider<AppCubit>.value(value: app), testMoneyProvider(app)],
+  Widget harness({required Widget home, required Brightness brightness, AppBlocs? blocs}) {
+    final app = blocs ?? populatedCubit();
+    return MultiBlocProvider(providers: [...app.providers, testMoneyProvider(app)],
       child: MaterialApp(
         localizationsDelegates: AppLocalizations.localizationsDelegates,
         supportedLocales: AppLocalizations.supportedLocales,
@@ -108,7 +109,7 @@ void main() {
       await tester.pumpWidget(harness(
         home: InstrumentDetailScreen(card: card),
         brightness: brightness,
-        cubit: populatedCubit(),
+        blocs: populatedCubit(),
       ));
       await tester.pump();
       expect(tester.takeException(), isNull);
@@ -122,25 +123,25 @@ void main() {
   }
 
   testWidgets('WatchlistScreen still builds cleanly with an empty watchlist', (tester) async {
-    final cubit = AppCubit();
-    cubit.emit(cubit.state.copyWith(initialized: true));
-    await tester.pumpWidget(harness(home: const WatchlistScreen(), brightness: Brightness.dark, cubit: cubit));
+    final blocs = AppBlocs();
+    blocs.seed(initialized: true);
+    await tester.pumpWidget(harness(home: const WatchlistScreen(), brightness: Brightness.dark, blocs: blocs));
     await tester.pump();
     expect(tester.takeException(), isNull);
   });
 
   testWidgets('WatchlistScreen shows the loading state before initialization', (tester) async {
-    final cubit = AppCubit();
-    await tester.pumpWidget(harness(home: const WatchlistScreen(), brightness: Brightness.dark, cubit: cubit));
+    final blocs = AppBlocs();
+    await tester.pumpWidget(harness(home: const WatchlistScreen(), brightness: Brightness.dark, blocs: blocs));
     await tester.pump();
     expect(find.byType(CircularProgressIndicator), findsWidgets);
     expect(tester.takeException(), isNull);
   });
 
   testWidgets('PortfolioDetailScreen shows the empty state with no holdings', (tester) async {
-    final cubit = AppCubit();
-    cubit.emit(cubit.state.copyWith(initialized: true));
-    await tester.pumpWidget(harness(home: const PortfolioDetailScreen(), brightness: Brightness.dark, cubit: cubit));
+    final blocs = AppBlocs();
+    blocs.seed(initialized: true);
+    await tester.pumpWidget(harness(home: const PortfolioDetailScreen(), brightness: Brightness.dark, blocs: blocs));
     await tester.pump();
     expect(tester.takeException(), isNull);
   });
@@ -150,7 +151,7 @@ void main() {
     await tester.pumpWidget(harness(
       home: InstrumentDetailScreen(card: card),
       brightness: Brightness.dark,
-      cubit: populatedCubit(),
+      blocs: populatedCubit(),
     ));
     await tester.pump();
 
@@ -169,7 +170,7 @@ void main() {
     await tester.pumpWidget(harness(
       home: InstrumentDetailScreen(card: card),
       brightness: Brightness.dark,
-      cubit: populatedCubit(),
+      blocs: populatedCubit(),
     ));
     await tester.pump();
 
@@ -202,7 +203,7 @@ void main() {
       await tester.pumpWidget(harness(
         home: InstrumentDetailScreen(card: card),
         brightness: Brightness.dark,
-        cubit: populatedCubit(),
+        blocs: populatedCubit(),
       ));
       await tester.pump();
       expect(tester.takeException(), isNull);
@@ -221,9 +222,9 @@ void main() {
   });
 
   group('RTL (Arabic locale) layout', () {
-    Widget arabicHarness({required Widget home, AppCubit? cubit}) {
-      final app = cubit ?? populatedCubit();
-      return MultiBlocProvider(providers: [BlocProvider<AppCubit>.value(value: app), testMoneyProvider(app)],
+    Widget arabicHarness({required Widget home, AppBlocs? blocs}) {
+      final app = blocs ?? populatedCubit();
+      return MultiBlocProvider(providers: [...app.providers, testMoneyProvider(app)],
         child: MaterialApp(
           locale: const Locale('ar'),
           localizationsDelegates: AppLocalizations.localizationsDelegates,

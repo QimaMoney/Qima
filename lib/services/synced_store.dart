@@ -143,6 +143,12 @@ class SyncedStore<T extends Syncable> {
   /// How long a tombstone is kept; null keeps tombstones for ever.
   final Duration? tombstoneTTL;
 
+  /// Called after every change made through this store (a save, a delete, an
+  /// import), and not after a load or a merge. It is how something that
+  /// wants to know of local changes, such as the change log sync, hears of
+  /// them; it must not throw.
+  void Function()? onSaved;
+
   final LocalRecords<T> _local;
   final Expando<_OperationQueue> _queues = Expando<_OperationQueue>();
   bool _cloudUnreadable = false;
@@ -435,6 +441,7 @@ class SyncedStore<T extends Syncable> {
   /// (see [GuardedRecords]).
   Future<void> _put(List<Record<T>> records) async {
     await _writeCloud(await _writeLocal(prune(records)));
+    onSaved?.call();
   }
 
   Future<List<T>> upsert(T item) => _serialized(() => _upsert(item));

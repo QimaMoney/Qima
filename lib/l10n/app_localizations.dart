@@ -246,6 +246,18 @@ abstract class AppLocalizations {
   /// **'Add ticker'**
   String get addCustomTickerSubmit;
 
+  /// No description provided for @addCustomTickerConfirmBody.
+  ///
+  /// In en, this message translates to:
+  /// **'This is what the price feed has under this symbol. Add it only if it is the one you mean.'**
+  String get addCustomTickerConfirmBody;
+
+  /// No description provided for @addCustomTickerConfirmNo.
+  ///
+  /// In en, this message translates to:
+  /// **'Not this one'**
+  String get addCustomTickerConfirmNo;
+
   /// No description provided for @cardConfigAddToWatchlist.
   ///
   /// In en, this message translates to:
@@ -525,7 +537,7 @@ abstract class AppLocalizations {
   /// No description provided for @settingsDefaultRangeFooter.
   ///
   /// In en, this message translates to:
-  /// **'Used when opening an asset for the first time.'**
+  /// **'Charts on Home and on an asset open on this range. Choosing a range on an asset\'s chart updates it.'**
   String get settingsDefaultRangeFooter;
 
   /// No description provided for @settingsWidgetRefresh.
@@ -1533,6 +1545,78 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'iCloud storage for Qima is full'**
   String get settingsICloudSyncStatusStorageFull;
+
+  /// No description provided for @settingsCloudLogSyncSwitch.
+  ///
+  /// In en, this message translates to:
+  /// **'Faster sync (early version)'**
+  String get settingsCloudLogSyncSwitch;
+
+  /// No description provided for @settingsCloudLogSyncFooter.
+  ///
+  /// In en, this message translates to:
+  /// **'A new way to sync your book through iCloud, still being tested. It runs beside the sync above and deletes nothing when you turn it off.'**
+  String get settingsCloudLogSyncFooter;
+
+  /// No description provided for @settingsCloudLogSyncStatusUpToDate.
+  ///
+  /// In en, this message translates to:
+  /// **'Up to date · {time}'**
+  String settingsCloudLogSyncStatusUpToDate(String time);
+
+  /// No description provided for @settingsCloudLogSyncStatusSyncing.
+  ///
+  /// In en, this message translates to:
+  /// **'Syncing…'**
+  String get settingsCloudLogSyncStatusSyncing;
+
+  /// No description provided for @settingsCloudLogSyncStatusWaiting.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting for another device to finish sending'**
+  String get settingsCloudLogSyncStatusWaiting;
+
+  /// No description provided for @settingsCloudLogSyncStatusOffline.
+  ///
+  /// In en, this message translates to:
+  /// **'Can\'t reach iCloud. Trying again soon.'**
+  String get settingsCloudLogSyncStatusOffline;
+
+  /// No description provided for @settingsCloudLogSyncStatusQuota.
+  ///
+  /// In en, this message translates to:
+  /// **'iCloud storage is full'**
+  String get settingsCloudLogSyncStatusQuota;
+
+  /// No description provided for @settingsCloudLogSyncStatusNotSignedIn.
+  ///
+  /// In en, this message translates to:
+  /// **'Not signed in to iCloud'**
+  String get settingsCloudLogSyncStatusNotSignedIn;
+
+  /// No description provided for @settingsCloudLogSyncStatusUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Not available in this build'**
+  String get settingsCloudLogSyncStatusUnavailable;
+
+  /// No description provided for @settingsCloudLogSyncStatusZoneMissing.
+  ///
+  /// In en, this message translates to:
+  /// **'The synced data is missing in iCloud and could not be made again'**
+  String get settingsCloudLogSyncStatusZoneMissing;
+
+  /// No description provided for @settingsCloudLogSyncStatusNewerVersion.
+  ///
+  /// In en, this message translates to:
+  /// **'Another device uses a newer version. Update Qima.'**
+  String get settingsCloudLogSyncStatusNewerVersion;
+
+  /// No description provided for @settingsCloudLogSyncStatusOther.
+  ///
+  /// In en, this message translates to:
+  /// **'Sync stopped. Trying again soon.'**
+  String get settingsCloudLogSyncStatusOther;
 
   /// No description provided for @backupTitle.
   ///
@@ -7259,6 +7343,12 @@ abstract class AppLocalizations {
   /// **'No budget'**
   String get budgetNone;
 
+  /// No description provided for @budgetAdd.
+  ///
+  /// In en, this message translates to:
+  /// **'New budget'**
+  String get budgetAdd;
+
   /// No description provided for @budgetOf.
   ///
   /// In en, this message translates to:
@@ -7816,6 +7906,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Move to another account'**
   String get importMoveMessage;
+
+  /// No description provided for @importRowAccount.
+  ///
+  /// In en, this message translates to:
+  /// **'Card or account'**
+  String get importRowAccount;
+
+  /// No description provided for @importRowAccountWholeFile.
+  ///
+  /// In en, this message translates to:
+  /// **'Moves every row from this file'**
+  String get importRowAccountWholeFile;
 
   /// No description provided for @bankMessagesNotifyTitle.
   ///

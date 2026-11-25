@@ -97,6 +97,13 @@ class AppLocalizationsEs extends AppLocalizations {
   String get addCustomTickerSubmit => 'Añadir símbolo';
 
   @override
+  String get addCustomTickerConfirmBody =>
+      'Esto es lo que la fuente de precios tiene con este símbolo. Añádelo solo si es el que buscas.';
+
+  @override
+  String get addCustomTickerConfirmNo => 'No es este';
+
+  @override
   String get cardConfigAddToWatchlist => 'Añadir a la lista de seguimiento';
 
   @override
@@ -252,7 +259,7 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get settingsDefaultRangeFooter =>
-      'Se usa al abrir un activo por primera vez.';
+      'Los gráficos de Inicio y de un activo se abren con este rango. Elegir un rango en el gráfico de un activo lo actualiza.';
 
   @override
   String get settingsWidgetRefresh => 'Intervalo de actualización del widget';
@@ -828,6 +835,54 @@ class AppLocalizationsEs extends AppLocalizations {
   @override
   String get settingsICloudSyncStatusStorageFull =>
       'El almacenamiento de iCloud para Qima está lleno';
+
+  @override
+  String get settingsCloudLogSyncSwitch =>
+      'Sincronización más rápida (versión preliminar)';
+
+  @override
+  String get settingsCloudLogSyncFooter =>
+      'Una nueva forma de sincronizar tu libro con iCloud, aún en pruebas. Funciona junto a la sincronización de arriba y no borra nada al desactivarla.';
+
+  @override
+  String settingsCloudLogSyncStatusUpToDate(String time) {
+    return 'Actualizado · $time';
+  }
+
+  @override
+  String get settingsCloudLogSyncStatusSyncing => 'Sincronizando…';
+
+  @override
+  String get settingsCloudLogSyncStatusWaiting =>
+      'Esperando a que otro dispositivo termine de enviar';
+
+  @override
+  String get settingsCloudLogSyncStatusOffline =>
+      'No se puede conectar con iCloud. Se volverá a intentar pronto.';
+
+  @override
+  String get settingsCloudLogSyncStatusQuota =>
+      'El almacenamiento de iCloud está lleno';
+
+  @override
+  String get settingsCloudLogSyncStatusNotSignedIn =>
+      'No has iniciado sesión en iCloud';
+
+  @override
+  String get settingsCloudLogSyncStatusUnavailable =>
+      'No disponible en esta versión';
+
+  @override
+  String get settingsCloudLogSyncStatusZoneMissing =>
+      'Faltan los datos sincronizados en iCloud y no se pudieron crear de nuevo';
+
+  @override
+  String get settingsCloudLogSyncStatusNewerVersion =>
+      'Otro dispositivo usa una versión más reciente. Actualiza Qima.';
+
+  @override
+  String get settingsCloudLogSyncStatusOther =>
+      'La sincronización se detuvo. Se volverá a intentar pronto.';
 
   @override
   String get backupTitle => 'Copia de seguridad y restauración';
@@ -4220,6 +4275,9 @@ class AppLocalizationsEs extends AppLocalizations {
   String get budgetNone => 'Sin presupuesto';
 
   @override
+  String get budgetAdd => 'Nuevo presupuesto';
+
+  @override
   String budgetOf(String amount) {
     return 'Presupuesto $amount';
   }
@@ -4564,6 +4622,13 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get importMoveMessage => 'Mover a otra cuenta';
+
+  @override
+  String get importRowAccount => 'Tarjeta o cuenta';
+
+  @override
+  String get importRowAccountWholeFile =>
+      'Mueve todas las filas de este archivo';
 
   @override
   String get bankMessagesNotifyTitle => 'Mensajes del banco por revisar';

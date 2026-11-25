@@ -4,7 +4,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:qima/blocs/app_cubit.dart';
+import 'package:qima/blocs/app_blocs.dart';
+import '../helpers/app_blocs.dart';
 import 'package:qima/l10n/app_localizations.dart';
 import 'package:qima/models/asset.dart';
 import 'package:qima/models/fx_history.dart';
@@ -34,18 +35,18 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   late Directory tempDir;
-  late AppCubit cubit;
+  late AppBlocs cubit;
   final gold = InstrumentCatalog.instrument('metal.XAU')!;
 
   setUp(() async {
     tempDir = await Directory.systemTemp.createTemp('qima_help_sheet_test');
     LocalFileStore.overrideDirectoryForTesting(tempDir);
     SharedPreferences.setMockInitialValues({});
-    cubit = AppCubit();
-    cubit.preferences = await Preferences.create();
+    cubit = AppBlocs();
+    cubit.settings.preferences = await Preferences.create();
     final now = DateTime(2024, 6, 10);
     final card = WatchCard(id: 'c1', instrumentID: gold.id, currency: 'USD', unit: PriceUnit.troyOunce);
-    cubit.emit(cubit.state.copyWith(
+    cubit.seed(
       initialized: true,
       cards: [card],
       baseCurrency: 'USD',
@@ -56,7 +57,7 @@ void main() {
           Quote(instrumentID: gold.id, timestamp: now, canonicalUSD: 2000),
         ]),
       },
-    ));
+    );
   });
 
   tearDown(() async {
@@ -67,7 +68,7 @@ void main() {
   });
 
   Widget harness(Widget child, {Locale locale = const Locale('en')}) {
-    return MultiBlocProvider(providers: [BlocProvider<AppCubit>.value(value: cubit), testMoneyProvider(cubit)],
+    return MultiBlocProvider(providers: [...cubit.providers, testMoneyProvider(cubit)],
       child: MaterialApp(
         locale: locale,
         localizationsDelegates: AppLocalizations.localizationsDelegates,
@@ -131,7 +132,7 @@ void main() {
     await settle(tester);
 
     expect(find.byType(HelpSheet), findsNothing);
-    expect(cubit.state.tourRequested, isTrue);
+    expect(cubit.app.state.tourRequested, isTrue);
   });
 
   testWidgets('a help sheet on a screen opened over the shell has no "Replay the tour"', (tester) async {

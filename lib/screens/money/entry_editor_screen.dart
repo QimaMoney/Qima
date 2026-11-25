@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
-import '../../blocs/app_cubit.dart';
+import '../../blocs/settings_cubit.dart';
 import '../../blocs/money_cubit.dart';
 import '../../l10n/app_localizations.dart';
 import '../../models/book_account.dart';
@@ -317,7 +317,7 @@ class _EntryEditorScreenState extends State<EntryEditorScreen> {
       EntryKind.cardPayment || EntryKind.loanPayment => _to ?? _from,
       _ => _from,
     };
-    return a?.currency ?? context.read<AppCubit>().state.baseCurrency;
+    return a?.currency ?? context.read<SettingsCubit>().state.baseCurrency;
   }
 
   /// A repayment whose money is in another currency than the debt: the
@@ -443,7 +443,7 @@ class _EntryEditorScreenState extends State<EntryEditorScreen> {
           );
 
     final heard = _heard;
-    final picked = context.select<AppCubit, String?>((c) => c.state.speechLanguage);
+    final picked = context.select<SettingsCubit, String?>((c) => c.state.speechLanguage);
     final appLanguage = Localizations.localeOf(context).languageCode;
     final speech = _speechLanguages.containsKey(picked) ? picked! : (_speechLanguages.containsKey(appLanguage) ? appLanguage : 'en');
     final fields = <Widget>[
@@ -639,7 +639,7 @@ class _SpeechLanguageButton extends StatelessWidget {
       enabled: enabled,
       tooltip: AppLocalizations.of(context)!.dictationLanguage,
       initialValue: language,
-      onSelected: (code) => context.read<AppCubit>().setSpeechLanguage(code),
+      onSelected: (code) => context.read<SettingsCubit>().setSpeechLanguage(code),
       itemBuilder: (_) => [
         for (final e in _speechLanguages.entries) PopupMenuItem(key: ValueKey('speechLanguage-${e.key}'), value: e.key, child: Text(e.value)),
       ],

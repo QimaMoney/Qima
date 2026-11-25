@@ -126,7 +126,7 @@ class BookRejected implements Exception {
   String toString() => 'BookRejected: ${issues.join('; ')}';
 }
 
-/// Owns the money ledger. Base currency and rates belong to `AppCubit`
+/// Owns the money ledger. Base currency and rates belong to `SettingsCubit` and `MarketCubit`
 /// (they are shared with holdings), so they are read through callbacks
 /// at the moment an entry is made.
 class MoneyCubit extends Cubit<MoneyState> {
@@ -572,7 +572,7 @@ class MoneyCubit extends Cubit<MoneyState> {
   /// puts what it brought in, converted at today's rate when the account
   /// keeps another currency. Null when no cash moved: no account (or one the
   /// book does not have), a transfer, or an amount that rounds to nothing.
-  /// Pure; `AppCubit.saveTransaction` saves it with the trade.
+  /// Pure; `HoldingsCubit.saveTransaction` saves it with the trade.
   CashLeg? cashLegFor(HoldingTransaction t, String? accountId) {
     final account = accountId == null ? null : state.book.accounts[accountId];
     final currency = account?.currency;

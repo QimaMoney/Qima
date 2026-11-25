@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:uuid/uuid.dart';
 
-import '../blocs/app_cubit.dart';
+import '../blocs/market_cubit.dart';
+import '../blocs/settings_cubit.dart';
+import '../blocs/watchlist_cubit.dart';
 import '../l10n/app_localizations.dart';
 import '../models/asset.dart';
 import '../models/metal_breakdown.dart';
@@ -34,15 +36,14 @@ class _CardConfigScreenState extends State<CardConfigScreen> {
   @override
   void initState() {
     super.initState();
-    final cubit = context.read<AppCubit>();
-    _currency = cubit.state.baseCurrency;
+    _currency = context.read<SettingsCubit>().state.baseCurrency;
     _unit = widget.instrument.quotation.defaultUnit;
     _karat = widget.instrument.supportedKarats.isNotEmpty ? widget.instrument.supportedKarats.first : null;
   }
 
   @override
   Widget build(BuildContext context) {
-    final cubit = context.read<AppCubit>();
+    final watchlist = context.read<WatchlistCubit>();
     final instrument = widget.instrument;
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
@@ -65,8 +66,8 @@ class _CardConfigScreenState extends State<CardConfigScreen> {
                   CurrencyField(
                     label: l10n.currencyFieldShowIn,
                     selected: _currency,
-                    baseCurrency: cubit.state.baseCurrency,
-                    currencies: cubit.state.rates.availableCurrencies,
+                    baseCurrency: context.read<SettingsCubit>().state.baseCurrency,
+                    currencies: context.read<MarketCubit>().state.rates.availableCurrencies,
                     onChanged: (code) => setState(() => _currency = code),
                   ),
                   if (instrument.supportedUnits.length > 1) ...[
@@ -111,7 +112,7 @@ class _CardConfigScreenState extends State<CardConfigScreen> {
                   unit: _unit,
                   karat: karat,
                 );
-                final result = await cubit.addCard(card);
+                final result = await watchlist.addCard(card);
                 if (context.mounted) {
                   completeAdd(context, result.card, created: result.created);
                 }

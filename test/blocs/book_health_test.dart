@@ -4,8 +4,8 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:qima/blocs/app_cubit.dart';
-import 'package:qima/blocs/app_state.dart';
+import 'package:qima/blocs/app_blocs.dart';
+import 'package:qima/blocs/sync_state.dart';
 import 'package:qima/models/fx_history.dart';
 import 'package:qima/models/holding_transaction.dart';
 import 'package:qima/models/quote.dart';
@@ -109,96 +109,96 @@ void main() {
     if (await dir.exists()) await dir.delete(recursive: true);
   });
 
-  Future<AppCubit> start({BookStore? book, HoldingsLedger Function(BookStore)? holdings}) async {
+  Future<AppBlocs> start({BookStore? book, HoldingsLedger Function(BookStore)? holdings}) async {
     final cloud = SwitchableCloudKVStore();
     final store = book ?? BookStore(cloud: cloud);
-    final cubit = AppCubit(
+    final cubit = AppBlocs(
       repository: _NoopRepository(),
       cloudStore: cloud,
       bookStore: store,
       holdings: holdings?.call(store),
       notificationService: _FakeNotificationService(),
     );
-    addTearDown(cubit.disposeCloudSync);
+    addTearDown(cubit.sync.disposeCloudSync);
     await cubit.init();
     return cubit;
   }
 
   test('a book that is fine says nothing, and sync is up to date', () async {
     final cubit = await start();
-    expect(cubit.state.bookHealth, BookHealth.fine);
-    expect(cubit.state.bookHealth.hasProblem, isFalse);
-    expect(cubit.state.cloudSyncStatus, CloudSyncStatus.upToDate);
+    expect(cubit.sync.state.bookHealth, BookHealth.fine);
+    expect(cubit.sync.state.bookHealth.hasProblem, isFalse);
+    expect(cubit.sync.state.cloudSyncStatus, CloudSyncStatus.upToDate);
   });
 
   test('start-up completes when the trades cannot be read, with what there is, and records the problem', () async {
     late _Holdings broken;
     final cubit = await start(holdings: (book) => broken = _Holdings(book));
-    expect(cubit.state.initialized, isTrue);
-    expect(cubit.state.transactions, isEmpty);
-    expect(cubit.state.bookHealth.loadFailed, isTrue);
-    expect(cubit.state.cloudSyncStatus, CloudSyncStatus.needsAttention);
+    expect(cubit.app.state.initialized, isTrue);
+    expect(cubit.holdings.state.transactions, isEmpty);
+    expect(cubit.sync.state.bookHealth.loadFailed, isTrue);
+    expect(cubit.sync.state.cloudSyncStatus, CloudSyncStatus.needsAttention);
 
     // The next sync reads them, and the problem goes.
     broken.broken = false;
-    await cubit.adoptCloudChanges();
-    expect(cubit.state.bookHealth, BookHealth.fine);
-    expect(cubit.state.cloudSyncStatus, CloudSyncStatus.upToDate);
+    await cubit.sync.adoptCloudChanges();
+    expect(cubit.sync.state.bookHealth, BookHealth.fine);
+    expect(cubit.sync.state.cloudSyncStatus, CloudSyncStatus.upToDate);
   });
 
   test('a migration step that did not finish is reported, and clears once it has', () async {
     final book = _MigrationBook({LedgerNames.flagHoldings: StateError('the holdings could not be folded in')});
     final cubit = await start(book: book);
-    expect(cubit.state.initialized, isTrue);
-    expect(cubit.state.bookHealth.migrationFailed, isTrue);
-    expect(cubit.state.bookHealth.loadFailed, isFalse);
-    expect(cubit.state.cloudSyncStatus, CloudSyncStatus.needsAttention);
+    expect(cubit.app.state.initialized, isTrue);
+    expect(cubit.sync.state.bookHealth.migrationFailed, isTrue);
+    expect(cubit.sync.state.bookHealth.loadFailed, isFalse);
+    expect(cubit.sync.state.cloudSyncStatus, CloudSyncStatus.needsAttention);
 
     book.problems = {};
-    await cubit.adoptCloudChanges();
-    expect(cubit.state.bookHealth.migrationFailed, isFalse);
-    expect(cubit.state.cloudSyncStatus, CloudSyncStatus.upToDate);
+    await cubit.sync.adoptCloudChanges();
+    expect(cubit.sync.state.bookHealth.migrationFailed, isFalse);
+    expect(cubit.sync.state.cloudSyncStatus, CloudSyncStatus.upToDate);
   });
 
   test('a collection written by a newer build is reported, and sync is not up to date', () async {
     cloudValues[BookStore.entriesKey] = jsonEncode({'v': 2, 'blob': 'x'});
     final cubit = await start();
-    expect(cubit.state.bookHealth.newerVersion, isTrue);
-    expect(cubit.state.cloudSyncStatus, CloudSyncStatus.needsAttention);
+    expect(cubit.sync.state.bookHealth.newerVersion, isTrue);
+    expect(cubit.sync.state.cloudSyncStatus, CloudSyncStatus.needsAttention);
 
     // Updating is what clears it: the value is readable again.
     cloudValues.remove(BookStore.entriesKey);
-    await cubit.adoptCloudChanges();
-    expect(cubit.state.bookHealth.newerVersion, isFalse);
-    expect(cubit.state.cloudSyncStatus, CloudSyncStatus.upToDate);
+    await cubit.sync.adoptCloudChanges();
+    expect(cubit.sync.state.bookHealth.newerVersion, isFalse);
+    expect(cubit.sync.state.cloudSyncStatus, CloudSyncStatus.upToDate);
   });
 
   test('an old cloud value that cannot be read is reported, and tried again by the next sync', () async {
     cloudValues[LedgerNames.legacyTransactions] = 'not json at all';
     final cubit = await start();
-    expect(cubit.legacyAbsorbProblem, isNotNull);
-    expect(cubit.state.bookHealth.legacyUnreadable, isTrue);
-    expect(cubit.state.cloudSyncStatus, CloudSyncStatus.needsAttention);
+    expect(cubit.sync.legacyAbsorbProblem, isNotNull);
+    expect(cubit.sync.state.bookHealth.legacyUnreadable, isTrue);
+    expect(cubit.sync.state.cloudSyncStatus, CloudSyncStatus.needsAttention);
 
     cloudValues.remove(LedgerNames.legacyTransactions);
-    await cubit.adoptCloudChanges();
-    expect(cubit.legacyAbsorbProblem, isNull);
-    expect(cubit.state.bookHealth, BookHealth.fine);
+    await cubit.sync.adoptCloudChanges();
+    expect(cubit.sync.legacyAbsorbProblem, isNull);
+    expect(cubit.sync.state.bookHealth, BookHealth.fine);
   });
 
   test('a failed load made outside the cubit is recorded too', () async {
     final cubit = await start();
-    await cubit.noteLoadFailed();
-    expect(cubit.state.bookHealth.loadFailed, isTrue);
-    expect(cubit.state.cloudSyncStatus, CloudSyncStatus.needsAttention);
+    await cubit.sync.noteLoadFailed();
+    expect(cubit.sync.state.bookHealth.loadFailed, isTrue);
+    expect(cubit.sync.state.cloudSyncStatus, CloudSyncStatus.needsAttention);
   });
 
   test('a restore reads the health again', () async {
     final book = _MigrationBook({LedgerNames.flagHoldings: StateError('x')});
     final cubit = await start(book: book);
-    expect(cubit.state.bookHealth.migrationFailed, isTrue);
+    expect(cubit.sync.state.bookHealth.migrationFailed, isTrue);
     book.problems = {};
-    await cubit.restoreFromBackup(await cubit.backupService.buildPayload(), mode: BackupImportMode.merge);
-    expect(cubit.state.bookHealth.migrationFailed, isFalse);
+    await cubit.sync.restoreFromBackup(await cubit.sync.backupService.buildPayload(), mode: BackupImportMode.merge);
+    expect(cubit.sync.state.bookHealth.migrationFailed, isFalse);
   });
 }
