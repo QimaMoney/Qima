@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:qima/blocs/app_cubit.dart';
+import 'package:qima/blocs/app_blocs.dart';
 import 'package:qima/l10n/app_localizations.dart';
 import 'package:qima/screens/settings_screen.dart';
 import 'package:qima/screens/watch_watchlist_screen.dart';
@@ -10,12 +10,14 @@ import 'package:qima/services/preferences.dart';
 import 'package:qima/theme/app_theme.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../helpers/money_provider.dart';
+
 /// Phase 1 smoke coverage: every main screen builds without error in both
-/// [ThemeMode]s, and [Appearance] round-trips through [AppState]/[AppCubit]
+/// [ThemeMode]s, and [Appearance] round-trips through [SettingsState]/[SettingsCubit]
 /// the way `AppLanguage` already did.
 Widget _themedApp({required Widget home, required Brightness brightness}) {
-  return BlocProvider<AppCubit>(
-    create: (_) => AppCubit(),
+  return MultiBlocProvider(
+    providers: AppBlocs().providers,
     child: MaterialApp(
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
@@ -45,10 +47,9 @@ void main() {
   }
 
   testWidgets('the Appearance section renders a System/Light/Dark segmented button', (tester) async {
-    final cubit = AppCubit();
+    final cubit = AppBlocs();
     await tester.pumpWidget(
-      BlocProvider<AppCubit>.value(
-        value: cubit,
+      MultiBlocProvider(providers: [...cubit.providers, testMoneyProvider(cubit)],
         child: MaterialApp(
           localizationsDelegates: AppLocalizations.localizationsDelegates,
           supportedLocales: AppLocalizations.supportedLocales,
@@ -76,9 +77,9 @@ void main() {
     // (bindingless-UI) testWidgets rather than a bare test() — a bare
     // test() has no mock method-channel handler and the platform call
     // never returns.
-    testWidgets('defaults to system and round-trips through AppCubit.setAppearance', (tester) async {
+    testWidgets('defaults to system and round-trips through SettingsCubit.setAppearance', (tester) async {
       SharedPreferences.setMockInitialValues({});
-      final cubit = AppCubit();
+      final cubit = AppBlocs().settings;
       expect(cubit.state.appearance, Appearance.system);
 
       // setAppearance() awaits Preferences persistence, which needs

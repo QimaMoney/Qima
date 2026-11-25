@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/chart_range.dart';
 import '../models/instrument_catalog.dart';
+import '../models/setup_answers.dart';
 import '../models/watch_card.dart';
 import '../models/zakat.dart';
 import 'cloud_kv_store.dart';
@@ -140,16 +141,21 @@ class Preferences {
   static const String _appLanguageKey = 'appLanguage';
   static const String _appearanceKey = 'appearance';
   static const String _preferredChartRangeKey = 'preferredChartRange';
-  static const String _preferredPortfolioRangeKey = 'preferredPortfolioRange';
   static const String _hideBalancesKey = 'hideBalances';
   static const String _plainSummariesKey = 'plainSummaries';
+  static const String _speechLanguageKey = 'speechLanguage';
+  static const String _plannedReminderIdsKey = 'plannedReminderIds';
   static const String _onDeviceModelKey = 'onDeviceModel';
   static const String _appLockEnabledKey = 'appLockEnabled';
   static const String _lockGraceKey = 'lockGrace';
   static const String _deliverAlertsOnThisDeviceKey = 'deliverAlertsOnThisDevice';
   static const String _lastAlertEvaluationAtKey = 'lastAlertEvaluationAt';
   static const String _iCloudSyncEnabledKey = 'iCloudSyncEnabled';
+  static const String _cloudLogSyncEnabledKey = 'cloudLogSyncEnabled';
+  static const String _cloudLogCompactedAtKey = 'cloudLogCompactedAt';
   static const String _onboardingCompletedKey = 'onboardingCompleted';
+  static const String _setupAnswersKey = 'setupAnswers';
+  static const String _getStartedDismissedKey = 'getStartedDismissed';
   static const String _zakatSettingsKey = 'zakatSettings';
   static const String _zakatReminderNotifiedForKey = 'zakatReminderNotifiedFor';
   static const String _legacyWatchcardsKey = 'pref.watchcards';
@@ -297,22 +303,6 @@ class Preferences {
     await local.setString(_preferredChartRangeKey, coerced.name);
   }
 
-  /// Local-only, like [preferredChartRange]. Restricted to
-  /// [ChartRange.portfolioSelectable] — anything else read back (a stale
-  /// value from a future app version, say) falls back to
-  /// [ChartRange.portfolioDefault] rather than being trusted blindly.
-  ChartRange get preferredPortfolioRange {
-    final raw = local.getString(_preferredPortfolioRangeKey);
-    if (raw == null) return ChartRange.portfolioDefault;
-    final range = ChartRange.values.firstWhere((r) => r.name == raw, orElse: () => ChartRange.portfolioDefault);
-    return ChartRange.portfolioSelectable.contains(range) ? range : ChartRange.portfolioDefault;
-  }
-
-  Future<void> setPreferredPortfolioRange(ChartRange value) async {
-    if (!ChartRange.portfolioSelectable.contains(value)) return;
-    await local.setString(_preferredPortfolioRangeKey, value.name);
-  }
-
   /// Local-only, NOT synced — hiding balances is a per-device, in-the-moment
   /// privacy choice (e.g. "don't show this over someone's shoulder right
   /// now"), not something that should silently reveal or hide amounts on a
@@ -329,6 +319,22 @@ class Preferences {
 
   Future<void> setPlainSummaries(bool value) async {
     await local.setBool(_plainSummariesKey, value);
+  }
+
+  /// v5: the language New transaction listens in, picked by the person
+  /// (Arabic speech while the app is in English). Per device.
+  String? get speechLanguage => local.getString(_speechLanguageKey);
+
+  Future<void> setSpeechLanguage(String languageCode) async {
+    await local.setString(_speechLanguageKey, languageCode);
+  }
+
+  /// v5: the planned-payment reminders scheduled on this device, so they
+  /// can be withdrawn when the plans change.
+  List<int> get plannedReminderIds => [for (final s in local.getStringList(_plannedReminderIdsKey) ?? const <String>[]) ?int.tryParse(s)];
+
+  Future<void> setPlannedReminderIds(List<int> ids) async {
+    await local.setStringList(_plannedReminderIdsKey, [for (final id in ids) '$id']);
   }
 
   /// v4: whether the OS's on-device model may help read typed purchases
@@ -407,7 +413,7 @@ class Preferences {
   /// Local-only, NOT synced through the cloud store itself — this is the
   /// on/off switch FOR cloud sync, so it can never be read from the thing it
   /// controls (spec Phase 7). Whether this device even offers the setting is
-  /// a separate concern (`AppCubit`/`SettingsScreen` gate on platform +
+  /// a separate concern (`SyncCubit`/`SettingsScreen` gate on platform +
   /// account availability); this getter just answers "did the user turn it
   /// on", defaulting to on so a first launch on a device with an iCloud
   /// account already signed in starts syncing without an extra step.
@@ -419,6 +425,26 @@ class Preferences {
     await local.setBool(_iCloudSyncEnabledKey, value);
   }
 
+  /// Local-only, NOT synced: whether this device also syncs the book through
+  /// CloudKit (the change log), beside the iCloud key-value sync above. Off
+  /// until the person turns it on, on each device on its own.
+  bool get cloudLogSyncEnabled => local.getBool(_cloudLogSyncEnabledKey) ?? false;
+
+  Future<void> setCloudLogSyncEnabled(bool value) async {
+    await local.setBool(_cloudLogSyncEnabledKey, value);
+  }
+
+  /// Local-only: when this device last compacted its CloudKit change log, so
+  /// that it does so at most once a day.
+  DateTime? get cloudLogCompactedAt {
+    final raw = local.getString(_cloudLogCompactedAtKey);
+    return raw == null ? null : DateTime.tryParse(raw);
+  }
+
+  Future<void> setCloudLogCompactedAt(DateTime value) async {
+    await local.setString(_cloudLogCompactedAtKey, value.toUtc().toIso8601String());
+  }
+
   /// Local-only, NOT synced — whether the first-launch onboarding tour has
   /// been shown (finished or skipped) on THIS device. Like
   /// [hideBalances]/[appLockEnabled], there's no reason a second device
@@ -428,6 +454,33 @@ class Preferences {
 
   Future<void> setOnboardingCompleted(bool value) async {
     await local.setBool(_onboardingCompletedKey, value);
+  }
+
+  /// Local-only, NOT synced, like [onboardingCompleted]: what the person
+  /// answered in setup on THIS device, or null when they skipped it (or set
+  /// the app up before setup existed). What the answers switch on (features,
+  /// the watchlist, the base currency) is stored and synced where it always
+  /// was; this only steers the tour, the Get started card and the tab the
+  /// app opens on.
+  SetupAnswers? get setupAnswers {
+    final raw = local.getString(_setupAnswersKey);
+    if (raw == null) return null;
+    try {
+      return SetupAnswers.fromJson(jsonDecode(raw) as Map<String, dynamic>);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> setSetupAnswers(SetupAnswers value) async {
+    await local.setString(_setupAnswersKey, jsonEncode(value.toJson()));
+  }
+
+  /// Local-only: the person closed Home's Get started card.
+  bool get getStartedDismissed => local.getBool(_getStartedDismissedKey) ?? false;
+
+  Future<void> setGetStartedDismissed(bool value) async {
+    await local.setBool(_getStartedDismissedKey, value);
   }
 
   /// Migration chain, simplified for a from-scratch app: (1) pre-sync

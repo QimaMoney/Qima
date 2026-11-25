@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:qima/blocs/app_cubit.dart';
+import 'package:qima/blocs/app_blocs.dart';
 import 'package:qima/l10n/app_localizations.dart';
 import 'package:qima/models/asset.dart';
 import 'package:qima/theme/app_theme.dart';
@@ -9,8 +9,8 @@ import 'package:qima/widgets/asset_class_filter.dart';
 
 void main() {
   Widget harness({required Set<AssetClass> classes, AssetClass? selected, ValueChanged<AssetClass?>? onSelected}) {
-    return BlocProvider<AppCubit>(
-      create: (_) => AppCubit(),
+    return MultiBlocProvider(
+      providers: AppBlocs().providers,
       child: MaterialApp(
         localizationsDelegates: AppLocalizations.localizationsDelegates,
         supportedLocales: AppLocalizations.supportedLocales,

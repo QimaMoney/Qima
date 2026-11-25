@@ -1,11 +1,14 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:qima/blocs/app_cubit.dart';
+import 'package:qima/blocs/app_blocs.dart';
 import 'package:qima/l10n/app_localizations.dart';
 import 'package:qima/models/asset.dart';
+import 'package:qima/models/holding_entry_codec.dart';
+import 'package:qima/models/holding_transaction.dart';
 import 'package:qima/models/watch_card.dart';
 import 'package:qima/screens/import_preview_screen.dart';
 import 'package:qima/services/backup/backup_service.dart';
@@ -13,6 +16,8 @@ import 'package:qima/services/local_file_store.dart';
 import 'package:qima/services/preferences.dart';
 import 'package:qima/theme/app_theme.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import '../helpers/app_blocs.dart';
 
 /// `ImportPreviewScreen` kicks off its parsing/decoding in a post-frame
 /// callback fired by the very FIRST frame `pumpWidget` schedules, and
@@ -65,23 +70,20 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
   }
 
-  Future<AppCubit> populatedCubit() async {
-    final cubit = AppCubit();
-    cubit.preferences = await Preferences.create();
-    cubit.backupService = BackupService(
-      watchlistStore: cubit.watchlistStore,
-      holdingsStore: cubit.holdingsStore,
-      customInstrumentStore: cubit.customInstrumentStore,
-      alertsStore: cubit.alertsStore,
-      preferences: cubit.preferences,
-    );
-    cubit.emit(cubit.state.copyWith(initialized: true));
-    return cubit;
+  Future<AppBlocs> populatedCubit() async {
+    final blocs = AppBlocs();
+    final preferences = await Preferences.create();
+    blocs.settings.preferences = preferences;
+    // Builds the backup service over the same stores, as start-up does.
+    await blocs.sync.start(preferences);
+    await blocs.zakat.load(preferences);
+    blocs.seed(initialized: true);
+    return blocs;
   }
 
-  Widget harness(AppCubit cubit, PickedBackupFile picked) {
-    return BlocProvider<AppCubit>.value(
-      value: cubit,
+  Widget harness(AppBlocs blocs, PickedBackupFile picked) {
+    return MultiBlocProvider(
+      providers: blocs.providers,
       child: MaterialApp(
         localizationsDelegates: AppLocalizations.localizationsDelegates,
         supportedLocales: AppLocalizations.supportedLocales,
@@ -93,9 +95,9 @@ void main() {
 
   Future<AppLocalizations> l10n() => AppLocalizations.delegate.load(const Locale('en'));
 
-  /// Builds a plain (unencrypted) backup JSON from a fresh cubit with one
+  /// Builds a plain (unencrypted) backup JSON from a fresh blocs with one
   /// watchlist card, writing straight through the store (not
-  /// `AppCubit.addCard`, which also fires off a live `refresh`/
+  /// `WatchlistCubit.addCard`, which also fires off a live `refresh`/
   /// `backfillHistoryIfNeeded` this helper has no need to deal with). Must
   /// run inside `tester.runAsync` — real `dart:io` file writes don't
   /// progress under a widget test's synchronous fake-async zone otherwise.
@@ -103,9 +105,9 @@ void main() {
     late String json;
     await tester.runAsync(() async {
       final source = await populatedCubit();
-      await source.watchlistStore
+      await source.watchlist.watchlistStore
           .upsert(WatchCard(id: 'c1', instrumentID: 'metal.XAU', currency: 'USD', unit: PriceUnit.troyOunce));
-      json = await source.backupService.buildJson();
+      json = await source.sync.backupService.buildJson();
     });
     return json;
   }
@@ -127,18 +129,18 @@ void main() {
     late String json;
     await tester.runAsync(() async {
       final source = await populatedCubit();
-      await source.watchlistStore
+      await source.watchlist.watchlistStore
           .upsert(WatchCard(id: 'c1', instrumentID: 'metal.XAU', currency: 'USD', unit: PriceUnit.troyOunce));
-      json = await source.backupService.buildJson(password: password, kdfIterations: 10);
+      json = await source.sync.backupService.buildJson(password: password, kdfIterations: 10);
     });
     return json;
   }
 
   testWidgets('a picked .csv file shows the CSV-chosen error state', (tester) async {
-    final cubit = await populatedCubit();
+    final blocs = await populatedCubit();
     final picked = const PickedBackupFile(name: 'qima-holdings-2026-01-01.csv', raw: 'a,b,c\n1,2,3');
 
-    await _runAsyncAndSettle(tester, () => tester.pumpWidget(harness(cubit, picked)));
+    await _runAsyncAndSettle(tester, () => tester.pumpWidget(harness(blocs, picked)));
 
     final strings = await l10n();
     expect(find.text(strings.backupImportCsvErrorTitle), findsOneWidget);
@@ -146,10 +148,10 @@ void main() {
   });
 
   testWidgets('a non-JSON file shows the generic error state with the right message', (tester) async {
-    final cubit = await populatedCubit();
+    final blocs = await populatedCubit();
     const picked = PickedBackupFile(name: 'notes.txt', raw: 'this is not json');
 
-    await _runAsyncAndSettle(tester, () => tester.pumpWidget(harness(cubit, picked)));
+    await _runAsyncAndSettle(tester, () => tester.pumpWidget(harness(blocs, picked)));
 
     final strings = await l10n();
     expect(find.text(strings.backupImportFailedTitle), findsOneWidget);
@@ -160,22 +162,71 @@ void main() {
       (tester) async {
     useTallSurface(tester);
     final json = await plainBackupJson(tester);
-    final cubit = await populatedCubit();
+    final blocs = await populatedCubit();
     final picked = PickedBackupFile(name: 'qima-backup-2026-01-01.json', raw: json);
 
-    await _runAsyncAndSettle(tester, () => tester.pumpWidget(harness(cubit, picked)));
+    await _runAsyncAndSettle(tester, () => tester.pumpWidget(harness(blocs, picked)));
 
     final strings = await l10n();
     expect(find.text(strings.backupImportModeMergeFooter), findsOneWidget);
     expect(find.text(strings.backupImportRestoreButton), findsOneWidget);
   }, timeout: const Timeout(Duration(seconds: 30)));
 
+  testWidgets('an older file with no book says, in replace mode only, that the accounts trades were paid from go', (tester) async {
+    useTallSurface(tester);
+    final blocs = await populatedCubit();
+    await tester.runAsync(() async {
+      await blocs.holdings.ledgerStore.upsert(
+        HoldingTransaction(id: 'd1', instrumentID: 'metal.XAU', kind: TransactionKind.buy, quantity: 2, unit: PriceUnit.troyOunce, unitPrice: 1500, currency: 'USD', date: DateTime(2026, 3, 1)),
+        cash: const CashLeg(accountId: 'bank', currency: 'USD', amount: 300000, baseAmount: 300000),
+        baseCurrency: 'USD',
+      );
+    });
+    final older = jsonEncode({
+      'format': 'qima-backup',
+      'version': 3,
+      'createdAt': '2026-03-10T00:00:00.000Z',
+      'app': {'version': '4.0.0', 'build': '1'},
+      'encrypted': false,
+      'payload': {
+        'watchcards': [],
+        'customInstruments': [],
+        'alerts': [],
+        'holdings': [],
+        'transactions': [],
+        'settings': {'baseCurrency': 'USD', 'appLanguage': 'system', 'appearance': 'system', 'preferredChartRange': 'month1', 'widgetRefreshInterval': 15},
+      },
+    });
+
+    await _runAsyncAndSettle(tester, () => tester.pumpWidget(harness(blocs, PickedBackupFile(name: 'qima-backup-2026-03-10.json', raw: older))));
+
+    final strings = await l10n();
+    expect(find.byKey(const ValueKey('replaceDropsCash')), findsNothing, reason: 'a merge keeps the trades as they are');
+    await tester.tap(find.text(strings.backupImportModeReplace));
+    await tester.pump();
+    expect(find.text(strings.backupImportReplaceDropsCash(1)), findsOneWidget);
+    await tester.tap(find.text(strings.backupImportModeMerge));
+    await tester.pump();
+    expect(find.byKey(const ValueKey('replaceDropsCash')), findsNothing);
+  }, timeout: const Timeout(Duration(seconds: 30)));
+
+  testWidgets('a file of this version has no such line, whatever the mode', (tester) async {
+    useTallSurface(tester);
+    final json = await plainBackupJson(tester);
+    final blocs = await populatedCubit();
+    await _runAsyncAndSettle(tester, () => tester.pumpWidget(harness(blocs, PickedBackupFile(name: 'qima-backup-2026-01-01.json', raw: json))));
+    final strings = await l10n();
+    await tester.tap(find.text(strings.backupImportModeReplace));
+    await tester.pump();
+    expect(find.byKey(const ValueKey('replaceDropsCash')), findsNothing);
+  }, timeout: const Timeout(Duration(seconds: 30)));
+
   testWidgets('an encrypted backup shows the password prompt first', (tester) async {
     final json = await encryptedBackupJson(tester, 'correcthorse');
-    final cubit = await populatedCubit();
+    final blocs = await populatedCubit();
     final picked = PickedBackupFile(name: 'qima-backup-2026-01-01.json', raw: json);
 
-    await _runAsyncAndSettle(tester, () => tester.pumpWidget(harness(cubit, picked)));
+    await _runAsyncAndSettle(tester, () => tester.pumpWidget(harness(blocs, picked)));
 
     final strings = await l10n();
     expect(find.text(strings.backupImportPasswordPrompt), findsOneWidget);
@@ -185,10 +236,10 @@ void main() {
   testWidgets('an encrypted backup with the wrong password shows an inline error and stays on the prompt',
       (tester) async {
     final json = await encryptedBackupJson(tester, 'correcthorse');
-    final cubit = await populatedCubit();
+    final blocs = await populatedCubit();
     final picked = PickedBackupFile(name: 'qima-backup-2026-01-01.json', raw: json);
 
-    await _runAsyncAndSettle(tester, () => tester.pumpWidget(harness(cubit, picked)));
+    await _runAsyncAndSettle(tester, () => tester.pumpWidget(harness(blocs, picked)));
 
     await tester.enterText(find.byType(TextField), 'wrongpassword');
     final strings = await l10n();
@@ -207,10 +258,10 @@ void main() {
 
   testWidgets('switching to Replace mode updates the footer text and diff line', (tester) async {
     final json = await plainBackupJson(tester);
-    final cubit = await populatedCubit();
+    final blocs = await populatedCubit();
     final picked = PickedBackupFile(name: 'qima-backup-2026-01-01.json', raw: json);
 
-    await _runAsyncAndSettle(tester, () => tester.pumpWidget(harness(cubit, picked)));
+    await _runAsyncAndSettle(tester, () => tester.pumpWidget(harness(blocs, picked)));
 
     final strings = await l10n();
     expect(find.text(strings.backupImportModeMergeFooter), findsOneWidget);
@@ -225,10 +276,10 @@ void main() {
   testWidgets('choosing Replace and confirming shows the "replace everything" confirmation dialog', (tester) async {
     useTallSurface(tester);
     final json = await plainBackupJson(tester);
-    final cubit = await populatedCubit();
+    final blocs = await populatedCubit();
     final picked = PickedBackupFile(name: 'qima-backup-2026-01-01.json', raw: json);
 
-    await _runAsyncAndSettle(tester, () => tester.pumpWidget(harness(cubit, picked)));
+    await _runAsyncAndSettle(tester, () => tester.pumpWidget(harness(blocs, picked)));
 
     final strings = await l10n();
     await tester.tap(find.text(strings.backupImportModeReplace));
@@ -243,7 +294,7 @@ void main() {
   testWidgets('confirming Merge restore applies the payload and pops with a success snackbar', (tester) async {
     useTallSurface(tester);
     final json = await plainBackupJson(tester);
-    final cubit = await populatedCubit();
+    final blocs = await populatedCubit();
     final picked = PickedBackupFile(name: 'qima-backup-2026-01-01.json', raw: json);
 
     // A two-route Navigator (a placeholder root route, then
@@ -257,8 +308,8 @@ void main() {
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
       theme: buildTheme(Brightness.dark),
-      home: BlocProvider<AppCubit>.value(
-        value: cubit,
+      home: MultiBlocProvider(
+        providers: blocs.providers,
         child: Navigator(
           key: innerNavigatorKey,
           onGenerateRoute: (_) => MaterialPageRoute(builder: (_) => const Scaffold(body: Text('root'))),
@@ -279,7 +330,7 @@ void main() {
       await tester.tap(find.text(strings.backupImportRestoreButton), warnIfMissed: false);
     });
 
-    expect(cubit.state.cards.map((c) => c.id), contains('c1'));
+    expect(blocs.watchlist.state.cards.map((c) => c.id), contains('c1'));
     expect(find.text(strings.backupImportSuccessSnackbar), findsOneWidget);
   }, timeout: const Timeout(Duration(seconds: 30)));
 }

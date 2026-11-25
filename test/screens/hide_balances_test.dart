@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:qima/blocs/app_cubit.dart';
+import '../helpers/money_provider.dart';
+import 'package:qima/blocs/app_blocs.dart';
+import '../helpers/app_blocs.dart';
 import 'package:qima/l10n/app_localizations.dart';
 import 'package:qima/models/asset.dart';
 import 'package:qima/models/fx_history.dart';
@@ -33,9 +35,9 @@ void main() {
   // TestWidgetsFlutterBinding sets up, so this is set once per test file.
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
-  Future<AppCubit> populatedCubit() async {
-    final cubit = AppCubit();
-    cubit.preferences = await Preferences.create();
+  Future<AppBlocs> populatedCubit() async {
+    final cubit = AppBlocs();
+    cubit.settings.preferences = await Preferences.create();
     final now = DateTime(2024, 6, 10);
     final cards = [
       WatchCard(id: 'c1', instrumentID: gold.id, currency: 'USD', unit: PriceUnit.troyOunce),
@@ -72,7 +74,7 @@ void main() {
       ]),
     };
 
-    cubit.emit(cubit.state.copyWith(
+    cubit.seed(
       initialized: true,
       cards: cards,
       lots: lots,
@@ -80,13 +82,12 @@ void main() {
       rates: FXRates(base: 'USD', rates: const {'USD': 1}, updatedAt: now),
       fxHistory: FXHistory.empty,
       baseCurrency: 'USD',
-    ));
+    );
     return cubit;
   }
 
-  Widget harness({required Widget home, required AppCubit cubit}) {
-    return BlocProvider<AppCubit>.value(
-      value: cubit,
+  Widget harness({required Widget home, required AppBlocs cubit}) {
+    return MultiBlocProvider(providers: [...cubit.providers, testMoneyProvider(cubit)],
       child: MaterialApp(
         localizationsDelegates: AppLocalizations.localizationsDelegates,
         supportedLocales: AppLocalizations.supportedLocales,
@@ -98,14 +99,14 @@ void main() {
 
   testWidgets('watchlist hero masks the portfolio value when hidden, and unmasks on toggle', (tester) async {
     final cubit = await populatedCubit();
-    final valuation = cubit.portfolioValuation!;
+    final valuation = cubit.holdings.portfolioValuation!;
     await tester.pumpWidget(harness(home: const WatchlistScreen(), cubit: cubit));
     await tester.pump();
 
     expect(find.text(valuation.value.formatted()), findsOneWidget);
     expect(find.text(Masking.mask), findsNothing);
 
-    await cubit.toggleHideBalances();
+    await cubit.settings.toggleHideBalances();
     await tester.pump();
 
     expect(find.text(valuation.value.formatted()), findsNothing);
@@ -122,8 +123,8 @@ void main() {
       'PortfolioDetailScreen masks value/cost/gain amounts but keeps the allocation weight percent and the app bar toggle works',
       (tester) async {
     final cubit = await populatedCubit();
-    final valuation = cubit.portfolioValuation!;
-    final held = cubit.heldInstruments.first;
+    final valuation = cubit.holdings.portfolioValuation!;
+    final held = cubit.holdings.heldInstruments.first;
     final weightPercent = (held.valuation.value.amount / valuation.value.amount * 100).toStringAsFixed(1);
     await tester.pumpWidget(harness(home: const PortfolioDetailScreen(), cubit: cubit));
     await tester.pump();
@@ -141,8 +142,8 @@ void main() {
 
   testWidgets('HoldingsScreen masks lot unit cost and total cost but not the raw quantity', (tester) async {
     final cubit = await populatedCubit();
-    await cubit.toggleHideBalances();
-    final lot = cubit.lotsFor(gold)[0];
+    await cubit.settings.toggleHideBalances();
+    final lot = cubit.holdings.lotsFor(gold)[0];
 
     await tester.pumpWidget(harness(
       home: HoldingsScreen(instrument: gold, displayCurrency: 'USD'),

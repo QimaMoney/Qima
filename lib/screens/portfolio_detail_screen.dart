@@ -1,8 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
-import '../blocs/app_cubit.dart';
-import '../blocs/app_state.dart';
+import '../models/money.dart';
+import '../models/zakat_book.dart';
+import '../blocs/money_cubit.dart';
+import '../blocs/holdings_cubit.dart';
+import '../blocs/market_cubit.dart';
+import '../blocs/settings_cubit.dart';
+import '../blocs/settings_state.dart';
+import '../blocs/watchlist_cubit.dart';
+import '../blocs/zakat_cubit.dart';
 import '../l10n/app_localizations.dart';
 import '../models/allocation.dart';
 import '../models/asset_group.dart';
@@ -43,7 +50,8 @@ class PortfolioDetailScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cubit = context.read<AppCubit>();
+    final settings = context.read<SettingsCubit>();
+    final holdings = context.read<HoldingsCubit>();
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
 
@@ -57,42 +65,48 @@ class PortfolioDetailScreen extends StatelessWidget {
           title: Text(l10n.portfolioTitle),
           actions: [
             const HelpButton(topic: HelpTopicId.portfolio),
-            BlocBuilder<AppCubit, AppState>(
+            BlocBuilder<SettingsCubit, SettingsState>(
               buildWhen: (previous, current) => previous.hideBalances != current.hideBalances,
               builder: (context, state) {
                 return IconButton(
                   icon: Icon(state.hideBalances ? Icons.visibility_off_outlined : Icons.visibility_outlined),
                   tooltip: state.hideBalances ? l10n.privacyShowBalances : l10n.privacyHideBalances,
-                  onPressed: cubit.toggleHideBalances,
+                  onPressed: settings.toggleHideBalances,
                 );
               },
             ),
           ],
         ),
-        body: BlocBuilder<AppCubit, AppState>(
-          builder: (context, state) {
-            final hidden = state.hideBalances;
-            final valuation = cubit.portfolioValuation;
-            final heldInstruments = cubit.heldInstruments;
+        // Valued at the current prices, summarised in the base currency and
+        // masked by the hide setting; the zakat entry reads the zakat choices.
+        body: Builder(
+          builder: (context) {
+            final prefs = context.watch<SettingsCubit>().state;
+            context.watch<HoldingsCubit>();
+            context.watch<MarketCubit>();
+            final zakat = context.watch<ZakatCubit>();
+            final hidden = prefs.hideBalances;
+            final valuation = holdings.portfolioValuation;
+            final heldInstruments = holdings.heldInstruments;
             final slices = resolveAllocation(heldInstruments, colors);
             final sliceByID = {for (final s in slices) s.holding.id: s};
-            final realised = cubit.portfolioRealised;
-            final closed = cubit.closedPositions;
+            final realised = holdings.portfolioRealised;
+            final closed = holdings.closedPositions;
 
             void openHolding(Instrument instrument) {
-              final card = cubit.firstCard(instrument);
+              final card = context.read<WatchlistCubit>().firstCard(instrument);
               Navigator.of(context).push(MaterialPageRoute(
                 builder: (_) => card != null
                     ? InstrumentDetailScreen(card: card)
                     // Not on the watchlist: straight to its ledger.
-                    : HoldingsScreen(instrument: instrument, displayCurrency: state.baseCurrency),
+                    : HoldingsScreen(instrument: instrument, displayCurrency: prefs.baseCurrency),
               ));
             }
 
             return ListView(
               controller: scrollController,
-              // Extra room at the end so the docked + never covers the last row.
-              padding: EdgeInsets.fromLTRB(DS.spaceMD, DS.spaceMD, DS.spaceMD, asTab ? DS.spaceXL * 2 : DS.spaceMD),
+              // Extra room at the end so the tab bar and + never cover the last row.
+              padding: EdgeInsets.fromLTRB(DS.spaceMD, DS.spaceMD, DS.spaceMD, asTab ? DS.tabListEnd(context) : DS.spaceMD),
               children: [
                 if (valuation != null)
                   DSHeroCard(
@@ -166,22 +180,22 @@ class PortfolioDetailScreen extends StatelessWidget {
                     child: Text(l10n.portfolioEmpty,
                         style: TextStyle(color: colors.textTertiary)),
                   ),
-                if (state.plainSummaries)
-                  if (cubit.periodSummary() case final summary?) ...[
+                if (prefs.plainSummaries)
+                  if (holdings.periodSummary() case final summary?) ...[
                     const SizedBox(height: DS.spaceSM),
                     _SummaryCard(
-                      sentence: periodSummarySentence(context, summary, currency: state.baseCurrency, hidden: hidden),
+                      sentence: periodSummarySentence(context, summary, currency: prefs.baseCurrency, hidden: hidden),
                       hidden: hidden,
                     ),
                   ],
-                if (state.lots.isNotEmpty) ...[
+                if (holdings.state.lots.isNotEmpty) ...[
                   const SizedBox(height: DS.spaceSM),
-                  _ZakatEntry(assessment: cubit.zakatAssessment, hidden: hidden),
+                  _ZakatEntry(assessment: zakat.assessment, hidden: hidden),
                 ],
                 if (heldInstruments.isNotEmpty) ...[
                   const SizedBox(height: DS.spaceSM),
                   _AllocationCard(
-                    groups: Allocation.byGroup(heldInstruments, state.baseCurrency),
+                    groups: Allocation.byGroup(heldInstruments, prefs.baseCurrency),
                     hidden: hidden,
                   ),
                 ],
@@ -263,7 +277,7 @@ class _SummaryCardState extends State<_SummaryCard> {
 
   void _phrase() {
     // Masked sentences have nothing to word better.
-    final cubit = context.read<AppCubit>();
+    final cubit = context.read<SettingsCubit>();
     // Turning the model on or off words the same sentence again.
     final key = '${cubit.state.onDeviceModel}|${widget.sentence}';
     if (widget.hidden || key == _for) return;
@@ -352,16 +366,18 @@ class _ZakatEntry extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
-    final String subtitle;
-    switch (assessment.status) {
-      case NisabStatus.above:
-        subtitle = l10n.zakatEntryDue(Masking.amount(assessment.due, hidden: hidden));
-      case NisabStatus.below:
-        subtitle = l10n.zakatStatusBelow;
-      case NisabStatus.thresholdUnknown:
-      case NisabStatus.noHoldings:
-        subtitle = l10n.zakatEntryCalculate;
-    }
+    // The same figure as the Zakat screen: the whole balance sheet, not
+    // the holdings alone.
+    final z = ZakatOnBook.of(
+        book: context.watch<MoneyCubit>().state.book,
+        holdings: assessment,
+        currency: context.read<SettingsCubit>().state.baseCurrency,
+        rates: context.read<MarketCubit>().state.rates);
+    final String subtitle = !z.thresholdKnown
+        ? l10n.zakatEntryCalculate
+        : z.above
+            ? l10n.zakatEntryDue(Masking.amount(Money(z.due, z.currency), hidden: hidden))
+            : l10n.zakatStatusBelow;
     return DSCard(
       padding: EdgeInsets.zero,
       child: ListTile(
@@ -370,7 +386,7 @@ class _ZakatEntry extends StatelessWidget {
         title: Text(l10n.zakatTitle, style: TextStyle(color: colors.textPrimary, fontWeight: FontWeight.w600)),
         subtitle: Text(subtitle, style: TextStyle(color: colors.textTertiary, fontSize: 12)),
         trailing: Icon(Icons.chevron_right, color: colors.textTertiary),
-        onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ZakatScreen())),
+        onTap: () => ZakatScreen.open(context),
       ),
     );
   }

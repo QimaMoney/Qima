@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:image_picker/image_picker.dart';
 
-import '../blocs/app_cubit.dart';
+import '../blocs/settings_cubit.dart';
 import '../l10n/app_localizations.dart';
 import '../services/dictation_service.dart';
 import '../services/text_recognition_service.dart';
@@ -28,7 +28,7 @@ class _ReceiptScanButtonState extends State<ReceiptScanButton> {
   bool _available = false;
   bool _reading = false;
 
-  TextRecognitionService get _service => context.read<AppCubit>().textRecognition;
+  TextRecognitionService get _service => context.read<SettingsCubit>().textRecognition;
 
   @override
   void initState() {

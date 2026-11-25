@@ -3,14 +3,21 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:qima/blocs/app_cubit.dart';
+import 'package:qima/blocs/app_blocs.dart';
+import '../helpers/app_blocs.dart';
 import 'package:qima/l10n/app_localizations.dart';
 import 'package:qima/screens/export_backup_sheet.dart';
-import 'package:qima/services/backup/backup_service.dart';
+import 'package:qima/services/book_store.dart';
 import 'package:qima/services/local_file_store.dart';
 import 'package:qima/services/preferences.dart';
 import 'package:qima/theme/app_theme.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+/// A book whose migration of the holdings has not finished.
+class _UnfinishedBook extends BookStore {
+  @override
+  Future<Map<String, Object>> ledgerProblems() async => {'migrated.ledger.holdings': StateError('the holdings could not be folded in')};
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -29,23 +36,18 @@ void main() {
     }
   });
 
-  Future<AppCubit> populatedCubit() async {
-    final cubit = AppCubit();
-    cubit.preferences = await Preferences.create();
-    cubit.backupService = BackupService(
-      watchlistStore: cubit.watchlistStore,
-      holdingsStore: cubit.holdingsStore,
-      customInstrumentStore: cubit.customInstrumentStore,
-      alertsStore: cubit.alertsStore,
-      preferences: cubit.preferences,
-    );
-    cubit.emit(cubit.state.copyWith(initialized: true));
+  Future<AppBlocs> populatedCubit({BookStore? book}) async {
+    final cubit = AppBlocs(bookStore: book);
+    final preferences = await Preferences.create();
+    cubit.settings.preferences = preferences;
+    await cubit.sync.start(preferences);
+    cubit.seed(initialized: true);
     return cubit;
   }
 
-  Widget harness(AppCubit cubit) {
-    return BlocProvider<AppCubit>.value(
-      value: cubit,
+  Widget harness(AppBlocs cubit) {
+    return MultiBlocProvider(
+      providers: cubit.providers,
       child: MaterialApp(
         localizationsDelegates: AppLocalizations.localizationsDelegates,
         supportedLocales: AppLocalizations.supportedLocales,
@@ -74,6 +76,28 @@ void main() {
     final button = tester.widget<FilledButton>(find.byType(FilledButton));
     expect(button.onPressed, isNotNull);
     expect(find.text(strings.backupExportSheetAction), findsOneWidget);
+  });
+
+  testWidgets('while the earlier holdings are not in the book, nothing is written and the sheet says why', (tester) async {
+    tester.view.physicalSize = const Size(800, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final cubit = await populatedCubit(book: _UnfinishedBook());
+    await tester.pumpWidget(harness(cubit));
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+
+    final strings = await l10n();
+    await tester.runAsync(() async {
+      await tester.tap(find.text(strings.backupExportSheetAction));
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+    });
+    await tester.pump();
+    expect(find.text(strings.backupErrorHoldingsUnreadable), findsOneWidget);
+    expect(find.text(strings.backupExportSheetFailed), findsNothing);
+    expect(find.text(strings.backupExportSheetAction), findsOneWidget, reason: 'the sheet stays open');
+    expect(cubit.sync.backupService.lastBackupAt, isNull);
   });
 
   testWidgets('unprotected warning note is shown when password protection is off', (tester) async {

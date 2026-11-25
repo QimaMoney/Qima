@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
-import '../blocs/app_cubit.dart';
-import '../blocs/app_state.dart';
+import '../blocs/alerts_cubit.dart';
+import '../blocs/market_cubit.dart';
+import '../blocs/settings_cubit.dart';
+import '../blocs/zakat_cubit.dart';
+import '../blocs/zakat_state.dart';
 import '../l10n/app_localizations.dart';
 import '../models/asset_group.dart';
 import '../models/hijri_date.dart';
@@ -33,7 +36,7 @@ class _ZakatSettingsScreenState extends State<ZakatSettingsScreen> with WidgetsB
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     // The reminder row says whether notifications are actually allowed.
-    context.read<AppCubit>().refreshNotificationStatus();
+    context.read<AlertsCubit>().refreshNotificationStatus();
   }
 
   @override
@@ -45,12 +48,13 @@ class _ZakatSettingsScreenState extends State<ZakatSettingsScreen> with WidgetsB
   /// Coming back from system Settings after allowing notifications.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) context.read<AppCubit>().refreshNotificationStatus();
+    if (state == AppLifecycleState.resumed) context.read<AlertsCubit>().refreshNotificationStatus();
   }
 
   @override
   Widget build(BuildContext context) {
-    final cubit = context.read<AppCubit>();
+    final cubit = context.read<ZakatCubit>();
+    final market = context.read<MarketCubit>();
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
 
@@ -62,17 +66,20 @@ class _ZakatSettingsScreenState extends State<ZakatSettingsScreen> with WidgetsB
           title: Text(l10n.zakatSettingsTitle),
           actions: const [HelpButton(topic: HelpTopicId.zakat)],
         ),
-        body: BlocBuilder<AppCubit, AppState>(
-          builder: (context, state) {
-            final settings = state.zakatSettings;
+        body: BlocBuilder<ZakatCubit, ZakatState>(
+          builder: (context, zakatState) {
+            final app = context.watch<SettingsCubit>().state;
+            final rates = context.watch<MarketCubit>().state.rates;
+            final notificationsEnabled = context.watch<AlertsCubit>().state.notificationsEnabled;
+            final settings = zakatState.settings;
             // Every change applies to the cubit's current settings, never this
             // build's snapshot, so two quick taps can't undo each other.
-            void update(ZakatSettings Function(ZakatSettings) change) => cubit.updateZakatSettings(change);
+            void update(ZakatSettings Function(ZakatSettings) change) => cubit.updateSettings(change);
 
             final gold = ZakatAssessment.thresholdFor(NisabBasis.gold,
-                rates: state.rates, baseCurrency: state.baseCurrency, latestUSD: cubit.latestUSD);
+                rates: rates, baseCurrency: app.baseCurrency, latestUSD: market.latestUSD);
             final silver = ZakatAssessment.thresholdFor(NisabBasis.silver,
-                rates: state.rates, baseCurrency: state.baseCurrency, latestUSD: cubit.latestUSD);
+                rates: rates, baseCurrency: app.baseCurrency, latestUSD: market.latestUSD);
 
             String basisSubtitle(NisabBasis basis) {
               final mine = basis == NisabBasis.gold ? gold : silver;
@@ -178,7 +185,7 @@ class _ZakatSettingsScreenState extends State<ZakatSettingsScreen> with WidgetsB
                       ),
                       if (settings.calendar == HawlCalendar.gregorian) ...[
                         const SizedBox(height: DS.spaceXS),
-                        Text(l10n.zakatGregorianNote(percentLabel(context, 2.577), percentLabel(context, ZakatAssessment.rate * 100)), style: TextStyle(color: colors.textTertiary, fontSize: 12)),
+                        Text(l10n.zakatGregorianNote, style: TextStyle(color: colors.textTertiary, fontSize: 12)),
                       ],
                       const SizedBox(height: DS.spaceSM),
                       // The date sits under the label, not in `trailing`: a
@@ -218,7 +225,7 @@ class _ZakatSettingsScreenState extends State<ZakatSettingsScreen> with WidgetsB
                         subtitle: Text(
                           start == null
                               ? l10n.zakatRemindNeedsStart
-                              : state.notificationsEnabled
+                              : notificationsEnabled
                                   ? l10n.zakatRemindSubtitle
                                   : l10n.zakatRemindNotificationsOff,
                           style: TextStyle(color: colors.textTertiary, fontSize: 12),
@@ -226,7 +233,7 @@ class _ZakatSettingsScreenState extends State<ZakatSettingsScreen> with WidgetsB
                         value: settings.remind && start != null,
                         onChanged: start == null ? null : (value) => update((s) => s.copyWith(remind: value)),
                       ),
-                      if (start != null && settings.remind && !state.notificationsEnabled)
+                      if (start != null && settings.remind && !notificationsEnabled)
                         Align(
                           alignment: AlignmentDirectional.centerStart,
                           child: TextButton(

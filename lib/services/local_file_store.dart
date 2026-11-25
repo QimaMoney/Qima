@@ -46,6 +46,17 @@ class LocalFileStore {
     }
   }
 
+  /// Like [readJson], but null means only that there is no file. A file that
+  /// cannot be read or parsed throws, for a caller that must not mistake a
+  /// failed read for an empty one.
+  static Future<Map<String, dynamic>?> readJsonStrict(String relativePath) async {
+    if (kIsWeb) {
+      final contents = (await _webPrefs()).getString(_webKey(relativePath));
+      return contents == null ? null : jsonDecode(contents) as Map<String, dynamic>;
+    }
+    return io_store.readJsonStrict(relativePath);
+  }
+
   /// Writes [data] as JSON to [relativePath]. Returns whether the write
   /// actually reached the backing store.
   static Future<bool> writeJson(String relativePath, Map<String, dynamic> data) async {
@@ -58,6 +69,13 @@ class LocalFileStore {
     } catch (_) {
       return false;
     }
+  }
+
+  /// The directory the JSON files live in, for storage that needs a file of
+  /// its own next to them (the money database). Not available on web.
+  static Future<String> directoryPath() async {
+    if (kIsWeb) throw UnsupportedError('There is no storage directory on web.');
+    return io_store.directoryPath();
   }
 
   /// Only used for tests: allows pointing at a temp directory (native) or

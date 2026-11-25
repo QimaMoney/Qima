@@ -1,11 +1,17 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../blocs/settings_cubit.dart';
+import '../models/chart_range.dart';
+
+import '../l10n/app_localizations.dart';
 import '../models/instrument_presentation.dart';
 import '../theme/design_system.dart';
 import '../theme/price_chart.dart';
 import '../theme/qima_colors.dart';
 import '../theme/strings.dart';
 import 'instrument_icon.dart';
+import 'market_status.dart';
 
 /// Watchlist row: icon, name/detail line, a small non-interactive sparkline,
 /// and price + windowed change. Mirrors `InstrumentRow.swift`.
@@ -19,7 +25,12 @@ class InstrumentRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final now = DateTime.now();
-    final change = presentation.sparklineChange(now);
+    // The period is the default chart range from Settings, the same one the
+    // charts open on, and it is named beside the change: a percentage with
+    // no period says nothing.
+    final range = context.select<SettingsCubit, ChartRange>((c) => c.state.preferredChartRange);
+    final change = presentation.sparklineChange(now, range: range);
+    final sparkline = presentation.sparklinePoints(now, range: range);
     final unitSuffix = presentation.unitSuffix != null ? ' ${displayLabel(context, presentation.unitSuffix!)}' : '';
     final karat = presentation.karatLabel != null ? ' · ${displayLabel(context, presentation.karatLabel!)}' : '';
 
@@ -42,10 +53,10 @@ class InstrumentRow extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                   ),
                   const SizedBox(height: 2),
-                  Text(
-                    '${presentation.symbol} · ${presentation.displayCurrency}$unitSuffix$karat',
+                  InstrumentDetailLine(
+                    text: '${presentation.symbol} · ${presentation.displayCurrency}$unitSuffix$karat',
+                    closed: MarketClosedMark.closed(presentation.instrument, now),
                     style: TextStyle(color: colors.textTertiary, fontSize: 12),
-                    overflow: TextOverflow.ellipsis,
                   ),
                 ],
               ),
@@ -54,9 +65,9 @@ class InstrumentRow extends StatelessWidget {
             SizedBox(
               width: 64,
               height: 34,
-              child: presentation.sparklinePoints(now).length >= 2
+              child: sparkline.length >= 2
                   ? PriceChartView(
-                      points: presentation.sparklinePoints(now),
+                      points: sparkline,
                       isTrendingUp: change?.isUp ?? presentation.isTrendingUp,
                       accent: QimaColors.trendColor(change?.isUp ?? presentation.isTrendingUp, colors),
                       showsAxes: false,
@@ -87,6 +98,8 @@ class InstrumentRow extends StatelessWidget {
                         style: TextStyle(
                             color: QimaColors.trendColor(change.isUp, colors), fontSize: 12, fontWeight: FontWeight.w600),
                       ),
+                      const SizedBox(width: 4),
+                      Text(displayLabel(context, range.labelKey), style: TextStyle(color: colors.textTertiary, fontSize: 11)),
                     ],
                   )
                 else
@@ -97,5 +110,40 @@ class InstrumentRow extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// The symbol line. When "· (moon) Closed" would not fit, the word goes
+/// and the moon stays, so the symbol and currency are never cut short.
+class InstrumentDetailLine extends StatelessWidget {
+  final String text;
+  final bool closed;
+  final TextStyle style;
+
+  const InstrumentDetailLine({super.key, required this.text, required this.closed, required this.style});
+
+  @override
+  Widget build(BuildContext context) {
+    Widget line({required bool label}) => Text.rich(
+          TextSpan(children: [
+            TextSpan(text: text),
+            if (closed) ...MarketClosedMark.spans(context, label: label),
+          ]),
+          style: style,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        );
+    if (!closed) return line(label: false);
+    return LayoutBuilder(builder: (context, constraints) {
+      final painter = TextPainter(
+        text: TextSpan(text: '$text ·    ${AppLocalizations.of(context)!.marketClosed}', style: style),
+        textDirection: Directionality.of(context),
+        textScaler: MediaQuery.textScalerOf(context),
+        maxLines: 1,
+      )..layout();
+      final fits = painter.width + style.fontSize! <= constraints.maxWidth;
+      painter.dispose();
+      return line(label: fits);
+    });
   }
 }

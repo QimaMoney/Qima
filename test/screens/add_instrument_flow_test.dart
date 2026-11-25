@@ -4,8 +4,9 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:qima/blocs/app_cubit.dart';
-import 'package:qima/blocs/app_state.dart';
+import 'package:qima/blocs/app_blocs.dart';
+import '../helpers/app_blocs.dart';
+import 'package:qima/blocs/market_state.dart';
 import 'package:qima/l10n/app_localizations.dart';
 import 'package:qima/models/asset.dart';
 import 'package:qima/models/fx_history.dart';
@@ -21,15 +22,20 @@ import 'package:qima/screens/transaction_editor_screen.dart';
 import 'package:qima/screens/watchlist_screen.dart';
 import 'package:qima/services/local_file_store.dart';
 import 'package:qima/services/price_repository.dart';
+import 'package:qima/services/quote_provider.dart';
+import '../helpers/money_provider.dart';
 
 /// No-ops every network/shared_preferences-touching call `AppCubit` fires in
 /// the background (refresh, FX/history backfill) so the widget tests below
-/// can exercise the add flow deterministically and offline. `validateCustomTicker`
+/// can exercise the add flow deterministically and offline. `probeListing`
 /// is overridden too, standing in for "the ticker is real" without hitting
 /// Yahoo — these tests are about navigation/state, not price validation.
 class _FakeRepository extends PriceRepository {
+  /// What the feed says the next ticker is; it names nothing by default.
+  Listing listing = const Listing(canonicalUSD: 100);
+
   @override
-  Future<double> probePrice(Instrument instrument) async => 100;
+  Future<Listing> probeListing(Instrument instrument) async => listing;
 
   @override
   Future<QuoteSeries> refresh(Instrument instrument, {DateTime? now}) async => QuoteSeries.empty(instrument.id);
@@ -56,7 +62,7 @@ class _FakeRepository extends PriceRepository {
 /// long enough. Used to await the ACTUAL completion of `addCard`/
 /// `undoAdd`'s real on-disk file IO (and everything chained after it —
 /// `CardConfigScreen`'s `onPressed` doesn't return, and doesn't call
-/// `completeAdd`'s navigation, until the whole `await cubit.addCard(...)`
+/// `completeAdd`'s navigation, until the whole `await cubit.watchlist.addCard(...)`
 /// chain resolves). A fixed delay that's too short leaves this work still
 /// in flight when the test (and `tearDown`'s `cubit.close()`) completes,
 /// which then throws "Cannot emit new states after calling close" during a
@@ -80,10 +86,10 @@ Future<void> _pollUntil(bool Function() condition, {Duration timeout = const Dur
 /// async work that must be fully drained before a test (and `tearDown`'s
 /// `cubit.close()`) completes, or either can throw "Cannot emit new states
 /// after calling close" into a LATER test.
-Future<void> _awaitAddCardSettled(AppCubit cubit, String instrumentID) async {
-  await _pollUntil(() => cubit.state.seriesByID.containsKey(instrumentID));
-  if (cubit.state.phase == RefreshPhase.refreshing) {
-    await cubit.stream.firstWhere((s) => s.phase != RefreshPhase.refreshing).timeout(const Duration(seconds: 5));
+Future<void> _awaitAddCardSettled(AppBlocs cubit, String instrumentID) async {
+  await _pollUntil(() => cubit.market.state.seriesByID.containsKey(instrumentID));
+  if (cubit.market.state.phase == RefreshPhase.refreshing) {
+    await cubit.market.stream.firstWhere((s) => s.phase != RefreshPhase.refreshing).timeout(const Duration(seconds: 5));
   }
 }
 
@@ -141,9 +147,9 @@ Future<void> _openWatch(WidgetTester tester, {AddStart start = AddStart.watchlis
   await tester.pumpAndSettle();
 }
 
-Widget _app(AppCubit cubit, {Locale locale = const Locale('en')}) {
-  return BlocProvider<AppCubit>.value(
-    value: cubit,
+Widget _app(AppBlocs cubit, {Locale locale = const Locale('en')}) {
+  return MultiBlocProvider(
+    providers: [...cubit.providers, testMoneyProvider(cubit)],
     child: MaterialApp(
       locale: locale,
       localizationsDelegates: AppLocalizations.localizationsDelegates,
@@ -157,13 +163,15 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   late Directory tempDir;
-  late AppCubit cubit;
+  late AppBlocs cubit;
+  late _FakeRepository repository;
 
   setUp(() async {
     tempDir = await Directory.systemTemp.createTemp('qima_add_flow_test');
     LocalFileStore.overrideDirectoryForTesting(tempDir);
-    cubit = AppCubit(repository: _FakeRepository());
-    cubit.emit(cubit.state.copyWith(initialized: true));
+    repository = _FakeRepository();
+    cubit = AppBlocs(repository: repository);
+    cubit.seed(initialized: true);
   });
 
   tearDown(() async {
@@ -244,7 +252,7 @@ void main() {
     expect(find.byType(InstrumentDetailScreen), findsOneWidget);
     expect(find.byType(CardConfigScreen), findsNothing);
     expect(find.byType(AddInstrumentScreen), findsNothing);
-    expect(cubit.state.cards.any((c) => c.instrumentID == gold.id), isTrue);
+    expect(cubit.watchlist.state.cards.any((c) => c.instrumentID == gold.id), isTrue);
 
     final navigator = tester.state<NavigatorState>(find.byType(Navigator).first);
     expect(navigator.canPop(), isTrue);
@@ -266,12 +274,12 @@ void main() {
     await _settle(tester);
 
     expect(find.byType(InstrumentDetailScreen), findsOneWidget);
-    expect(cubit.state.cards, isNotEmpty);
+    expect(cubit.watchlist.state.cards, isNotEmpty);
 
-    await _tapUndo(tester, () => _pollUntil(() => cubit.state.cards.isEmpty));
+    await _tapUndo(tester, () => _pollUntil(() => cubit.watchlist.state.cards.isEmpty));
     await _settle(tester);
 
-    expect(cubit.state.cards, isEmpty);
+    expect(cubit.watchlist.state.cards, isEmpty);
     expect(find.byType(WatchlistScreen), findsOneWidget);
   });
 
@@ -286,10 +294,10 @@ void main() {
     // flight when `tearDown` closes the cubit.
     late Instrument preExisting;
     await tester.runAsync(() async {
-      preExisting = await cubit.addCustomTicker('PREV', 'Previous Co', assetClass: AssetClass.stock);
-      await cubit.addCard(WatchCard(id: 'pre', instrumentID: preExisting.id, currency: 'EUR', unit: PriceUnit.each));
-      if (cubit.state.phase == RefreshPhase.refreshing) {
-        await cubit.stream.firstWhere((s) => s.phase != RefreshPhase.refreshing).timeout(const Duration(seconds: 5));
+      preExisting = await cubit.watchlist.addCustomTicker('PREV', 'Previous Co', assetClass: AssetClass.stock);
+      await cubit.watchlist.addCard(WatchCard(id: 'pre', instrumentID: preExisting.id, currency: 'EUR', unit: PriceUnit.each));
+      if (cubit.market.state.phase == RefreshPhase.refreshing) {
+        await cubit.market.stream.firstWhere((s) => s.phase != RefreshPhase.refreshing).timeout(const Duration(seconds: 5));
       }
     });
 
@@ -312,8 +320,8 @@ void main() {
     await _settle(tester);
 
     expect(find.byType(InstrumentDetailScreen), findsOneWidget);
-    expect(cubit.isCustom(newInstrumentID), isTrue);
-    expect(cubit.state.cards.any((c) => c.instrumentID == newInstrumentID), isTrue);
+    expect(cubit.watchlist.isCustom(newInstrumentID), isTrue);
+    expect(cubit.watchlist.state.cards.any((c) => c.instrumentID == newInstrumentID), isTrue);
 
     // `undoAdd` (with a `customInstrumentID`) ends with
     // `removeCustomInstrument`, which reloads the catalog BEFORE removing
@@ -322,16 +330,66 @@ void main() {
     await _tapUndo(
       tester,
       () => _pollUntil(
-        () => !cubit.isCustom(newInstrumentID) && !cubit.state.cards.any((c) => c.instrumentID == newInstrumentID),
+        () => !cubit.watchlist.isCustom(newInstrumentID) && !cubit.watchlist.state.cards.any((c) => c.instrumentID == newInstrumentID),
       ),
     );
     await _settle(tester);
 
-    expect(cubit.state.cards.any((c) => c.instrumentID == newInstrumentID), isFalse);
-    expect(cubit.isCustom(newInstrumentID), isFalse);
+    expect(cubit.watchlist.state.cards.any((c) => c.instrumentID == newInstrumentID), isFalse);
+    expect(cubit.watchlist.isCustom(newInstrumentID), isFalse);
     // The pre-existing ticker (and its card) must survive.
-    expect(cubit.isCustom(preExisting.id), isTrue);
-    expect(cubit.state.cards.any((c) => c.instrumentID == preExisting.id), isTrue);
+    expect(cubit.watchlist.isCustom(preExisting.id), isTrue);
+    expect(cubit.watchlist.state.cards.any((c) => c.instrumentID == preExisting.id), isTrue);
+  });
+
+  testWidgets('a custom ticker is added only after the feed\'s own name for it is confirmed', (tester) async {
+    // The feed answers for any symbol it knows, so a short one can be a
+    // different company on another exchange than the one meant.
+    repository.listing = const Listing(canonicalUSD: 100, name: 'Zed Utilities Inc.', exchange: 'Northport', currency: 'USD');
+    await tester.pumpWidget(_app(cubit));
+    await _openWatch(tester);
+    await tester.enterText(find.byType(TextField), 'ZD');
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(FilledButton));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, 'Ticker symbol'), 'ZD');
+    const instrumentID = 'stock.ZD';
+
+    // The button spins while the question is up, so frames never settle.
+    expect(tester.testTextInput.isVisible, isTrue);
+    await tester.tap(find.text('Add ticker'));
+    await _settle(tester);
+    expect(find.byKey(const ValueKey('customTickerConfirm')), findsOneWidget);
+    // The keyboard is put away, or it would stay up over the asset's page.
+    expect(tester.testTextInput.isVisible, isFalse);
+    expect(find.text('Zed Utilities Inc.'), findsOneWidget);
+    expect(find.text('ZD · Northport · USD'), findsOneWidget);
+
+    // Not the one meant: nothing is added and the screen stays for another try.
+    await tester.tap(find.byKey(const ValueKey('customTickerConfirmNo')));
+    await _settle(tester);
+    expect(find.byType(CustomTickerScreen), findsOneWidget);
+    expect(cubit.watchlist.isCustom(instrumentID), isFalse);
+    expect(cubit.watchlist.state.cards, isEmpty);
+
+    // Tapped in a real zone: everything that follows the answer (the file
+    // IO of adding) runs in the zone the tap started in.
+    await tester.runAsync(() async {
+      await tester.tap(find.text('Add ticker'));
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    });
+    await _settle(tester);
+    await _tapAndAwaitRealWork(
+      tester,
+      find.byKey(const ValueKey('customTickerConfirmYes')),
+      () => _awaitAddCardSettled(cubit, instrumentID),
+    );
+    await _settle(tester);
+
+    // With no name typed, it carries the feed's name and not the bare symbol.
+    expect(find.byType(InstrumentDetailScreen), findsOneWidget);
+    final stored = await tester.runAsync(() => cubit.watchlist.customInstruments());
+    expect(stored!.single.name, 'Zed Utilities Inc.');
   });
 
   testWidgets('adding a duplicate opens the existing card with no Undo action', (tester) async {
@@ -345,9 +403,9 @@ void main() {
     // in flight when `tearDown` closes the cubit and throws "Cannot emit
     // new states after calling close" into a LATER test.
     await tester.runAsync(() async {
-      await cubit.addCard(existing);
-      if (cubit.state.phase == RefreshPhase.refreshing) {
-        await cubit.stream.firstWhere((s) => s.phase != RefreshPhase.refreshing).timeout(const Duration(seconds: 5));
+      await cubit.watchlist.addCard(existing);
+      if (cubit.market.state.phase == RefreshPhase.refreshing) {
+        await cubit.market.stream.firstWhere((s) => s.phase != RefreshPhase.refreshing).timeout(const Duration(seconds: 5));
       }
     });
 
@@ -366,7 +424,7 @@ void main() {
     await _settle(tester);
 
     expect(find.byType(InstrumentDetailScreen), findsOneWidget);
-    expect(cubit.state.cards.length, 1); // no duplicate card was created.
+    expect(cubit.watchlist.state.cards.length, 1); // no duplicate card was created.
     expect(find.text('Undo'), findsNothing);
     expect(find.textContaining('already in your watchlist'), findsOneWidget);
   });

@@ -85,7 +85,9 @@ class PriceRepository {
 
   Future<FXRates> cachedRates() async => (await fxRateStore.load()) ?? FXRates.usdIdentity;
 
-  Future<FXHistory> cachedFXHistory() => fxHistoryStore.load();
+  /// The stored FX history, checked against the live rates (see
+  /// [FXHistory.checkedAgainst]); the store keeps the raw feed.
+  Future<FXHistory> cachedFXHistory() async => (await fxHistoryStore.load()).checkedAgainst(await cachedRates());
 
   Future<PriceConverter> converter({
     required String currency,
@@ -115,9 +117,13 @@ class PriceRepository {
 
   // ---- Live spot ----
 
-  Future<double> probePrice(Instrument instrument) async {
+  /// What the feed has under [instrument]'s symbol; throws when it has
+  /// nothing.
+  Future<Listing> probeListing(Instrument instrument) async {
     final rates = await cachedRates();
-    return provider(instrument, rates).canonicalUSDPrice(instrument);
+    final source = provider(instrument, rates);
+    if (source is YahooQuoteProvider) return source.listing(instrument);
+    return Listing(canonicalUSD: await source.canonicalUSDPrice(instrument));
   }
 
   Future<QuoteSeries> refresh(Instrument instrument, {DateTime? now}) async {
@@ -235,7 +241,7 @@ class PriceRepository {
       }
     }
 
-    return history;
+    return history.checkedAgainst(await cachedRates());
   }
 
   String? _historySymbol(Instrument instrument) {
@@ -334,8 +340,12 @@ class PriceRepository {
       if (instrument.assetClass == AssetClass.fiat) {
         if (!force && deep && !tailDue) continue;
         final quotes = fiatQuotes(instrument, fxHistory, fxHistory.allDates());
-        if (quotes.isEmpty) continue;
-        final merged = existing.merging(quotes, effectiveNow);
+        // The derived closes are the whole record before today's live
+        // samples, so closes kept from a feed since found wrong go too.
+        final dailyUntil = effectiveNow.subtract(QuoteSeries.intradayWindow);
+        final stale = existing.quotes.any((q) => q.timestamp.isBefore(dailyUntil));
+        if (quotes.isEmpty && !stale) continue;
+        final merged = existing.merging(quotes, effectiveNow, replacing: (from: DateTime.utc(1970), to: dailyUntil));
         final persisted = await quoteHistoryStore.save(merged);
         result[instrument.id] = merged;
         if (!force && deep && persisted) await _stamp(prefs, tailKey, effectiveNow);
@@ -362,18 +372,26 @@ class PriceRepository {
       if (doTail || relevel) await _stamp(prefs, attemptedKey, effectiveNow);
       if (doIntraday) await _stamp(prefs, intradayKey, effectiveNow);
 
+      // A bar's high and low are converted exactly as its close; one that
+      // can't be converted is left out and the bar stands on its close.
+      double? usdOrNull(double? price, String currency) {
+        if (price == null) return null;
+        try {
+          final usd = usdFromPrice(price, currency, rates);
+          return usd.isNaN ? null : usd;
+        } catch (_) {
+          return null;
+        }
+      }
+
       List<Quote> quotesOf(List<Bar> bars) => [
             for (final bar in bars)
               Quote(
                 instrumentID: instrument.id,
                 timestamp: bar.date,
-                canonicalUSD: () {
-                  try {
-                    return usdFromPrice(bar.close, bar.currency, rates);
-                  } catch (_) {
-                    return double.nan;
-                  }
-                }(),
+                canonicalUSD: usdOrNull(bar.close, bar.currency) ?? double.nan,
+                high: usdOrNull(bar.high, bar.currency),
+                low: usdOrNull(bar.low, bar.currency),
               ),
           ].where((q) => !q.canonicalUSD.isNaN).toList();
 
@@ -401,7 +419,13 @@ class PriceRepository {
           ? quotes
           : [
               for (final q in quotes)
-                Quote(instrumentID: q.instrumentID, timestamp: q.timestamp, canonicalUSD: q.canonicalUSD * factor),
+                Quote(
+                  instrumentID: q.instrumentID,
+                  timestamp: q.timestamp,
+                  canonicalUSD: q.canonicalUSD * factor,
+                  high: q.high == null ? null : q.high! * factor,
+                  low: q.low == null ? null : q.low! * factor,
+                ),
             ];
 
       var merged = existing;

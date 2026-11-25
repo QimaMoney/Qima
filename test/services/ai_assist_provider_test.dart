@@ -1,6 +1,10 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:qima/blocs/app_cubit.dart';
+import 'package:qima/blocs/settings_cubit.dart';
+import 'package:qima/blocs/app_blocs.dart';
+import '../helpers/app_blocs.dart';
 import 'package:qima/models/transaction_capture.dart';
+import 'package:qima/models/statement_facts.dart';
+import 'package:qima/models/statement_reader.dart';
 import 'package:qima/services/ai_assist_provider.dart';
 import 'package:qima/services/preferences.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -24,6 +28,15 @@ class _Wording implements AiAssistProvider {
     calls++;
     return wording;
   }
+
+  @override
+  Future<List<LineLabel>?> labelStatementLines(List<String> lines, String localeTag) async => null;
+
+  @override
+  Future<List<PageStructure>?> structurePages(String path, List<DocPage> pages, String localeTag) async => null;
+
+  @override
+  Future<MessageLabels?> readMessage(String text, String localeTag) async => null;
 }
 
 void main() {
@@ -81,12 +94,13 @@ void main() {
     });
   });
 
-  group('AppCubit.phrased', () {
-    Future<AppCubit> cubitWith(AiAssistProvider provider, {required bool on}) async {
+  group('SettingsCubit.phrased', () {
+    Future<SettingsCubit> cubitWith(AiAssistProvider provider, {required bool on}) async {
       SharedPreferences.setMockInitialValues({'onDeviceModel': on});
-      final cubit = AppCubit(aiAssist: provider);
+      final blocs = AppBlocs(aiAssist: provider);
+      final cubit = blocs.settings;
       cubit.preferences = await Preferences.create();
-      cubit.emit(cubit.state.copyWith(onDeviceModel: on));
+      blocs.seed(onDeviceModel: on);
       return cubit;
     }
 

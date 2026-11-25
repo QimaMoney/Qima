@@ -9,8 +9,19 @@ class DisplayPoint extends Equatable {
   final DateTime date;
   final double value;
 
-  DisplayPoint({required DateTime date, required this.value}) : date = date.toLocal();
+  /// The extremes of the span this point stands for, in the same terms as
+  /// [value]. Null where only the value is known.
+  final double? high;
+  final double? low;
+
+  DisplayPoint({required DateTime date, required this.value, this.high, this.low}) : date = date.toLocal();
+
+  /// The highest price the point stands for: its own extreme, else its value.
+  double get peak => high ?? value;
+
+  /// The lowest price the point stands for: its own extreme, else its value.
+  double get trough => low ?? value;
 
   @override
-  List<Object?> get props => [date, value];
+  List<Object?> get props => [date, value, high, low];
 }

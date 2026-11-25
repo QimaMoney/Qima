@@ -1,17 +1,31 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart' show kIsWeb, TargetPlatform, defaultTargetPlatform;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:intl/intl.dart';
+import 'package:intl/intl.dart' hide TextDirection;
 import 'package:package_info_plus/package_info_plus.dart';
 
-import '../blocs/app_cubit.dart';
-import '../blocs/app_state.dart';
+import '../blocs/alerts_cubit.dart';
+import '../blocs/alerts_state.dart';
+import '../blocs/cloud_log_sync.dart';
+import '../blocs/cloud_log_sync_state.dart';
+import '../blocs/holdings_cubit.dart';
+import '../blocs/market_cubit.dart';
+import '../blocs/money_cubit.dart';
+import '../blocs/settings_cubit.dart';
+import '../blocs/settings_state.dart';
+import '../blocs/sync_cubit.dart';
+import '../blocs/sync_state.dart';
 import '../l10n/app_localizations.dart';
 import '../models/chart_range.dart';
 import '../services/app_lock_service.dart';
 import '../services/cloud_kv_store.dart';
 import '../services/preferences.dart';
+import '../services/ai_apps.dart';
 import '../services/ai_assist_provider.dart';
+import '../services/platform_ai.dart';
 import '../theme/design_system.dart';
 import '../theme/help_topics.dart';
 import '../theme/qima_colors.dart';
@@ -19,11 +33,15 @@ import '../theme/strings.dart';
 import '../widgets/help_button.dart';
 import '../widgets/section_header.dart';
 import 'alerts_screen.dart';
+import 'money/accounts_screens.dart';
+import 'money/home_screen.dart';
+import 'money/more_money_screens.dart';
 import 'backup_screen.dart';
 import 'currency_picker.dart';
 import 'help_index_sheet.dart';
 import 'help_sheet.dart';
-import 'onboarding_tour_screen.dart';
+import '../widgets/guided_tour.dart';
+import 'setup_flow_screen.dart';
 import 'zakat_settings_screen.dart';
 
 /// Single settings sheet: base currency, default chart range, widget refresh
@@ -41,7 +59,7 @@ class SettingsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cubit = context.read<AppCubit>();
+    final cubit = context.read<SettingsCubit>();
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
 
@@ -55,9 +73,9 @@ class SettingsScreen extends StatelessWidget {
           title: Text(l10n.settingsTitle),
           actions: const [HelpButton(topic: HelpTopicId.settings)],
         ),
-        body: BlocBuilder<AppCubit, AppState>(
-          builder: (context, _) {
-            final state = cubit.state;
+        body: BlocBuilder<SettingsCubit, SettingsState>(
+          builder: (context, state) {
+            final bookHealth = context.select<SyncCubit, BookHealth>((c) => c.state.bookHealth);
             return ListView(
               controller: scrollController,
               padding: const EdgeInsets.all(DS.spaceMD),
@@ -87,6 +105,11 @@ class SettingsScreen extends StatelessWidget {
                   const _ICloudSyncSection(),
                   const SizedBox(height: DS.spaceLG),
                 ],
+                if (bookHealth.hasProblem) ...[
+                  SectionHeader(l10n.settingsNeedsAttention),
+                  _BookHealthSection(health: bookHealth),
+                  const SizedBox(height: DS.spaceLG),
+                ],
                 SectionHeader(l10n.settingsSummaries),
                 DSCard(
                   padding: const EdgeInsets.symmetric(horizontal: DS.spaceMD, vertical: DS.spaceXS),
@@ -105,6 +128,11 @@ class SettingsScreen extends StatelessWidget {
                 SectionHeader(l10n.settingsIntelligence),
                 const _OnDeviceModelSection(),
                 const SizedBox(height: DS.spaceLG),
+                if (AiApps.supported) ...[
+                  SectionHeader(l10n.settingsAiApps),
+                  const _AiAppsSection(),
+                  const SizedBox(height: DS.spaceLG),
+                ],
                 SectionHeader(l10n.settingsBackup),
                 const _BackupSection(),
                 const SizedBox(height: DS.spaceLG),
@@ -121,6 +149,9 @@ class SettingsScreen extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: DS.spaceLG),
+                SectionHeader(l10n.navMoney),
+                const _MoneySection(),
+                const SizedBox(height: DS.spaceLG),
                 SectionHeader(l10n.settingsBaseCurrency),
                 DSCard(
                   child: ListTile(
@@ -135,7 +166,7 @@ class SettingsScreen extends StatelessWidget {
                       final selected = await CurrencyPicker.show(
                         context,
                         selected: state.baseCurrency,
-                        currencies: state.rates.availableCurrencies,
+                        currencies: context.read<MarketCubit>().state.rates.availableCurrencies,
                       );
                       if (selected != null) await cubit.setBaseCurrency(selected);
                     },
@@ -287,11 +318,11 @@ class _AlertsSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cubit = context.read<AppCubit>();
+    final cubit = context.read<AlertsCubit>();
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
 
-    return BlocBuilder<AppCubit, AppState>(
+    return BlocBuilder<AlertsCubit, AlertsState>(
       bloc: cubit,
       builder: (context, state) {
         return DSCard(
@@ -357,7 +388,7 @@ class _PrivacySecuritySectionState extends State<_PrivacySecuritySection> {
   @override
   void initState() {
     super.initState();
-    _supported = context.read<AppCubit>().appLockService.isSupported;
+    _supported = context.read<SettingsCubit>().appLockService.isSupported;
   }
 
   /// `local_auth` ships no web or Linux implementation at all — rather than
@@ -373,7 +404,7 @@ class _PrivacySecuritySectionState extends State<_PrivacySecuritySection> {
 
   @override
   Widget build(BuildContext context) {
-    final cubit = context.read<AppCubit>();
+    final cubit = context.read<SettingsCubit>();
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
 
@@ -382,8 +413,8 @@ class _PrivacySecuritySectionState extends State<_PrivacySecuritySection> {
     // this whole subtree when the parent rebuilds but the const widget
     // instance is unchanged — its own BlocBuilder subscription is what
     // actually keeps the hide-balances/app-lock switches and the "Lock
-    // after" row in sync with AppCubit, independent of the parent.
-    return BlocBuilder<AppCubit, AppState>(
+    // after" row in sync with SettingsCubit, independent of the parent.
+    return BlocBuilder<SettingsCubit, SettingsState>(
       bloc: cubit,
       builder: (context, state) {
         return FutureBuilder<bool>(
@@ -451,7 +482,7 @@ class _PrivacySecuritySectionState extends State<_PrivacySecuritySection> {
     );
   }
 
-  Future<void> _showLockAfterSheet(BuildContext context, AppCubit cubit) async {
+  Future<void> _showLockAfterSheet(BuildContext context, SettingsCubit cubit) async {
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
     await showModalBottomSheet<void>(
@@ -477,7 +508,7 @@ class _PrivacySecuritySectionState extends State<_PrivacySecuritySection> {
                     ),
                   ),
                 ),
-                BlocBuilder<AppCubit, AppState>(
+                BlocBuilder<SettingsCubit, SettingsState>(
                   bloc: cubit,
                   builder: (context, state) {
                     return RadioGroup<LockGrace>(
@@ -511,14 +542,14 @@ class _PrivacySecuritySectionState extends State<_PrivacySecuritySection> {
 
 /// "iCloud sync" settings card (spec Phase 7, iOS only — [SettingsScreen]
 /// only builds this section on iOS): a "Sync with iCloud" switch plus a
-/// status line reflecting [AppState.cloudSyncStatus]. Turning the switch on
+/// status line reflecting [SyncState.cloudSyncStatus]. Turning the switch on
 /// merges — never wipes — this device's local data with whatever's already
-/// in iCloud (see `AppCubit.setICloudSyncEnabled`); turning it off just
+/// in iCloud (see `SyncCubit.setICloudSyncEnabled`); turning it off just
 /// stops listening for changes, it never deletes anything.
 class _ICloudSyncSection extends StatelessWidget {
   const _ICloudSyncSection();
 
-  String _statusText(BuildContext context, AppState state, AppLocalizations l10n) {
+  String _statusText(BuildContext context, SyncState state, AppLocalizations l10n) {
     switch (state.cloudSyncStatus) {
       case CloudSyncStatus.disabled:
         return '';
@@ -528,6 +559,8 @@ class _ICloudSyncSection extends StatelessWidget {
         return l10n.settingsICloudSyncStatusNotSignedIn;
       case CloudSyncStatus.storageFull:
         return l10n.settingsICloudSyncStatusStorageFull;
+      case CloudSyncStatus.needsAttention:
+        return l10n.settingsICloudSyncStatusAttention;
       case CloudSyncStatus.upToDate:
         final at = state.lastCloudSyncAt;
         if (at == null) return l10n.settingsICloudSyncStatusSyncing;
@@ -537,15 +570,16 @@ class _ICloudSyncSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cubit = context.read<AppCubit>();
+    final cubit = context.read<SyncCubit>();
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
 
-    return BlocBuilder<AppCubit, AppState>(
+    return BlocBuilder<SyncCubit, SyncState>(
       bloc: cubit,
       builder: (context, state) {
         final statusText = _statusText(context, state, l10n);
         final statusColor = state.cloudSyncStatus == CloudSyncStatus.storageFull ||
+                state.cloudSyncStatus == CloudSyncStatus.needsAttention ||
                 state.cloudSyncStatus == CloudSyncStatus.notSignedIn
             ? colors.down
             : colors.textTertiary;
@@ -568,10 +602,130 @@ class _ICloudSyncSection extends StatelessWidget {
                   child: Text(statusText, style: TextStyle(color: statusColor, fontSize: 12)),
                 ),
               ],
+              if (state.iCloudSyncEnabled) const _CloudLogSyncRow(),
             ],
           ),
         );
       },
+    );
+  }
+}
+
+/// The switch for the CloudKit change log sync, under the iCloud switch and
+/// shown only where CloudKit can be used (not on web, not in a build without
+/// it). It rebuilds on [CloudLogSync]'s own state, so nothing else on the
+/// screen does when a round starts or ends.
+class _CloudLogSyncRow extends StatelessWidget {
+  const _CloudLogSyncRow();
+
+  /// The one line under the switch: what the sync is doing, or why it is not.
+  (IconData, String, bool) _status(BuildContext context, CloudLogSyncState state, AppLocalizations l10n) {
+    switch (state.phase) {
+      case CloudLogPhase.unavailable:
+      case CloudLogPhase.off:
+        return (Icons.cloud_off_outlined, '', false);
+      case CloudLogPhase.syncing:
+        return (Icons.sync, l10n.settingsCloudLogSyncStatusSyncing, false);
+      case CloudLogPhase.upToDate:
+        final at = state.at;
+        if (at == null) return (Icons.sync, l10n.settingsCloudLogSyncStatusSyncing, false);
+        return (Icons.check_circle_outline, l10n.settingsCloudLogSyncStatusUpToDate(DateFormat.Hm(Localizations.localeOf(context).toString()).format(at.toLocal())), false);
+      case CloudLogPhase.waiting:
+        return (Icons.hourglass_empty, l10n.settingsCloudLogSyncStatusWaiting, false);
+      case CloudLogPhase.problem:
+        return switch (state.problem) {
+          CloudLogProblem.quota => (Icons.warning_amber_rounded, l10n.settingsCloudLogSyncStatusQuota, true),
+          CloudLogProblem.notSignedIn => (Icons.warning_amber_rounded, l10n.settingsCloudLogSyncStatusNotSignedIn, true),
+          CloudLogProblem.unavailable => (Icons.warning_amber_rounded, l10n.settingsCloudLogSyncStatusUnavailable, true),
+          CloudLogProblem.zoneMissing => (Icons.warning_amber_rounded, l10n.settingsCloudLogSyncStatusZoneMissing, true),
+          CloudLogProblem.newerVersion => (Icons.system_update_alt, l10n.settingsCloudLogSyncStatusNewerVersion, true),
+          CloudLogProblem.offline => (Icons.cloud_off_outlined, l10n.settingsCloudLogSyncStatusOffline, false),
+          CloudLogProblem.other || null => (Icons.warning_amber_rounded, l10n.settingsCloudLogSyncStatusOther, true),
+        };
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cubit = context.read<CloudLogSync>();
+    final l10n = AppLocalizations.of(context)!;
+    final colors = context.colors;
+
+    return BlocBuilder<CloudLogSync, CloudLogSyncState>(
+      bloc: cubit,
+      builder: (context, state) {
+        if (!state.offered) return const SizedBox.shrink();
+        final (icon, text, isProblem) = _status(context, state, l10n);
+        final color = isProblem ? colors.down : colors.textTertiary;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Divider(color: colors.hairline, height: DS.spaceLG),
+            SwitchListTile.adaptive(
+              key: const ValueKey('cloudLogSyncSwitch'),
+              contentPadding: EdgeInsets.zero,
+              secondary: Icon(Icons.science_outlined, color: colors.textTertiary),
+              title: Text(l10n.settingsCloudLogSyncSwitch, style: TextStyle(color: colors.textPrimary)),
+              subtitle: Text(l10n.settingsCloudLogSyncFooter, style: TextStyle(color: colors.textTertiary, fontSize: 12)),
+              value: state.enabled,
+              onChanged: (value) => cubit.setEnabled(value),
+            ),
+            if (text.isNotEmpty)
+              Padding(
+                key: const ValueKey('cloudLogSyncStatus'),
+                padding: const EdgeInsets.symmetric(vertical: DS.spaceXS),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(icon, size: 16, color: color),
+                    const SizedBox(width: DS.spaceSM),
+                    Expanded(child: Text(text, style: TextStyle(color: color, fontSize: 12))),
+                  ],
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// What is wrong with the book on this device, one row per kind of problem,
+/// each saying what happened and what to do. Shown only while there is one.
+class _BookHealthSection extends StatelessWidget {
+  final BookHealth health;
+
+  const _BookHealthSection({required this.health});
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final colors = context.colors;
+    final rows = [
+      if (health.migrationFailed) (const ValueKey('bookHealthMigration'), l10n.bookHealthMigration),
+      if (health.newerVersion) (const ValueKey('bookHealthNewerBuild'), l10n.bookHealthNewerBuild),
+      if (health.legacyUnreadable) (const ValueKey('bookHealthLegacy'), l10n.bookHealthLegacy),
+      if (health.loadFailed) (const ValueKey('bookHealthLoadFailed'), l10n.bookHealthLoadFailed),
+    ];
+    return DSCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (final (key, text) in rows)
+            Padding(
+              key: key,
+              padding: const EdgeInsets.symmetric(vertical: DS.spaceXS),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.warning_amber_rounded, size: 18, color: colors.down),
+                  const SizedBox(width: DS.spaceSM),
+                  Expanded(child: Text(text, style: TextStyle(color: colors.textSecondary, fontSize: 13))),
+                ],
+              ),
+            ),
+        ],
+      ),
     );
   }
 }
@@ -584,21 +738,25 @@ class _BackupSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cubit = context.read<AppCubit>();
+    final cubit = context.read<SyncCubit>();
+    final holdings = context.read<HoldingsCubit>();
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
 
-    return BlocBuilder<AppCubit, AppState>(
+    return BlocBuilder<SyncCubit, SyncState>(
       bloc: cubit,
       builder: (context, state) {
+        // The held count follows the trades and the prices.
+        final transactions = context.watch<HoldingsCubit>().state.transactions;
+        context.watch<MarketCubit>();
         final lastBackupAt = cubit.backupServiceOrNull?.lastBackupAt;
-        final instrumentCount = cubit.heldInstruments.length;
+        final instrumentCount = holdings.heldInstruments.length;
         final subtitle = lastBackupAt == null
             ? l10n.settingsBackupSubtitleNever
             : l10n.settingsBackupSubtitle(
                 MaterialLocalizations.of(context).formatMediumDate(lastBackupAt),
                 instrumentCount,
-                state.transactions.length,
+                transactions.length,
               );
         return DSCard(
           padding: EdgeInsets.zero,
@@ -640,7 +798,18 @@ class _HelpSection extends StatelessWidget {
               style: TextStyle(color: colors.textTertiary, fontSize: 12),
             ),
             trailing: Icon(Icons.chevron_right, color: colors.textTertiary),
-            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const OnboardingTourScreen())),
+            onTap: () => replayTour(context),
+          ),
+          Divider(color: colors.hairline, height: DS.spaceLG),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text(l10n.settingsHelpRunSetup, style: TextStyle(color: colors.textPrimary)),
+            subtitle: Text(
+              l10n.settingsHelpRunSetupSubtitle,
+              style: TextStyle(color: colors.textTertiary, fontSize: 12),
+            ),
+            trailing: Icon(Icons.chevron_right, color: colors.textTertiary),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const SetupFlowScreen(rerun: true))),
           ),
           Divider(color: colors.hairline, height: DS.spaceLG),
           ListTile(
@@ -675,6 +844,135 @@ class _HelpSection extends StatelessWidget {
 /// Settings · On-device intelligence (v4 phase 6): the switch, and whether
 /// the OS's model is ready for the app's language. The switch works either
 /// way; with no model, nothing changes.
+/// "Let AI apps read Qima" (desktop only): the switch, what it shares, and
+/// once it is on, the config to paste into an AI app. See [AiApps].
+class _AiAppsSection extends StatefulWidget {
+  const _AiAppsSection();
+
+  @override
+  State<_AiAppsSection> createState() => _AiAppsSectionState();
+}
+
+class _AiAppsSectionState extends State<_AiAppsSection> {
+  bool _copied = false;
+  Timer? _copiedReset;
+
+  @override
+  void dispose() {
+    _copiedReset?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _copy(String text) async {
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
+    setState(() => _copied = true);
+    _copiedReset?.cancel();
+    _copiedReset = Timer(const Duration(seconds: 2), () {
+      if (mounted) setState(() => _copied = false);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ai = context.read<AiApps>();
+    final l10n = AppLocalizations.of(context)!;
+    final colors = context.colors;
+    final footnote = TextStyle(color: colors.textTertiary, fontSize: 12, height: 1.35);
+    return DSCard(
+      padding: const EdgeInsets.symmetric(horizontal: DS.spaceMD, vertical: DS.spaceXS),
+      child: ValueListenableBuilder<bool>(
+        valueListenable: ai.enabled,
+        builder: (context, on, _) => Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SwitchListTile.adaptive(
+              key: const Key('aiAppsToggle'),
+              contentPadding: EdgeInsets.zero,
+              title: Text(l10n.aiAppsToggle, style: TextStyle(color: colors.textPrimary)),
+              value: on,
+              onChanged: ai.setEnabled,
+            ),
+            Padding(
+              padding: const EdgeInsets.only(bottom: DS.spaceSM),
+              child: Text(l10n.aiAppsFooter, style: footnote),
+            ),
+            if (on) ...[
+              ValueListenableBuilder<bool>(
+                valueListenable: ai.adding,
+                builder: (context, adding, _) => SwitchListTile.adaptive(
+                  key: const Key('aiAppsAddToggle'),
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(l10n.aiAppsAddToggle, style: TextStyle(color: colors.textPrimary)),
+                  value: adding,
+                  onChanged: ai.setAdding,
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(bottom: DS.spaceSM),
+                child: Text(l10n.aiAppsAddFooter, style: footnote),
+              ),
+              ..._setup(ai, l10n, colors, footnote),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _setup(AiApps ai, AppLocalizations l10n, QimaColors colors, TextStyle footnote) {
+    final helper = AiApps.helperPath();
+    if (helper == null) {
+      return [Padding(padding: const EdgeInsets.only(bottom: DS.spaceSM), child: Text(l10n.aiAppsNoHelper, style: footnote))];
+    }
+    return [
+      const Divider(height: DS.spaceLG),
+      Text(l10n.aiAppsSetupTitle, style: TextStyle(color: colors.textPrimary, fontWeight: FontWeight.w600)),
+      const SizedBox(height: DS.spaceXS),
+      Text(l10n.aiAppsSetupBody, style: footnote),
+      const SizedBox(height: DS.spaceSM),
+      FutureBuilder<String?>(
+        future: ai.snapshotPath(),
+        builder: (context, snap) {
+          final path = snap.data;
+          if (path == null) return const SizedBox.shrink();
+          final config = AiApps.config(helper: helper, snapshot: path);
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Commands and paths read left to right in every language.
+              Directionality(
+                textDirection: TextDirection.ltr,
+                child: Container(
+                  padding: const EdgeInsets.all(DS.spaceSM),
+                  decoration: BoxDecoration(
+                    color: colors.textPrimary.withValues(alpha: 0.05),
+                    borderRadius: BorderRadius.circular(DS.radiusTile),
+                  ),
+                  child: SelectableText(
+                    config,
+                    key: const Key('aiAppsConfig'),
+                    style: TextStyle(fontFamily: 'Menlo', fontFamilyFallback: const ['Consolas', 'monospace'], fontSize: 12, color: colors.textSecondary),
+                  ),
+                ),
+              ),
+              Align(
+                alignment: AlignmentDirectional.centerEnd,
+                child: TextButton.icon(
+                  onPressed: () => _copy(config),
+                  icon: Icon(_copied ? Icons.check : Icons.copy_rounded, size: 16),
+                  label: Text(_copied ? l10n.aiAppsCopied : l10n.aiAppsCopy),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+      Padding(padding: const EdgeInsets.only(bottom: DS.spaceSM), child: Text(l10n.aiAppsFreshness, style: footnote)),
+    ];
+  }
+}
+
 class _OnDeviceModelSection extends StatefulWidget {
   const _OnDeviceModelSection();
 
@@ -684,21 +982,48 @@ class _OnDeviceModelSection extends StatefulWidget {
 
 class _OnDeviceModelSectionState extends State<_OnDeviceModelSection> {
   Future<ModelStatus>? _status;
-  String? _tag;
+  String? _asked;
+
+  /// While the model is getting ready (downloading), it's asked again
+  /// every few seconds so the screen shows when it's done.
+  Timer? _recheck;
+  static const _recheckEvery = Duration(seconds: 5);
+
+  /// On Android the model is Google's ML Kit, which reports its use to
+  /// Google, so it isn't touched (not even to ask if it's there) until the
+  /// person turns it on.
+  static bool get _android => !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+
+  /// On Windows and Linux asking starts the model's download, so it waits
+  /// for the switch too.
+  static bool get _waitsForSwitch => _android || usesDownloadedModel;
+
+  Future<ModelStatus>? _statusFor(SettingsCubit cubit, String tag) {
+    if (_waitsForSwitch && !cubit.state.onDeviceModel) return null;
+    if (tag != _asked) {
+      _asked = tag;
+      _recheck?.cancel();
+      final status = _status = cubit.aiAssist.status(tag);
+      status.then((value) {
+        if (value != ModelStatus.notReady || !mounted || !identical(status, _status)) return;
+        _recheck = Timer(_recheckEvery, () {
+          if (mounted) setState(() => _asked = null);
+        });
+      }, onError: (Object _) {});
+    }
+    return _status;
+  }
 
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final tag = Localizations.localeOf(context).toLanguageTag();
-    if (tag != _tag) {
-      _tag = tag;
-      _status = context.read<AppCubit>().aiAssist.status(tag);
-    }
+  void dispose() {
+    _recheck?.cancel();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final cubit = context.read<AppCubit>();
+    final cubit = context.read<SettingsCubit>();
+    final status = _statusFor(cubit, Localizations.localeOf(context).toLanguageTag());
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
     return DSCard(
@@ -710,7 +1035,7 @@ class _OnDeviceModelSectionState extends State<_OnDeviceModelSection> {
             contentPadding: EdgeInsets.zero,
             title: Text(l10n.settingsUseModel, style: TextStyle(color: colors.textPrimary)),
             subtitle: FutureBuilder<ModelStatus>(
-              future: _status,
+              future: status,
               builder: (context, snapshot) {
                 final status = snapshot.data;
                 if (status == null) return const SizedBox.shrink();
@@ -728,13 +1053,67 @@ class _OnDeviceModelSectionState extends State<_OnDeviceModelSection> {
               },
             ),
             value: cubit.state.onDeviceModel,
-            onChanged: cubit.setOnDeviceModel,
+            onChanged: (on) async {
+              await cubit.setOnDeviceModel(on);
+              // Asked afresh, not the answer from before it was turned off.
+              if (mounted) setState(() => _asked = null);
+            },
           ),
           Padding(
             padding: const EdgeInsets.only(bottom: DS.spaceSM),
             child: Text(
-              l10n.settingsUseModelFooter,
+              _android
+                  ? '${l10n.settingsUseModelFooter} ${l10n.settingsUseModelAndroid}'
+                  : usesDownloadedModel
+                      ? '${l10n.settingsUseModelFooter} ${l10n.settingsUseModelDownload}'
+                      : l10n.settingsUseModelFooter,
               style: TextStyle(color: colors.textTertiary, fontSize: 12, height: 1.35),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
+/// Money (v5): which features are on, how Home is arranged, categories, and
+/// how often to review the values of assets valued by hand.
+class _MoneySection extends StatelessWidget {
+  const _MoneySection();
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final colors = context.colors;
+    final money = context.read<MoneyCubit>();
+    final months = context.select<MoneyCubit, int>((c) => c.state.settings.valueReviewMonths);
+    Widget tile(String title, String? subtitle, Widget screen) => ListTile(
+          contentPadding: const EdgeInsets.symmetric(horizontal: DS.spaceMD, vertical: DS.space2XS),
+          title: Text(title, style: TextStyle(color: colors.textPrimary)),
+          subtitle: subtitle == null ? null : Text(subtitle, style: TextStyle(color: colors.textTertiary, fontSize: 12)),
+          trailing: Icon(Icons.chevron_right, color: colors.textTertiary),
+          onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen)),
+        );
+    return DSCard(
+      padding: EdgeInsets.zero,
+      child: Column(
+        children: [
+          tile(l10n.featuresTitle, l10n.featuresSubtitle, const FeaturesScreen()),
+          tile(l10n.editHome, null, const EditHomeScreen()),
+          tile(l10n.categoriesTitle, null, const CategoriesScreen()),
+          ListTile(
+            contentPadding: const EdgeInsets.symmetric(horizontal: DS.spaceMD, vertical: DS.space2XS),
+            title: Text(l10n.valueReview, style: TextStyle(color: colors.textPrimary)),
+            subtitle: Text(l10n.valueReviewHelp, style: TextStyle(color: colors.textTertiary, fontSize: 12)),
+            trailing: DropdownButton<int>(
+              value: months,
+              underline: const SizedBox.shrink(),
+              items: [
+                DropdownMenuItem(value: 0, child: Text(l10n.valueReviewOff)),
+                for (final m in const [3, 6, 12]) DropdownMenuItem(value: m, child: Text(l10n.valueReviewMonths(m))),
+              ],
+              onChanged: (v) => money.setValueReviewMonths(v ?? months),
             ),
           ),
         ],

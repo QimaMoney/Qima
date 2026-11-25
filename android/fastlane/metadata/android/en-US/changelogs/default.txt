@@ -1,6 +1,7 @@
-Qima 4.0.0
-• Tap + to add to your watchlist or add a holding
-• Add a purchase in your own words: type it or say it. It's read on your phone and saved only when you confirm
-• Search assets in English, Arabic, Spanish or French
-• A plain summary of your past month
-• Picking a currency is clearer when adding an asset or a transaction
+Qima 5.0.0
+• Home shows your net worth over time, with your accounts, holdings, spending and zakat
+• Add bank accounts, cash, cards and loans
+• Spending by category, a monthly budget and recurring payments
+• Bank text messages and statements become transactions you review, read on your phone
+• Track money you lent and borrowed, and split bills
+• Zakat now counts your whole balance sheet

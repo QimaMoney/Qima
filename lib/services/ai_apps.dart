@@ -1,0 +1,296 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
+
+import '../blocs/app_cubit.dart';
+import '../blocs/holdings_cubit.dart';
+import '../blocs/market_cubit.dart';
+import '../blocs/money_cubit.dart';
+import '../blocs/settings_cubit.dart';
+import '../mcp/ai_inbox.dart';
+import '../mcp/snapshot_location.dart';
+import '../models/ai_snapshot.dart';
+
+/// "Let AI apps read Qima" on the desktop: while it is on, Qima keeps a
+/// copy of the books ([AiSnapshot], private fields left out) where the
+/// `qima-mcp` helper can read it, and an AI app that runs the helper can
+/// answer questions about the person's money. The helper never sees Qima's
+/// own files, and turning this off deletes the copy.
+///
+/// "Let AI apps add transactions" goes with it: while that is on, the
+/// helper may leave transactions in a folder beside the copy ([AiInbox]),
+/// which the import inbox reads like any shared statement. The person
+/// reviews them before anything is saved, and the helper still never
+/// touches the books.
+///
+/// The settings are per computer and never sync: sharing with an AI app on
+/// one Mac shouldn't turn it on for another.
+class AiApps {
+  static const String _enabledKey = 'aiAppsEnabled';
+  static const String _addingKey = 'aiAppsAddEnabled';
+  static const Duration _settle = Duration(seconds: 2);
+  static const MethodChannel _macBridge = MethodChannel('com.devlabtechnologies.qima/widgets');
+
+  final AppCubit app;
+  final SettingsCubit settings;
+  final MarketCubit market;
+  final HoldingsCubit holdings;
+  final MoneyCubit money;
+
+  /// Whether sharing is on; the settings section listens to it.
+  final ValueNotifier<bool> enabled = ValueNotifier(false);
+
+  final List<StreamSubscription<Object?>> _subscriptions = [];
+
+  /// Whether AI apps may leave transactions for review. Only ever on while
+  /// [enabled] is.
+  final ValueNotifier<bool> adding = ValueNotifier(false);
+
+  /// Called when an AI app left transactions, so the import inbox is read
+  /// without waiting for the app to come back to the front.
+  void Function()? onAdded;
+
+  StreamSubscription<FileSystemEvent>? _inboxSub;
+  Timer? _addedSoon;
+  Timer? _pending;
+  String? _lastWritten;
+
+  /// Writes and deletes run one after another, so turning sharing off
+  /// can't race a write that is still finishing.
+  Future<void> _queue = Future.value();
+  Future<String?>? _path;
+
+  AiApps({required this.app, required this.settings, required this.market, required this.holdings, required this.money});
+
+  /// Desktop systems with a helper build: macOS, Windows and Linux.
+  static bool get supported =>
+      !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.macOS ||
+          defaultTargetPlatform == TargetPlatform.windows ||
+          defaultTargetPlatform == TargetPlatform.linux);
+
+  /// Reads the setting and starts keeping the copy current. Call once the
+  /// app has loaded its preferences.
+  void start() {
+    if (!supported) return;
+    enabled.value = settings.preferences.local.getBool(_enabledKey) ?? false;
+    // What the copy holds: the base currency, the rates and prices, what is
+    // held and the books; nothing else needs a rewrite.
+    for (final source in [settings.stream, market.stream, holdings.stream, money.stream]) {
+      _subscriptions.add(source.listen((_) => _schedule()));
+    }
+    if (enabled.value) _schedule();
+    adding.value = enabled.value && (settings.preferences.local.getBool(_addingKey) ?? false);
+    // Also when off, so a marker left by a crash never outlives the setting.
+    unawaited(_serial(() => _accept(adding.value)));
+  }
+
+  Future<void> dispose() async {
+    _pending?.cancel();
+    _addedSoon?.cancel();
+    await _inboxSub?.cancel();
+    for (final subscription in _subscriptions) {
+      await subscription.cancel();
+    }
+    enabled.dispose();
+    adding.dispose();
+  }
+
+  Future<void> setEnabled(bool value) async {
+    if (!supported) return;
+    await settings.preferences.local.setBool(_enabledKey, value);
+    enabled.value = value;
+    _pending?.cancel();
+    if (value) {
+      await writeNow();
+    } else {
+      await setAdding(false);
+      await _serial(_delete);
+    }
+  }
+
+  /// Lets AI apps leave transactions for review, or stops them. What they
+  /// already left stays in the import inbox for the person.
+  Future<void> setAdding(bool value) async {
+    if (!supported) return;
+    final on = value && enabled.value;
+    await settings.preferences.local.setBool(_addingKey, on);
+    adding.value = on;
+    await _serial(() => _accept(on));
+  }
+
+  /// The folder AI apps leave transactions in, whether or not they may
+  /// right now; null where Qima has no desktop app.
+  Future<String?> inboxPath() async {
+    final snapshot = await snapshotPath();
+    return snapshot == null ? null : AiInbox.folderFor(snapshot);
+  }
+
+  /// Puts the marker the helper looks for in place, or takes it away, and
+  /// watches the folder while it is there.
+  Future<void> _accept(bool on) async {
+    await _inboxSub?.cancel();
+    _inboxSub = null;
+    try {
+      final path = await inboxPath();
+      if (path == null) return;
+      final folder = Directory(path);
+      final marker = File('$path${Platform.pathSeparator}${AiInbox.marker}');
+      if (!on) {
+        if (await marker.exists()) await marker.delete();
+        return;
+      }
+      await folder.create(recursive: true);
+      await marker.writeAsString('', flush: true);
+      _inboxSub = folder.watch().listen((_) {
+        // A batch is a few files written and a rename; tell the app once.
+        _addedSoon?.cancel();
+        _addedSoon = Timer(const Duration(milliseconds: 500), () => onAdded?.call());
+      }, onError: (Object e) => debugPrint('AiApps: watching the folder failed: $e'));
+    } on FileSystemException catch (e) {
+      debugPrint('AiApps: could not ${on ? 'open' : 'close'} the folder for added transactions: ${e.message}');
+    } on UnsupportedError catch (e) {
+      // No folder watching here; the inbox is still read when Qima comes
+      // back to the front.
+      debugPrint('AiApps: $e');
+    }
+  }
+
+  Future<void> _delete() async {
+    _lastWritten = null;
+    final path = await snapshotPath();
+    if (path == null) return;
+    try {
+      await File(path).delete();
+    } on PathNotFoundException {
+      // Nothing shared yet.
+    } on FileSystemException catch (e) {
+      debugPrint('AiApps: could not remove the shared copy: ${e.message}');
+    }
+  }
+
+  /// A step that failed never holds up the ones after it: turning sharing
+  /// off must still delete the copy.
+  Future<void> _serial(Future<void> Function() step) => _queue = _queue.then((_) => step(), onError: (_) => step());
+
+  /// Where the copy lives on this computer: the App Group container on a
+  /// Mac App Store build (its sandboxed helper shares that group), else the
+  /// app's support folder, which an unsandboxed helper can read.
+  Future<String?> snapshotPath() => _path ??= () async {
+        if (!supported) return null;
+        try {
+          if (defaultTargetPlatform == TargetPlatform.macOS) {
+            final group = await _macBridge.invokeMethod<String>('groupContainerPath');
+            if (group != null && _writable(group)) return '$group/${SnapshotLocation.fileName}';
+          }
+          final dir = await getApplicationSupportDirectory();
+          return '${dir.path}${Platform.pathSeparator}${SnapshotLocation.fileName}';
+        } catch (_) {
+          // Asked again next time rather than remembered as failed.
+          _path = null;
+          rethrow;
+        }
+      }();
+
+  /// Builds without the App Group entitlement get a group path they may not
+  /// write to; try before trusting it.
+  static bool _writable(String dir) {
+    try {
+      Directory(dir).createSync(recursive: true);
+      File('$dir/.qima-write-check')
+        ..writeAsStringSync('')
+        ..deleteSync();
+      return true;
+    } on FileSystemException {
+      return false;
+    }
+  }
+
+  /// The helper shipped beside the app, or null when this build has none
+  /// (a `flutter run` that skipped it).
+  static String? helperPath() {
+    if (!supported) return null;
+    final exe = File(Platform.resolvedExecutable);
+    final dir = exe.parent.path;
+    final path = switch (defaultTargetPlatform) {
+      // Qima.app/Contents/MacOS/Qima → Contents/Helpers/QimaMCP.app (a
+      // bundle so the sandboxed helper has a bundle id; see embed_macos.sh).
+      TargetPlatform.macOS => '${exe.parent.parent.path}/Helpers/QimaMCP.app/Contents/MacOS/qima-mcp',
+      TargetPlatform.windows => '$dir\\qima-mcp.exe',
+      _ => '$dir/qima-mcp',
+    };
+    return File(path).existsSync() ? path : null;
+  }
+
+  /// The `mcpServers` entry an AI app needs, as Claude Desktop reads it.
+  static String config({required String helper, required String snapshot}) =>
+      const JsonEncoder.withIndent('  ').convert({
+        'mcpServers': {
+          'qima': {
+            'command': helper,
+            'args': ['--snapshot', snapshot],
+          },
+        },
+      });
+
+  void _schedule() {
+    // At most one write per [_settle]: prices tick often, and resetting the
+    // timer on every tick could put the write off indefinitely.
+    if (!enabled.value || (_pending?.isActive ?? false)) return;
+    _pending = Timer(_settle, () => unawaited(writeNow()));
+  }
+
+  /// Writes the copy now if the books are loaded and something changed.
+  Future<void> writeNow() => _serial(_write);
+
+  Future<void> _write() async {
+    if (!enabled.value || !app.state.initialized || !money.state.loaded) return;
+    final snapshot = _build();
+    final body = snapshot.toJson()..remove('writtenAt');
+    final key = jsonEncode(body);
+    if (key == _lastWritten) return;
+    final path = await snapshotPath();
+    if (path == null) return;
+    try {
+      final file = File(path);
+      await file.parent.create(recursive: true);
+      // Atomic, as LocalFileStore writes: the helper never reads half a file.
+      final tmp = File('$path.tmp');
+      await tmp.writeAsString(jsonEncode(snapshot.toJson()), flush: true);
+      await tmp.rename(path);
+      _lastWritten = key;
+    } on FileSystemException catch (e) {
+      debugPrint('AiApps: could not write the shared copy: ${e.message}');
+    }
+  }
+
+  AiSnapshot _build() {
+    final rates = market.state.rates;
+    final m = money.state;
+    final held = holdings.heldInstruments;
+    return AiSnapshot.build(
+      now: DateTime.now(),
+      baseCurrency: settings.state.baseCurrency,
+      rates: rates,
+      accounts: m.accounts,
+      entries: m.entries,
+      planned: m.recurring,
+      settings: m.settings,
+      // No lots is a real zero; lots without prices yet are unknown.
+      holdingsValue: holdings.state.lots.isEmpty ? 0 : holdings.portfolioValuation?.value.amount,
+      holdings: [
+        for (final h in held)
+          AiHolding(
+            symbol: h.instrument.symbol,
+            assetClass: h.instrument.assetClass.name,
+            value: h.valuation.value.amount,
+            cost: h.valuation.cost.amount,
+          ),
+      ],
+    );
+  }
+}

@@ -13,17 +13,21 @@ import '../../models/backup.dart';
 import '../../models/chart_range.dart';
 import '../../models/custom_instrument.dart';
 import '../../models/holding.dart';
+import '../../models/holding_entry_codec.dart';
 import '../../models/holding_transaction.dart';
+import '../../models/legacy_collapse.dart';
 import '../../models/price_alert.dart';
 import '../../models/syncable.dart';
 import '../../models/watch_card.dart';
 import '../../models/zakat.dart';
+import '../../models/book_account.dart';
+import '../../models/book_entry.dart';
+import '../../models/money_settings.dart';
 import '../alerts_store.dart';
+import '../book_store.dart';
 import '../custom_instrument_store.dart';
-import '../holdings_store.dart';
 import '../preferences.dart';
 import '../synced_store.dart';
-import '../transactions_store.dart';
 import '../watchlist_store.dart';
 import 'backup_codec.dart';
 import 'holdings_csv.dart';
@@ -55,18 +59,27 @@ class BackupPreview {
   final BackupDiff mergeDiff;
   final BackupDiff replaceDiff;
 
+  /// Trades in the file: the live trade entries of a version-4 file; the
+  /// ledger rows of a version-3 one, or, for a backup from before the ledger,
+  /// its lots, each of which restores as a buy.
+  final int transactionCount;
+
+  /// Trades on this device that were paid from or into an account, and that a
+  /// replace takes that account side from: nonzero only for a file from
+  /// before trades kept their cash, which has no book section to bring it
+  /// back.
+  final int cashSidesReplaced;
+
   const BackupPreview({
     required this.envelope,
     required this.payload,
     required this.mergeDiff,
     required this.replaceDiff,
+    required this.transactionCount,
+    this.cashSidesReplaced = 0,
   });
 
   int get cardCount => payload.watchcards.length;
-
-  /// Ledger rows in the file — or, for a backup from before the ledger,
-  /// its lots, each of which restores as a buy.
-  int get transactionCount => payload.transactions?.length ?? payload.holdings.length;
 
   int get customTickerCount => payload.customInstruments.length;
 }
@@ -89,20 +102,26 @@ enum BackupImportMode { merge, replace }
 /// leaves any single collection half-written.
 class BackupService {
   final WatchlistStore watchlistStore;
-  final HoldingsStore holdingsStore;
-  final TransactionsStore transactionsStore;
   final CustomInstrumentStore customInstrumentStore;
   final AlertsStore alertsStore;
+
+  /// The book: the money ledger, and the trades in it (one entry each).
+  ///
+  /// A backup file is the book as the stores hold it (version 4). A file from
+  /// before trades were entries lists them apart (`transactions`, or only
+  /// lots) with the cash each one moved as a `holding_trade` entry in its
+  /// book section; those are made into trade entries on the way in, see
+  /// [LegacyCollapse.collapse].
+  final BookStore bookStore;
   final Preferences preferences;
 
   BackupService({
     required this.watchlistStore,
-    required this.holdingsStore,
-    TransactionsStore? transactionsStore,
     required this.customInstrumentStore,
     required this.alertsStore,
+    required this.bookStore,
     required this.preferences,
-  }) : transactionsStore = transactionsStore ?? TransactionsStore(legacyLots: holdingsStore);
+  });
 
   static const String _lastBackupAtKey = 'backup.lastBackupAt';
   static const String _reminderEnabledKey = 'backup.reminderEnabled';
@@ -131,12 +150,12 @@ class BackupService {
 
   /// Reads every collection's raw [SyncedStore] records (metadata and
   /// tombstones intact) plus the syncable settings subset, straight from the
-  /// stores — never from in-memory `AppState`, so an export always reflects
-  /// what's actually on disk.
+  /// stores — never from in-memory state, so an export always reflects
+  /// what's actually on disk. Throws [BackupError] with
+  /// [BackupErrorKind.holdingsUnreadable], writing nothing, while the holdings
+  /// of an earlier version are not in the book.
   Future<BackupPayload> buildPayload() async {
     final cardsRecords = await watchlistStore.exportRecords();
-    final lotsRecords = await holdingsStore.exportRecords();
-    final transactionRecords = await transactionsStore.exportRecords();
     final customRecords = await customInstrumentStore.exportRecords();
     final alertsRecords = await alertsStore.exportRecords();
 
@@ -149,13 +168,29 @@ class BackupService {
       zakat: (await preferences.zakatSettings).toJson(),
     );
 
+    final book = bookStore;
+    // Seeds the default categories first, so a replace from this backup
+    // never tombstones them on the device it restores to.
+    await book.loadAccounts();
+    // A file made while the migration that folds the old holdings into the
+    // book has not finished would list no trades, and restoring it elsewhere
+    // would remove every one.
+    if ((await book.ledgerProblems()).isNotEmpty) throw const BackupError(BackupErrorKind.holdingsUnreadable);
+    // The records as the stores hold them: trades are entries like any other,
+    // with their quantity lines, order, stamps and tombstones.
+    final bookJson = {
+      'accounts': [for (final r in await book.accounts.exportRecords()) r.toJson()],
+      'entries': [for (final r in await book.entries.exportRecords()) r.toJson()],
+      'recurring': [for (final r in await book.recurring.exportRecords()) r.toJson()],
+      'settings': [for (final r in await book.settings.exportRecords()) r.toJson()],
+    };
+
     return BackupPayload(
       watchcards: cardsRecords.map((r) => r.toJson()).toList(),
-      holdings: lotsRecords.map((r) => r.toJson()).toList(),
-      transactions: transactionRecords.map((r) => r.toJson()).toList(),
       customInstruments: customRecords.map((r) => r.toJson()).toList(),
       alerts: alertsRecords.map((r) => r.toJson()).toList(),
       settings: settings,
+      book: bookJson,
     );
   }
 
@@ -323,26 +358,78 @@ class BackupService {
     final payload = await BackupCodec.decodePayload(envelope, password: password);
 
     final cardRecords = _decodeRecords(payload.watchcards, WatchCard.fromJson);
-    final transactionRecords = _transactionRecords(payload);
     final customRecords = _decodeRecords(payload.customInstruments, CustomInstrument.fromJson);
     final alertRecords = _decodeRecords(payload.alerts, PriceAlert.fromJson);
 
-    final mergeDiff = await _diff(
+    final bookDiff = await _bookDiff(payload);
+    final mergeDiff = bookDiff.merge + await _diff(
       cardRecords: cardRecords,
-      transactionRecords: transactionRecords,
       customRecords: customRecords,
       alertRecords: alertRecords,
       mode: BackupImportMode.merge,
     );
-    final replaceDiff = await _diff(
+    final replaceDiff = bookDiff.replace + await _diff(
       cardRecords: cardRecords,
-      transactionRecords: transactionRecords,
       customRecords: customRecords,
       alertRecords: alertRecords,
       mode: BackupImportMode.replace,
     );
 
-    return BackupPreview(envelope: envelope, payload: payload, mergeDiff: mergeDiff, replaceDiff: replaceDiff);
+    return BackupPreview(
+      envelope: envelope,
+      payload: payload,
+      mergeDiff: mergeDiff,
+      replaceDiff: replaceDiff,
+      transactionCount: payload.isLedger
+          ? _entryRecords(payload).where((r) => !r.deleted && _isTrade(r)).length
+          : payload.transactions?.length ?? payload.holdings.length,
+      cashSidesReplaced: payload.book != null
+          ? 0
+          : [for (final r in await bookStore.entries.exportRecords()) if (!r.deleted && _isTrade(r) && HoldingEntryCodec.cashLegOf(r.item) != null) r].length,
+    );
+  }
+
+  /// What restoring the book would change, in each mode: its trades (diffed
+  /// as trades, whole records, the cash leg being part of one), and, when the
+  /// file has a ledger, its accounts and other entries (a file with none
+  /// leaves those as they are). A version-4 file maps onto the same counts as
+  /// an older one: trade entries are the trades, the rest the book's entries.
+  Future<({BackupDiff merge, BackupDiff replace})> _bookDiff(BackupPayload payload) async {
+    final book = bookStore, data = payload.book;
+    final entries = _entryRecords(payload);
+    final accounts = data == null ? <Record<BookAccount>>[] : _decodeRecords(data['accounts'] ?? const [], BookAccount.fromJson);
+    final currentAccounts = await book.accounts.exportRecords();
+    final currentEntries = await book.entries.exportRecords();
+    BackupDiff of(BackupImportMode mode) {
+      final trades = _diffRecords(currentEntries.where(_isTrade).toList(), entries.where(_isTrade).toList(), mode);
+      if (data == null) return trades;
+      return trades +
+          _diffRecords(currentAccounts, accounts, mode) +
+          _diffRecords(currentEntries.where((r) => !_isTrade(r)).toList(), entries.where((r) => !_isTrade(r)).toList(), mode);
+    }
+    return (merge: of(BackupImportMode.merge), replace: of(BackupImportMode.replace));
+  }
+
+  Future<void> _importBook(BackupPayload payload, {required bool replace}) async {
+    final book = bookStore, data = payload.book;
+    final entries = _entryRecords(payload);
+    if (data == null) {
+      // No ledger in the file: only the trades are restored. A replace puts
+      // the file's trades in place of every trade here, and leaves every other
+      // entry as it is. A trade is one entry with its cash leg, so a trade on
+      // this device that the file also has is the file's whole record (its
+      // leg goes if the file has none), and one the file lacks goes with its
+      // leg. A merge keeps whichever record of a trade is newer, as a whole.
+      await book.entries.importRecords([for (final r in entries) if (_isTrade(r)) r], replace: replace, replaceWhere: _isTrade);
+      return;
+    }
+    await book.accounts.importRecords(_decodeRecords(data['accounts'] ?? const [], BookAccount.fromJson), replace: replace);
+    await book.entries.importRecords(entries, replace: replace);
+    await book.recurring.importRecords(_decodeRecords(data['recurring'] ?? const [], RecurringPayment.fromJson), replace: replace);
+    final settings = _decodeRecords(data['settings'] ?? const [], MoneySettings.fromJson);
+    // Money's settings are one record: a merge keeps the newer copy, a
+    // replace takes the backup's only if it has one.
+    if (settings.isNotEmpty || !replace) await book.settings.importRecords(settings, replace: replace);
   }
 
   List<Record<T>> _decodeRecords<T extends Syncable>(
@@ -356,32 +443,35 @@ class BackupService {
     }
   }
 
-  /// The ledger a payload restores: its own transactions, or for a backup
-  /// from before the ledger, its live lots as buys — the same conversion the
-  /// on-device migration makes, so the ids line up.
-  List<Record<HoldingTransaction>> _transactionRecords(BackupPayload payload) {
+  /// The book's entries a payload restores. A version-4 payload's are its
+  /// own, as exported. An older one lists its trades apart, so every trade is
+  /// made one entry (the cash it moved folded in) the way the on-device
+  /// migration makes them, so the ids line up; a file from before the ledger
+  /// has its live lots as buys.
+  List<Record<BookEntry>> _entryRecords(BackupPayload payload) {
+    final entries = _decodeRecords<BookEntry>(payload.book?['entries'] ?? const [], BookEntry.fromJson);
+    if (payload.isLedger) return entries;
     final transactions = payload.transactions;
-    if (transactions != null) return _decodeRecords(transactions, HoldingTransaction.fromJson);
-    return [
-      for (final r in _decodeRecords(payload.holdings, HoldingLot.fromJson))
-        if (!r.deleted) Record<HoldingTransaction>(item: HoldingTransaction.fromLot(r.item), order: r.order, updatedAt: r.updatedAt),
-    ];
+    return LegacyCollapse.collapse(
+      transactions: transactions == null ? const [] : _decodeRecords(transactions, HoldingTransaction.fromJson),
+      lots: _decodeRecords(payload.holdings, HoldingLot.fromJson),
+      entries: entries,
+    );
   }
+
+  static bool _isTrade(Record<BookEntry> r) => r.item.template.isHoldingEntry;
 
   Future<BackupDiff> _diff({
     required List<Record<WatchCard>> cardRecords,
-    required List<Record<HoldingTransaction>> transactionRecords,
     required List<Record<CustomInstrument>> customRecords,
     required List<Record<PriceAlert>> alertRecords,
     required BackupImportMode mode,
   }) async {
     final cards = await watchlistStore.exportRecords();
-    final transactions = await transactionsStore.exportRecords();
     final customs = await customInstrumentStore.exportRecords();
     final alerts = await alertsStore.exportRecords();
 
     return _diffRecords(cards, cardRecords, mode) +
-        _diffRecords(transactions, transactionRecords, mode) +
         _diffRecords(customs, customRecords, mode) +
         _diffRecords(alerts, alertRecords, mode);
   }
@@ -449,18 +539,13 @@ class BackupService {
     final replace = mode == BackupImportMode.replace;
 
     final cardRecords = _decodeRecords(payload.watchcards, WatchCard.fromJson);
-    final lotRecords = _decodeRecords(payload.holdings, HoldingLot.fromJson);
-    final transactionRecords = _transactionRecords(payload);
     final customRecords = _decodeRecords(payload.customInstruments, CustomInstrument.fromJson);
     final alertRecords = _decodeRecords(payload.alerts, PriceAlert.fromJson);
 
     await watchlistStore.importRecords(cardRecords, replace: replace);
-    // The legacy lots first: importing the ledger afterwards means a lot a
-    // replace just tombstoned can't be migrated back in.
-    await holdingsStore.importRecords(lotRecords, replace: replace);
-    await transactionsStore.importRecords(transactionRecords, replace: replace);
     await customInstrumentStore.importRecords(customRecords, replace: replace);
     await alertsStore.importRecords(alertRecords, replace: replace);
+    await _importBook(payload, replace: replace);
 
     if (replace) {
       await _applySettings(payload.settings);
@@ -510,7 +595,7 @@ class BackupService {
   }
 
   /// Set whenever ANY user collection mutates (watchlist/holdings/custom
-  /// tickers/alerts) — see `AppCubit`'s wiring — and cleared on a successful
+  /// tickers/alerts) — see `SyncCubit.markDataChanged` — and cleared on a successful
   /// full JSON export. The reminder only fires if data actually changed
   /// since the last backup, not merely because 30 days elapsed on a
   /// portfolio that hasn't moved.

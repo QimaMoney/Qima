@@ -1,7 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:qima/blocs/app_cubit.dart';
+import 'package:qima/blocs/app_blocs.dart';
 import 'package:qima/models/asset.dart';
 import 'package:qima/models/fx_history.dart';
 import 'package:qima/models/instrument_catalog.dart';
@@ -54,7 +54,7 @@ void main() {
   });
 
   test('addCard returns the new card with created: true', () async {
-    final cubit = AppCubit(repository: _NoopRepository());
+    final cubit = AppBlocs(repository: _NoopRepository()).watchlist;
     final gold = InstrumentCatalog.instrument('metal.XAU')!;
     final card = WatchCard(id: 'c1', instrumentID: gold.id, currency: 'USD', unit: PriceUnit.troyOunce);
 
@@ -66,7 +66,7 @@ void main() {
   });
 
   test('addCard on a duplicate combo returns the EXISTING card with created: false, without adding a second card', () async {
-    final cubit = AppCubit(repository: _NoopRepository());
+    final cubit = AppBlocs(repository: _NoopRepository()).watchlist;
     final gold = InstrumentCatalog.instrument('metal.XAU')!;
     final first = WatchCard(id: 'c1', instrumentID: gold.id, currency: 'USD', unit: PriceUnit.troyOunce);
     final duplicate = WatchCard(id: 'c2', instrumentID: gold.id, currency: 'USD', unit: PriceUnit.troyOunce);
@@ -81,7 +81,7 @@ void main() {
   });
 
   test('different karats of the same instrument/currency/unit are not duplicates (TC-W4)', () async {
-    final cubit = AppCubit(repository: _NoopRepository());
+    final cubit = AppBlocs(repository: _NoopRepository()).watchlist;
     final gold = InstrumentCatalog.instrument('metal.XAU')!;
     final k24 = WatchCard(id: 'c1', instrumentID: gold.id, currency: 'USD', unit: PriceUnit.gram, karat: GoldKarat.k24);
     final k18 = WatchCard(id: 'c2', instrumentID: gold.id, currency: 'USD', unit: PriceUnit.gram, karat: GoldKarat.k18);
@@ -95,7 +95,7 @@ void main() {
   });
 
   test('undoAdd removes the card', () async {
-    final cubit = AppCubit(repository: _NoopRepository());
+    final cubit = AppBlocs(repository: _NoopRepository()).watchlist;
     final gold = InstrumentCatalog.instrument('metal.XAU')!;
     final card = WatchCard(id: 'c1', instrumentID: gold.id, currency: 'USD', unit: PriceUnit.troyOunce);
     await cubit.addCard(card);
@@ -107,7 +107,7 @@ void main() {
   });
 
   test('undoAdd with a customInstrumentID removes a newly-created custom ticker entirely', () async {
-    final cubit = AppCubit(repository: _NoopRepository());
+    final cubit = AppBlocs(repository: _NoopRepository()).watchlist;
     final instrument = await cubit.addCustomTicker('ZZZZ', 'Test Co', assetClass: AssetClass.stock);
     expect(cubit.isCustom(instrument.id), isTrue);
 
@@ -121,7 +121,7 @@ void main() {
   });
 
   test('undoAdd keeps a custom ticker that existed before this add flow, only removing the card', () async {
-    final cubit = AppCubit(repository: _NoopRepository());
+    final cubit = AppBlocs(repository: _NoopRepository()).watchlist;
     final instrument = await cubit.addCustomTicker('YYYY', 'Existing Co', assetClass: AssetClass.stock);
     // Simulate the ticker already having a watchlist card from an earlier flow.
     final oldCard = WatchCard(id: 'old', instrumentID: instrument.id, currency: 'EUR', unit: PriceUnit.each);
@@ -141,7 +141,7 @@ void main() {
   });
 
   test('undoAdd with customInstrumentID keeps the ticker if another card still references it', () async {
-    final cubit = AppCubit(repository: _NoopRepository());
+    final cubit = AppBlocs(repository: _NoopRepository()).watchlist;
     final instrument = await cubit.addCustomTicker('XXXX', 'Multi Co', assetClass: AssetClass.stock);
 
     final usdCard = WatchCard(id: 'usd', instrumentID: instrument.id, currency: 'USD', unit: PriceUnit.each);

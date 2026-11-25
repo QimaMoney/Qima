@@ -3,7 +3,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:package_info_plus/package_info_plus.dart';
-import 'package:qima/blocs/app_cubit.dart';
+import 'package:qima/blocs/app_blocs.dart';
 import 'package:qima/l10n/app_localizations.dart';
 import 'package:qima/models/asset.dart';
 import 'package:qima/models/chart_range.dart';
@@ -19,14 +19,17 @@ import 'package:qima/screens/watchlist_screen.dart';
 import 'package:qima/theme/app_theme.dart';
 import 'package:qima/widgets/asset_share_card.dart';
 
+import '../helpers/app_blocs.dart';
+import '../helpers/money_provider.dart';
+
 void main() {
   final gold = InstrumentCatalog.instrument('metal.XAU')!;
   final btc = InstrumentCatalog.instrument('crypto.BTC')!;
   final goldCard = WatchCard(id: 'c1', instrumentID: gold.id, currency: 'USD', unit: PriceUnit.troyOunce);
   final btcCard = WatchCard(id: 'c2', instrumentID: btc.id, currency: 'USD', unit: PriceUnit.each);
 
-  AppCubit populatedCubit() {
-    final cubit = AppCubit();
+  AppBlocs populatedCubit() {
+    final blocs = AppBlocs();
     final now = DateTime.now();
     QuoteSeries series(String id, double from, double to) => QuoteSeries(instrumentID: id, quotes: [
           for (var day = 60; day >= 0; day--)
@@ -36,20 +39,21 @@ void main() {
               canonicalUSD: from + (to - from) * (60 - day) / 60,
             ),
         ]);
-    cubit.emit(cubit.state.copyWith(
+    blocs.seed(
       initialized: true,
       cards: [goldCard, btcCard],
       seriesByID: {gold.id: series(gold.id, 1900, 2000), btc.id: series(btc.id, 70000, 65000)},
       rates: FXRates(base: 'USD', rates: const {'USD': 1}, updatedAt: now),
       fxHistory: FXHistory.empty,
       baseCurrency: 'USD',
-    ));
-    return cubit;
+    );
+    return blocs;
   }
 
-  Widget harness(Widget home, {AppCubit? cubit, Locale locale = const Locale('en')}) {
-    return BlocProvider<AppCubit>(
-      create: (_) => cubit ?? populatedCubit(),
+  Widget harness(Widget home, {AppBlocs? blocs, Locale locale = const Locale('en')}) {
+    final app = blocs ?? populatedCubit();
+    return MultiBlocProvider(
+      providers: [...app.providers, testMoneyProvider(app)],
       child: MaterialApp(
         locale: locale,
         localizationsDelegates: AppLocalizations.localizationsDelegates,
@@ -92,9 +96,9 @@ void main() {
     });
 
     testWidgets('Edit order is not offered for a single card', (tester) async {
-      final cubit = populatedCubit();
-      cubit.emit(cubit.state.copyWith(cards: [goldCard]));
-      await tester.pumpWidget(harness(const WatchlistScreen(manageRefreshLifecycle: false), cubit: cubit));
+      final blocs = populatedCubit();
+      blocs.seed(cards: [goldCard]);
+      await tester.pumpWidget(harness(const WatchlistScreen(manageRefreshLifecycle: false), blocs: blocs));
       await tester.pump();
       expect(find.byIcon(Icons.swap_vert), findsNothing);
     });

@@ -1,95 +1,44 @@
 import 'dart:async';
 import 'dart:ui' show Locale, PlatformDispatcher;
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:intl/intl.dart' show NumberFormat;
 
-import '../models/alert_runtime_state.dart';
-import '../models/asset.dart';
-import '../models/backup.dart';
-import '../models/custom_instrument.dart';
-import '../models/fx_history.dart';
-import '../models/holding.dart';
 import '../models/holding_transaction.dart';
-import '../models/ledger.dart';
-import '../models/holding_totals.dart';
 import '../models/instrument_catalog.dart';
-import '../models/instrument_presentation.dart';
-import '../models/metal_breakdown.dart';
-import '../models/money.dart';
-import '../models/period_summary.dart';
-import '../models/portfolio_history.dart';
 import '../models/price_alert.dart';
-import '../models/quote.dart';
+import '../models/setup_answers.dart';
 import '../models/watch_card.dart';
-import '../models/watchlist_sort.dart';
-import '../models/zakat.dart';
-import '../models/chart_range.dart';
-import '../services/ai_assist_provider.dart';
-import '../services/dictation_service.dart';
-import '../services/alert_runtime_store.dart';
-import '../services/alerts_store.dart';
-import '../services/app_lock_service.dart';
 import '../services/background_refresh.dart';
 import '../services/backup/backup_service.dart';
-import '../services/cloud_kv_store.dart';
-import '../services/custom_instrument_store.dart';
-import '../services/holdings_store.dart';
-import '../services/transactions_store.dart';
-import '../services/notification_service.dart';
 import '../services/preferences.dart';
-import '../services/home_widget_service.dart';
-import '../services/price_converter.dart';
-import '../services/price_repository.dart';
 import '../services/refresh_pipeline.dart';
-import '../services/switchable_cloud_kv_store.dart';
-import '../services/text_recognition_service.dart';
-import '../services/watchlist_store.dart';
-import '../services/zakat_reminder_notifier.dart';
+import 'alerts_cubit.dart';
 import 'app_state.dart';
+import 'guarded_emit.dart';
+import 'holdings_cubit.dart';
+import 'market_cubit.dart';
+import 'settings_cubit.dart';
+import 'sync_cubit.dart';
+import 'watchlist_cubit.dart';
+import 'zakat_cubit.dart';
 
-/// Central state container mirroring `AppModel.swift` (spec §4.1). Wires the
-/// [PriceRepository] and the persisted stores to a single [AppState] the UI
-/// observes via `flutter_bloc`.
-class AppCubit extends Cubit<AppState> {
-  static const _refreshFailedKey = 'error.refreshFailed';
+/// Start-up and first run. [init] loads every other cubit in the order the
+/// data needs (the cloud backend settles before any store is read, the
+/// trades load before the book's health is judged) and only then marks the
+/// app [AppState.initialized]; the state also holds what setup decided.
+class AppCubit extends Cubit<AppState> with GuardedEmit<AppState> {
+  final SettingsCubit _settings;
+  final MarketCubit _market;
+  final WatchlistCubit _watchlist;
+  final HoldingsCubit _holdings;
+  final AlertsCubit _alerts;
+  final ZakatCubit _zakat;
+  final SyncCubit _sync;
 
-  final PriceRepository repository;
-  final WatchlistStore watchlistStore;
-  final HoldingsStore holdingsStore;
-  final TransactionsStore transactionsStore;
-  final CustomInstrumentStore customInstrumentStore;
-  final AppLockService appLockService;
-  final AlertsStore alertsStore;
-  final AlertRuntimeStore alertRuntimeStore;
-  final NotificationService notificationService;
-
-  /// The OS's on-device language model (v4). Features reach it through
-  /// [assist], which is the null provider unless Settings · On-device
-  /// intelligence is on; every feature has a deterministic path that never
-  /// consults it.
-  final AiAssistProvider aiAssist;
-
-  /// On-device speech to text for the Add field (v4 phase 4).
-  final DictationService dictation;
-
-  /// On-device text recognition for receipt scans (v4 phase 7).
-  final TextRecognitionService textRecognition;
-  late Preferences preferences;
-  late BackupService backupService;
-  RefreshPipeline? _pipeline;
-
-  /// Shared cloud key-value backend for every synced store + [preferences]
-  /// (spec Phase 7). Always constructed (even on platforms/tests that never
-  /// enable it) so [watchlistStore]/[holdingsStore]/etc default-construct
-  /// against the SAME instance rather than each getting their own — turning
-  /// sync on/off is then just [SwitchableCloudKVStore.setEnabled], with no
-  /// store ever rebuilt. Callers that inject their own stores (most unit
-  /// tests) bypass this entirely — each of those stores keeps whatever cloud
-  /// backend it was given (normally none, i.e. [LocalOnlyCloudKVStore]).
-  final SwitchableCloudKVStore cloudStore;
-  StreamSubscription<CloudKVChangeEvent>? _cloudChangesSubscription;
+  /// Builds the pipeline that evaluates alerts after a refresh, once the
+  /// preferences and the backup service exist.
+  final RefreshPipeline Function(Preferences preferences, BackupService backupService) _pipeline;
 
   /// The device locale consulted for onboarding step 5's base-currency
   /// prefill (see [_deviceRegionCurrency]). Defaults to the real OS locale;
@@ -97,136 +46,53 @@ class AppCubit extends Cubit<AppState> {
   /// depending on the test runner's own locale.
   final Locale? _deviceLocale;
 
-  /// Maps a `SyncedStore.cloudKey` to the reload+re-emit routine for that
-  /// store, so an external-change event naming that key reloads only the
-  /// affected store instead of everything (spec Phase 7 "external-change
-  /// event reloads the right store"). Populated in [init] once every store
-  /// exists.
-  Map<String, Future<void> Function()> _reloadByCloudKey = {};
-
-  factory AppCubit({
-    PriceRepository? repository,
-    WatchlistStore? watchlistStore,
-    HoldingsStore? holdingsStore,
-    TransactionsStore? transactionsStore,
-    CustomInstrumentStore? customInstrumentStore,
-    AppLockService? appLockService,
-    AlertsStore? alertsStore,
-    AlertRuntimeStore? alertRuntimeStore,
-    NotificationService? notificationService,
-    SwitchableCloudKVStore? cloudStore,
-    AiAssistProvider? aiAssist,
-    DictationService? dictation,
-    TextRecognitionService? textRecognition,
+  AppCubit({
+    required SettingsCubit settings,
+    required MarketCubit market,
+    required WatchlistCubit watchlist,
+    required HoldingsCubit holdings,
+    required AlertsCubit alerts,
+    required ZakatCubit zakat,
+    required SyncCubit sync,
+    required RefreshPipeline Function(Preferences preferences, BackupService backupService) pipeline,
     Locale? deviceLocale,
-  }) {
-    // Built once up front so every default-constructed store below shares
-    // the exact same backend — see [cloudStore]'s doc comment.
-    final resolvedCloudStore = cloudStore ?? SwitchableCloudKVStore();
-    final resolvedHoldingsStore = holdingsStore ?? HoldingsStore(cloud: resolvedCloudStore);
-    return AppCubit._(
-      repository: repository ?? PriceRepository(),
-      watchlistStore: watchlistStore ?? WatchlistStore(cloud: resolvedCloudStore),
-      holdingsStore: resolvedHoldingsStore,
-      transactionsStore:
-          transactionsStore ?? TransactionsStore(legacyLots: resolvedHoldingsStore, cloud: resolvedCloudStore),
-      customInstrumentStore: customInstrumentStore ?? CustomInstrumentStore(cloud: resolvedCloudStore),
-      appLockService: appLockService ?? AppLockService(),
-      alertsStore: alertsStore ?? AlertsStore(cloud: resolvedCloudStore),
-      alertRuntimeStore: alertRuntimeStore ?? AlertRuntimeStore(),
-      notificationService: notificationService ?? NotificationService(),
-      cloudStore: resolvedCloudStore,
-      aiAssist: aiAssist ?? const PlatformAiAssistProvider(),
-      dictation: dictation ?? const PlatformDictation(),
-      textRecognition: textRecognition ?? const PlatformTextRecognition(),
-      deviceLocale: deviceLocale,
-    );
-  }
-
-  AppCubit._({
-    required this.repository,
-    required this.watchlistStore,
-    required this.holdingsStore,
-    required this.transactionsStore,
-    required this.customInstrumentStore,
-    required this.appLockService,
-    required this.alertsStore,
-    required this.alertRuntimeStore,
-    required this.notificationService,
-    required this.cloudStore,
-    required this.aiAssist,
-    required this.dictation,
-    required this.textRecognition,
-    Locale? deviceLocale,
-  })  : _deviceLocale = deviceLocale,
-        super(AppState());
+  })  : _settings = settings,
+        _market = market,
+        _watchlist = watchlist,
+        _holdings = holdings,
+        _alerts = alerts,
+        _zakat = zakat,
+        _sync = sync,
+        _pipeline = pipeline,
+        _deviceLocale = deviceLocale,
+        super(const AppState());
 
   // ---------------------------------------------------------------------
   // Init
   // ---------------------------------------------------------------------
 
   Future<void> init() async {
-    preferences = await Preferences.create(cloud: cloudStore);
-    backupService = BackupService(
-      watchlistStore: watchlistStore,
-      holdingsStore: holdingsStore,
-      transactionsStore: transactionsStore,
-      customInstrumentStore: customInstrumentStore,
-      alertsStore: alertsStore,
-      preferences: preferences,
-    );
+    final preferences = await Preferences.create(cloud: _sync.cloudStore);
 
-    // Resolves (and, if applicable, enables) the cloud backend BEFORE any
-    // store's `load()`/seeding runs below — critical for the "first-enable
-    // on a device that already has local data" case (spec Phase 7): if the
-    // cloud store were enabled only after seeding, a fresh device would seed
-    // its local mirror from `InstrumentCatalog.defaultWatchlist` while
-    // looking at an empty (not-yet-connected) cloud, and that seeded data
-    // would then merge back IN alongside whatever's really in the cloud
-    // instead of the cloud's real state being seen first. Enabling first
-    // means `WatchlistStore.load()`'s seed check (`local.isEmpty &&
-    // cloud.isEmpty`) sees the real cloud contents, so a device joining an
-    // already-populated account merges into it instead of re-seeding
-    // defaults next to it.
-    final iCloudAccountAvailable = platformSupportsICloud ? await cloudStore.accountStatus() : false;
-    final iCloudSyncEnabled = preferences.iCloudSyncEnabled;
-    final cloudEnabledAtStartup = iCloudSyncEnabled && iCloudAccountAvailable;
-    cloudStore.setEnabled(cloudEnabledAtStartup);
-    if (cloudEnabledAtStartup) await cloudStore.synchronize();
+    // Resolves (and, if applicable, enables) the cloud backend, and builds
+    // the backup service, BEFORE any store's `load()`/seeding runs below;
+    // see `SyncCubit.start` for why the order matters.
+    await _sync.start(preferences);
 
-    final customs = await customInstrumentStore.load();
-    InstrumentCatalog.reloadCustom(customs.map((c) => c.instrument).toList());
+    await _watchlist.loadCustomInstruments();
 
-    var baseCurrency = await preferences.baseCurrency;
-    final baseCurrencyExplicitlySet = preferences.baseCurrencyExplicitlySet;
-    final widgetRefreshInterval = await preferences.widgetRefreshInterval;
-    final appLanguage = await preferences.appLanguage;
-    final appearance = await preferences.appearance;
-    final preferredChartRange = preferences.preferredChartRange;
-    final preferredPortfolioRange = preferences.preferredPortfolioRange;
-    final hideBalances = preferences.hideBalances;
-    final plainSummaries = preferences.plainSummaries;
-    final onDeviceModel = preferences.onDeviceModel;
-    final appLockEnabled = preferences.appLockEnabled;
-    final lockGrace = preferences.lockGrace;
-    final deliverAlertsOnThisDevice = preferences.deliverAlertsOnThisDevice;
-    final zakatSettings = await preferences.zakatSettings;
+    await _settings.load(preferences);
+    await _zakat.load(preferences);
 
     final seedCards = await preferences.seedWatchcards();
-    final cards = await _loadCardsSeeding(watchlistStore, seedCards);
-    final alerts = await alertsStore.load();
+    await _watchlist.load(seedCards);
+    await _alerts.load(preferences: preferences, pipeline: _pipeline(preferences, _sync.backupService));
 
-    final transactions = await transactionsStore.load();
-    final rates = await repository.cachedRates();
-    final fxHistory = await repository.cachedFXHistory();
+    await _holdings.load();
+    await _sync.load();
+    await _market.loadCached();
 
-    final seriesByID = <String, QuoteSeries>{};
-    for (final instrument in _trackedInstrumentsFor(cards, transactions)) {
-      seriesByID[instrument.id] = await repository.cachedSeries(instrument);
-    }
-
-    await notificationService.init();
-    final notificationsEnabled = await notificationService.isEnabled();
+    await _alerts.initNotifications();
 
     // Never show the tour again once it's been completed/skipped on this
     // device, and never show it AUTOMATICALLY to an existing (pre-onboarding)
@@ -236,7 +102,8 @@ class AppCubit extends Cubit<AppState> {
     // from-scratch install only ever has the seeded default watchlist (spec
     // Phase 1 seeding, `InstrumentCatalog.defaultWatchlist`) and no
     // lots/alerts yet, so that combination is what "no data" means here.
-    final shouldShowOnboarding = !preferences.onboardingCompleted && !_hasExistingUserData(cards, transactions, alerts);
+    final shouldShowOnboarding = !preferences.onboardingCompleted &&
+        !_hasExistingUserData(_watchlist.state.cards, _holdings.state.transactions, _alerts.state.alerts);
 
     // Onboarding step 5's "Base currency" row prefills from the device
     // region (spec "prefilled from the device region if it maps to a
@@ -244,66 +111,26 @@ class AppCubit extends Cubit<AppState> {
     // a fresh install about to see the tour, and only when nothing has ever
     // explicitly set a base currency yet (never overrides a real choice,
     // including one that arrived via sync before this device's first run).
-    if (shouldShowOnboarding && !baseCurrencyExplicitlySet) {
-      final regionCurrency = _deviceRegionCurrency(rates.availableCurrencies);
-      if (regionCurrency != null && regionCurrency != baseCurrency) {
-        baseCurrency = regionCurrency;
-        await preferences.setBaseCurrency(baseCurrency);
+    if (shouldShowOnboarding && !preferences.baseCurrencyExplicitlySet) {
+      final regionCurrency = _deviceRegionCurrency(_market.state.rates.availableCurrencies);
+      if (regionCurrency != null && regionCurrency != _settings.state.baseCurrency) {
+        await _settings.setBaseCurrency(regionCurrency);
       }
     }
-
-    _pipeline = RefreshPipeline(
-      repository: repository,
-      watchlistStore: watchlistStore,
-      transactionsStore: transactionsStore,
-      customInstrumentStore: customInstrumentStore,
-      alertsStore: alertsStore,
-      alertRuntimeStore: alertRuntimeStore,
-      notificationService: notificationService,
-      preferences: preferences,
-      backupService: backupService,
-    );
 
     // Best-effort: registers the periodic background task on platforms that
     // support it (Android always; iOS opportunistically via BGTaskScheduler
     // — see `background_refresh.dart`). Never blocks/fails init.
-    unawaited(BackgroundRefresh.register(interval: widgetRefreshInterval.timeInterval));
+    unawaited(BackgroundRefresh.register(interval: _settings.state.widgetRefreshInterval.timeInterval));
 
     emit(state.copyWith(
       initialized: true,
-      baseCurrency: baseCurrency,
-      widgetRefreshInterval: widgetRefreshInterval,
-      appLanguage: appLanguage,
-      appearance: appearance,
-      alerts: alerts,
-      deliverAlertsOnThisDevice: deliverAlertsOnThisDevice,
-      notificationsEnabled: notificationsEnabled,
-      preferredChartRange: preferredChartRange,
-      preferredPortfolioRange: preferredPortfolioRange,
-      cards: cards,
-      transactions: transactions,
-      rates: rates,
-      fxHistory: fxHistory,
-      seriesByID: seriesByID,
-      hideBalances: hideBalances,
-      plainSummaries: plainSummaries,
-      onDeviceModel: onDeviceModel,
-      appLockEnabled: appLockEnabled,
-      lockGrace: lockGrace,
-      backupReminderDue: backupService.isReminderDue(),
-      iCloudSyncEnabled: iCloudSyncEnabled,
-      iCloudAccountAvailable: iCloudAccountAvailable,
-      cloudSyncStatus: _statusFor(
-        syncEnabled: iCloudSyncEnabled,
-        accountAvailable: iCloudAccountAvailable,
-        platformSupported: platformSupportsICloud,
-      ),
-      lastCloudSyncAt: cloudEnabledAtStartup ? DateTime.now() : null,
       shouldShowOnboarding: shouldShowOnboarding,
-      zakatSettings: zakatSettings,
+      setup: preferences.setupAnswers,
+      getStartedDismissed: preferences.getStartedDismissed,
     ));
 
-    startSync();
+    _sync.startSync();
   }
 
   /// The device region's default currency (via `intl`'s per-locale currency
@@ -311,6 +138,10 @@ class AppCubit extends Cubit<AppState> {
   /// `PlatformDispatcher.instance.locale` mirrors how the rest of the app
   /// resolves the device's own locale for background/system work (see
   /// `RefreshPipeline`/`BackupReminderNotifier`).
+  /// [_deviceRegionCurrency] against the currencies loaded now, for setup's
+  /// "From your region" label.
+  String? get deviceRegionCurrency => _deviceRegionCurrency(_market.state.rates.availableCurrencies);
+
   String? _deviceRegionCurrency(List<String> available) {
     final locale = _deviceLocale ?? PlatformDispatcher.instance.locale;
     final code = NumberFormat.simpleCurrency(locale: locale.toString()).currencyName;
@@ -330,1198 +161,41 @@ class AppCubit extends Cubit<AppState> {
     return cards.any((card) => !defaultIDs.contains(card.instrumentID));
   }
 
-  /// Marks the first-launch tour as finished (either completed or skipped)
-  /// so it never shows automatically again on this device (spec "Onboarding
-  /// tour"). Replaying it from Settings/a help sheet pushes
-  /// `OnboardingTourScreen` directly instead of going through this flag.
+  // ---------------------------------------------------------------------
+  // First run
+  // ---------------------------------------------------------------------
+
+  /// Marks first-launch setup as finished (either completed or skipped) so
+  /// it never shows automatically again on this device. "Run setup again"
+  /// in Settings pushes `SetupFlowScreen` directly instead of going through
+  /// this flag.
   Future<void> completeOnboarding() async {
-    await preferences.setOnboardingCompleted(true);
+    await _settings.preferences.setOnboardingCompleted(true);
     if (!state.shouldShowOnboarding) return;
     emit(state.copyWith(shouldShowOnboarding: false));
   }
 
-  CloudSyncStatus _statusFor({
-    required bool syncEnabled,
-    required bool accountAvailable,
-    required bool platformSupported,
-  }) {
-    if (!platformSupported || !syncEnabled) return CloudSyncStatus.disabled;
-    if (!accountAvailable) return CloudSyncStatus.notSignedIn;
-    return CloudSyncStatus.upToDate;
+  /// Keeps the setup answers on this device and brings Home's Get started
+  /// card back for them (running setup again is asking for it again).
+  Future<void> saveSetup(SetupAnswers answers) async {
+    await _settings.preferences.setSetupAnswers(answers);
+    await _settings.preferences.setGetStartedDismissed(false);
+    emit(state.copyWith(setup: answers, getStartedDismissed: false));
   }
 
-  /// Recomputes [AppState.backupReminderDue] from [BackupService] — called
-  /// after any user-collection mutation (which marks
-  /// `dataChangedSinceLastBackup`) and after a successful export/import, so
-  /// the Settings/Backup reminder card appears and disappears immediately
-  /// rather than waiting for the next unrelated rebuild.
-  ///
-  /// [backupService] is only assigned in [init] (it needs the async-created
-  /// [Preferences] first) — a handful of unit tests construct [AppCubit]
-  /// directly and call a mutator without ever calling [init] (they only
-  /// care about the watchlist/holdings mutation itself), so this and
-  /// [_markDataChanged] tolerate that by treating an un-initialized
-  /// [backupService] as "nothing to do yet" rather than throwing.
-  Future<void> _refreshBackupReminder() async {
-    if (!_backupServiceReady) return;
-    final due = backupService.isReminderDue();
-    if (due != state.backupReminderDue) {
-      emit(state.copyWith(backupReminderDue: due));
-    }
+  /// Asks the home shell to run the guided tour; it starts once the shell is
+  /// on screen and clears the request with [tourStarted].
+  void requestTour() {
+    if (!state.tourRequested) emit(state.copyWith(tourRequested: true));
   }
 
-  /// Marks that user data changed since the last backup — called by every
-  /// watchlist/holdings/custom-ticker/alert mutator so the Phase 6 backup
-  /// reminder only fires when there's actually something new to protect.
-  Future<void> _markDataChanged() async {
-    if (!_backupServiceReady) return;
-    await backupService.setDataChangedSinceLastBackup(true);
-    await _refreshBackupReminder();
+  void tourStarted() {
+    if (state.tourRequested) emit(state.copyWith(tourRequested: false));
   }
 
-  bool get _backupServiceReady => backupServiceOrNull != null;
-
-  /// Null-safe access to [backupService] for callers that may run before
-  /// [init] has finished (or, in tests, before it's called at all) — [init]
-  /// assigns [backupService] only after constructing the async-created
-  /// [Preferences] it depends on, so it's genuinely unavailable for a brief
-  /// window rather than merely inconvenient to check. UI that wants to show
-  /// backup status (see `SettingsScreen`'s `_BackupSection`) reads through
-  /// this rather than the `late` field directly, so it degrades to an empty
-  /// state instead of crashing when rendered that early.
-  BackupService? get backupServiceOrNull {
-    try {
-      return backupService;
-    } on Error {
-      // `LateInitializationError` before `init()` has run.
-      return null;
-    }
-  }
-
-  /// [WatchlistStore]'s seed callback is synchronous, but seeding the
-  /// default watchlist needs the (async) base currency — so seed once here
-  /// and pass the precomputed list through.
-  Future<List<WatchCard>> _loadCardsSeeding(WatchlistStore store, List<WatchCard> seed) async {
-    // The store was already constructed without a seed closure (it doesn't
-    // know about it yet at this point in a from-scratch install); load()
-    // will seed from an empty local+cloud state using whatever `seed`
-    // callback it was given at construction. Since the default
-    // [WatchlistStore] takes no seed, replicate the seeding here directly.
-    final loaded = await store.load();
-    if (loaded.isNotEmpty) return loaded;
-    if (seed.isEmpty) return loaded;
-    for (final card in seed) {
-      await store.upsert(card);
-    }
-    return store.load();
-  }
-
-  /// Registers which store to reload when an external-change event names
-  /// its cloud key, and starts listening for them if this platform can
-  /// support iCloud at all. Called once from [init] AFTER the cloud backend
-  /// has already been enabled/synced for the startup case (see the comment
-  /// above `cloudStore.setEnabled` in [init]) — this only wires the ongoing
-  /// listener, it doesn't repeat that initial enable/merge.
-  void startSync() {
-    _reloadByCloudKey = {
-      'watchcards.records': () => _reloadWatchlist(),
-      // A lot arriving from a device still on 2.x is migrated on reload.
-      'holdings.records': () => _reloadHoldings(),
-      TransactionsStore.cloudKey: () => _reloadHoldings(),
-      'custominstruments.records': () => _reloadCustomInstruments(),
-      'alerts.records': () => _reloadAlerts(),
-      'zakatSettings': () => _reloadZakatSettings(),
-    };
-
-    if (!platformSupportsICloud) return;
-    _cloudChangesSubscription ??= cloudStore.didChangeExternally.listen(_handleCloudChange);
-  }
-
-  /// Re-checks `accountStatus()` and reconciles [AppState]/[cloudStore] with
-  /// it, then — if both the platform, the account and the user's preference
-  /// allow it — performs the actual enable/merge sync. Used by
-  /// [setICloudSyncEnabled] (user flips the switch) and by
-  /// [_handleCloudChange] for an `accountChange` event; [init] does its own
-  /// first-enable pass directly (see the ordering comment there) rather than
-  /// calling this, since this emits [CloudSyncStatus.syncing] transiently in
-  /// a way that would flash before [init]'s own first `emit`.
-  Future<void> _refreshICloudAvailabilityAndSync({required bool userInitiatedEnable}) async {
-    if (!platformSupportsICloud) {
-      cloudStore.setEnabled(false);
-      if (isClosed) return;
-      emit(state.copyWith(
-        iCloudSyncEnabled: userInitiatedEnable,
-        iCloudAccountAvailable: false,
-        cloudSyncStatus: CloudSyncStatus.disabled,
-      ));
-      return;
-    }
-
-    final accountAvailable = await cloudStore.accountStatus();
-    if (isClosed) return;
-    emit(state.copyWith(iCloudAccountAvailable: accountAvailable));
-
-    if (!userInitiatedEnable || !accountAvailable) {
-      cloudStore.setEnabled(false);
-      if (isClosed) return;
-      emit(state.copyWith(
-        iCloudSyncEnabled: userInitiatedEnable,
-        cloudSyncStatus: userInitiatedEnable ? CloudSyncStatus.notSignedIn : CloudSyncStatus.disabled,
-      ));
-      return;
-    }
-
-    if (isClosed) return;
-    emit(state.copyWith(iCloudSyncEnabled: true, cloudSyncStatus: CloudSyncStatus.syncing));
-    cloudStore.setEnabled(true);
-    await adoptCloudChanges();
-  }
-
-  /// User-facing toggle for the Settings "Sync with iCloud" switch (spec
-  /// Phase 7). Persists the preference (itself never synced — see
-  /// `Preferences.iCloudSyncEnabled`) and, when turning ON, immediately
-  /// merges — never wipes — whatever is already on this device with
-  /// whatever is already in the cloud: every store's `load()` already does
-  /// last-write-wins-per-item merge against the (now-enabled) cloud backend,
-  /// so a device that had local-only data before enabling keeps it, folded
-  /// together with anything already synced from another device. Turning OFF
-  /// stops listening for external changes but leaves all local data and the
-  /// last-synced cloud copy untouched — nothing is deleted either way.
-  Future<void> setICloudSyncEnabled(bool value) async {
-    if (value == state.iCloudSyncEnabled) return;
-    await preferences.setICloudSyncEnabled(value);
-    await _refreshICloudAvailabilityAndSync(userInitiatedEnable: value);
-  }
-
-  /// Handles one `NSUbiquitousKeyValueStore.didChangeExternallyNotification`
-  /// forwarded from the platform channel. Reloads only the store(s) named by
-  /// the event's keys (spec Phase 7 "external-change event reloads the
-  /// right store") — an event with no keys (iCloud sometimes omits them, and
-  /// [CloudKVChangeReason.accountChange]/[CloudKVChangeReason.initialSyncChange]
-  /// never carry a useful key list) reloads every synced store instead,
-  /// since at that point any of them may have changed.
-  Future<void> _handleCloudChange(CloudKVChangeEvent event) async {
-    // `disposeCloudSync` cancels the stream subscription, but an event
-    // already dispatched to this handler before that cancellation takes
-    // effect can still be mid-flight across the `await`s below — guard every
-    // `emit` in this method (and the reload helpers it calls) with
-    // `isClosed` so a straggling event can never throw by emitting into a
-    // closed `Cubit` after the owning widget/test has torn it down.
-    if (isClosed) return;
-    switch (event.reason) {
-      case CloudKVChangeReason.quotaViolationChange:
-        emit(state.copyWith(cloudSyncStatus: CloudSyncStatus.storageFull));
-        return;
-      case CloudKVChangeReason.accountChange:
-        // The signed-in account changed (switched or signed out) — re-check
-        // rather than trust the stale `iCloudAccountAvailable`/cached data,
-        // since keys now visible may belong to a different account.
-        await _refreshICloudAvailabilityAndSync(userInitiatedEnable: state.iCloudSyncEnabled);
-        return;
-      case CloudKVChangeReason.serverChange:
-      case CloudKVChangeReason.initialSyncChange:
-      case CloudKVChangeReason.unknown:
-        break;
-    }
-
-    emit(state.copyWith(cloudSyncStatus: CloudSyncStatus.syncing));
-    final keysToReload = event.keys.isEmpty ? _reloadByCloudKey.keys.toList() : event.keys;
-    for (final key in keysToReload) {
-      if (isClosed) return;
-      final reload = _reloadByCloudKey[key];
-      if (reload != null) await reload();
-    }
-    if (isClosed) return;
-    emit(state.copyWith(cloudSyncStatus: CloudSyncStatus.upToDate, lastCloudSyncAt: DateTime.now()));
-  }
-
-  Future<void> _reloadWatchlist() async {
-    final cards = await watchlistStore.load();
-    if (!isClosed && cards != state.cards) emit(state.copyWith(cards: cards));
-  }
-
-  Future<void> _reloadHoldings() async {
-    final transactions = await transactionsStore.load();
-    if (!isClosed && transactions != state.transactions) emit(state.copyWith(transactions: transactions));
-  }
-
-  Future<void> _reloadCustomInstruments() async {
-    final customs = await customInstrumentStore.load();
-    InstrumentCatalog.reloadCustom(customs.map((c) => c.instrument).toList());
-  }
-
-  Future<void> _reloadAlerts() async {
-    final alerts = await alertsStore.load();
-    if (!isClosed && alerts != state.alerts) emit(state.copyWith(alerts: alerts));
-  }
-
-  Future<void> _reloadZakatSettings() async {
-    final settings = await preferences.zakatSettings;
-    if (!isClosed && settings != state.zakatSettings) emit(state.copyWith(zakatSettings: settings));
-  }
-
-  /// Runs a full first-enable/merge pass across every synced store — each
-  /// store's `load()` merges local+cloud last-write-wins-per-item (spec
-  /// Phase 7 "first-enable on a device that already has local data"), so
-  /// this can never wipe local data, only fold it together with the cloud's
-  /// copy. Also starts the underlying `NSUbiquitousKeyValueStore.synchronize()`
-  /// pass so a prompt round-trip is more likely.
-  Future<void> adoptCloudChanges() async {
-    if (!state.iCloudSyncEnabled) return;
-    await cloudStore.synchronize();
-    await _reloadWatchlist();
-    await _reloadHoldings();
-    await _reloadCustomInstruments();
-    await _reloadAlerts();
-    await _reloadZakatSettings();
-    if (isClosed) return;
-    emit(state.copyWith(cloudSyncStatus: CloudSyncStatus.upToDate, lastCloudSyncAt: DateTime.now()));
-  }
-
-  /// Cancels the cloud-change subscription — called from tests/teardown or
-  /// when the owning widget is disposed, so no native event listener
-  /// outlives this cubit. `AppCubit` itself has no `close()` override today
-  /// (flutter_bloc's `Cubit.close()` doesn't know about this subscription),
-  /// so callers that construct a long-lived [AppCubit] and later discard it
-  /// should call this explicitly.
-  Future<void> disposeCloudSync() async {
-    await _cloudChangesSubscription?.cancel();
-    _cloudChangesSubscription = null;
-    await cloudStore.dispose();
-  }
-
-  // ---------------------------------------------------------------------
-  // Derived helpers
-  // ---------------------------------------------------------------------
-
-  List<Instrument> _watchInstrumentsFor(List<WatchCard> cards) {
-    final seen = <String>{};
-    final result = <Instrument>[];
-    for (final card in cards) {
-      final instrument = card.instrument;
-      if (instrument == null || seen.contains(instrument.id)) continue;
-      seen.add(instrument.id);
-      result.add(instrument);
-    }
-    return result;
-  }
-
-  List<Instrument> get watchInstruments => _watchInstrumentsFor(state.cards);
-
-  /// Union of watchlist instruments and every instrument with transactions —
-  /// including ones sold off entirely, whose prices the portfolio history
-  /// still needs for the days they were held. Holdings can reference an
-  /// instrument the user removed (or never added) to the watchlist, and
-  /// without this union they'd be left out of refresh and backfill.
-  List<Instrument> _trackedInstrumentsFor(List<WatchCard> cards, List<HoldingTransaction> transactions) {
-    final result = _watchInstrumentsFor(cards);
-    final seen = result.map((i) => i.id).toSet();
-    for (final transaction in transactions) {
-      if (seen.contains(transaction.instrumentID)) continue;
-      final instrument = InstrumentCatalog.instrument(transaction.instrumentID);
-      if (instrument == null) continue;
-      seen.add(instrument.id);
-      result.add(instrument);
-    }
-    return result;
-  }
-
-  List<Instrument> get trackedInstruments => _trackedInstrumentsFor(state.cards, state.transactions);
-
-  InstrumentPresentation presentation(WatchCard card) {
-    final instrument = card.instrument ?? InstrumentCatalog.all.first;
-    final converter = PriceConverter(
-      rates: state.rates,
-      currencyCode: card.currency,
-      unit: card.unit,
-      karat: card.karat,
-      history: state.fxHistory,
-    );
-    final series = state.seriesByID[instrument.id] ?? QuoteSeries.empty(instrument.id);
-    return InstrumentPresentation(instrument: instrument, series: series, converter: converter);
-  }
-
-  // ---------------------------------------------------------------------
-  // Refresh flow
-  // ---------------------------------------------------------------------
-
-  Future<void> refreshIfStale({Duration minInterval = const Duration(seconds: 120)}) async {
-    final last = state.lastRefresh;
-    if (last == null || DateTime.now().difference(last) > minInterval) {
-      await refreshAll();
-    }
-  }
-
-  Future<void> refreshAll({bool silent = false}) async {
-    final instruments = trackedInstruments;
-    if (!silent) emit(state.copyWith(phase: RefreshPhase.refreshing, clearError: true));
-    try {
-      final updated = await repository.refreshAll(instruments);
-      final rates = await repository.cachedRates();
-      final merged = {...state.seriesByID, ...updated};
-      if (updated.isEmpty && instruments.isNotEmpty) {
-        emit(state.copyWith(
-          phase: RefreshPhase.failed,
-          errorMessage: _refreshFailedKey,
-          rates: rates,
-          seriesByID: merged,
-        ));
-      } else {
-        emit(state.copyWith(
-          phase: RefreshPhase.idle,
-          clearError: true,
-          rates: rates,
-          seriesByID: merged,
-          lastRefresh: DateTime.now(),
-        ));
-        if (updated.isNotEmpty) {
-          await _evaluateAlertsAfterRefresh(seriesByID: merged, rates: rates);
-        }
-      }
-    } catch (e, st) {
-      debugPrint('AppCubit: refreshAll failed: $e\n$st');
-      emit(state.copyWith(phase: RefreshPhase.failed, errorMessage: _refreshFailedKey));
-    }
-    // Fire-and-forget: history is larger and shouldn't block live prices.
-    unawaited(backfillHistoryIfNeeded());
-    unawaited(_notifyZakatIfDue());
-  }
-
-  /// The foreground half of the hawl reminder; the background task runs the
-  /// same notifier from `RefreshPipeline.run`. Once per completion per
-  /// device either way (see [ZakatReminderNotifier]).
-  Future<void> _notifyZakatIfDue() async {
-    // [preferences] is `late` like [backupService] and assigned just before
-    // it in [init], so the same readiness check covers both.
-    if (!_backupServiceReady || !state.zakatSettings.remind) return;
-    try {
-      await ZakatReminderNotifier(preferences: preferences, notificationService: notificationService).notifyIfDue();
-    } catch (e, st) {
-      debugPrint('AppCubit: zakat reminder failed: $e\n$st');
-    }
-  }
-
-  /// Runs alert evaluation for the alerts currently in state against a
-  /// just-refreshed price snapshot, via the same [RefreshPipeline] the
-  /// background task uses (spec Phase 5) — then reloads alerts from disk in
-  /// case a one-off alert just disabled itself, so the UI reflects it
-  /// immediately without waiting for the next unrelated state change.
-  Future<void> _evaluateAlertsAfterRefresh({
-    required Map<String, QuoteSeries> seriesByID,
-    required FXRates rates,
-  }) async {
-    final pipeline = _pipeline;
-    if (pipeline == null || state.alerts.isEmpty) return;
-    try {
-      await pipeline.evaluateAndNotify(
-        alerts: state.alerts,
-        cards: state.cards,
-        seriesByID: seriesByID,
-        rates: rates,
-        fxHistory: state.fxHistory,
-      );
-      final reloaded = await alertsStore.load();
-      if (reloaded != state.alerts) {
-        emit(state.copyWith(alerts: reloaded));
-      }
-    } catch (e, st) {
-      debugPrint('AppCubit: alert evaluation failed: $e\n$st');
-    }
-  }
-
-  Future<void> backfillHistoryIfNeeded() async {
-    if (state.isBackfilling) return;
-    emit(state.copyWith(isBackfilling: true));
-    try {
-      final currencies = <String>{
-        ...state.cards.map((c) => c.currency),
-        ...InstrumentCatalog.fiat.map((i) => i.symbol),
-        state.baseCurrency,
-      };
-      final fxHistory = await repository.backfillFXHistory(currencies.toList());
-      final updated = await repository.backfillInstruments(trackedInstruments, fxHistory);
-      if (updated.isNotEmpty || fxHistory != state.fxHistory) {
-        emit(state.copyWith(
-          fxHistory: fxHistory,
-          seriesByID: {...state.seriesByID, ...updated},
-        ));
-      }
-    } finally {
-      emit(state.copyWith(isBackfilling: false));
-    }
-  }
-
-  Future<void> loadHistory(Instrument instrument, String currency) async {
-    if (state.isLoadingHistory) return;
-    emit(state.copyWith(isLoadingHistory: true));
-    try {
-      final currencies = <String>{currency, state.baseCurrency};
-      if (instrument.assetClass == AssetClass.fiat) currencies.add(instrument.symbol);
-      final fxHistory = await repository.backfillFXHistory(currencies.toList(), force: true);
-      final result = await repository.backfillInstruments([instrument], fxHistory, force: true);
-      emit(state.copyWith(
-        fxHistory: fxHistory,
-        seriesByID: {...state.seriesByID, ...result},
-      ));
-    } finally {
-      emit(state.copyWith(isLoadingHistory: false));
-    }
-  }
-
-  Future<void> refresh(Instrument instrument) async {
-    emit(state.copyWith(phase: RefreshPhase.refreshing, clearError: true));
-    try {
-      final series = await repository.refresh(instrument);
-      final rates = await repository.cachedRates();
-      final merged = {...state.seriesByID, instrument.id: series};
-      emit(state.copyWith(
-        phase: RefreshPhase.idle,
-        clearError: true,
-        rates: rates,
-        seriesByID: merged,
-        lastRefresh: DateTime.now(),
-      ));
-      await _evaluateAlertsAfterRefresh(seriesByID: merged, rates: rates);
-    } catch (e, st) {
-      debugPrint('AppCubit: refresh(${instrument.id}) failed: $e\n$st');
-      emit(state.copyWith(phase: RefreshPhase.failed, errorMessage: _refreshFailedKey));
-    }
-  }
-
-  // ---------------------------------------------------------------------
-  // Watchlist mutations
-  // ---------------------------------------------------------------------
-
-  /// Adds [card] to the watchlist, unless a card with the same
-  /// instrument/currency/unit/karat combo already exists — in which case the
-  /// EXISTING card is returned with `created: false` instead of adding a
-  /// duplicate. Callers use `created` to decide whether to show an "added"
-  /// or "already in your watchlist" confirmation (see `AddFlowNavigation`).
-  Future<({WatchCard card, bool created})> addCard(WatchCard card) async {
-    for (final c in state.cards) {
-      if (c.isSameCombo(card)) return (card: c, created: false);
-    }
-
-    final isNewInstrument = card.instrument != null && !state.seriesByID.containsKey(card.instrumentID);
-    final cards = await watchlistStore.upsert(card);
-    emit(state.copyWith(cards: cards));
-    unawaited(_markDataChanged());
-
-    if (isNewInstrument) {
-      final instrument = card.instrument!;
-      final cached = await repository.cachedSeries(instrument);
-      emit(state.copyWith(seriesByID: {...state.seriesByID, instrument.id: cached}));
-      unawaited(refresh(instrument));
-      unawaited(backfillHistoryIfNeeded());
-    }
-    return (card: card, created: true);
-  }
-
-  /// Reverses a just-completed add-instrument flow: removes [card] from the
-  /// watchlist, and — if [customInstrumentID] is given (the ticker was
-  /// created fresh in that same flow, not a pre-existing custom ticker) —
-  /// also removes the custom instrument itself, but only when no other
-  /// watchlist card still references it (a user could have added the same
-  /// freshly-created ticker at two currencies before hitting Undo on one).
-  Future<void> undoAdd(WatchCard card, {String? customInstrumentID}) async {
-    await removeCard(card.id);
-    if (customInstrumentID == null) return;
-    final stillUsed = state.cards.any((c) => c.instrumentID == customInstrumentID);
-    if (!stillUsed) {
-      await removeCustomInstrument(customInstrumentID);
-    }
-  }
-
-  Future<void> updateCard(WatchCard card) async {
-    final cards = await watchlistStore.upsert(card);
-    emit(state.copyWith(cards: cards));
-    unawaited(_markDataChanged());
-  }
-
-  Future<void> removeCard(String id) async {
-    final cards = await watchlistStore.delete(id);
-    emit(state.copyWith(cards: cards));
-    unawaited(_markDataChanged());
-  }
-
-  Future<void> removeAt(int index) async {
-    if (index < 0 || index >= state.cards.length) return;
-    await removeCard(state.cards[index].id);
-  }
-
-  Future<void> move(int fromIndex, int toIndex) async {
-    final cards = List.of(state.cards);
-    final item = cards.removeAt(fromIndex);
-    cards.insert(toIndex > fromIndex ? toIndex - 1 : toIndex, item);
-    await _saveOrder(cards);
-  }
-
-  /// Rewrites the watchlist order by [sort]. [nameOf] is the localized row
-  /// name, which only the UI can resolve.
-  Future<void> sortWatchlist(WatchlistSort sort, {required String Function(WatchCard) nameOf}) async {
-    final now = DateTime.now();
-    final cards = sortWatchCards(
-      state.cards,
-      sort,
-      nameOf: nameOf,
-      changeOf: (card) => presentation(card).sparklineChange(now)?.percentValue,
-      assetClassOf: (card) => presentation(card).instrument.assetClass,
-    );
-    await _saveOrder(cards);
-  }
-
-  Future<void> _saveOrder(List<WatchCard> cards) async {
-    emit(state.copyWith(cards: cards));
-    await watchlistStore.setOrder(cards.map((c) => c.id).toList());
-    unawaited(_markDataChanged());
-  }
-
-  // ---------------------------------------------------------------------
-  // Custom tickers
-  // ---------------------------------------------------------------------
-
-  List<CustomInstrument> _customCache = const [];
-
-  Future<List<CustomInstrument>> customInstruments() async {
-    _customCache = await customInstrumentStore.load();
-    return _customCache;
-  }
-
-  bool isCustom(String instrumentID) {
-    final builtInIds = InstrumentCatalog.builtIn.map((i) => i.id).toSet();
-    final resolved = InstrumentCatalog.instrument(instrumentID) != null;
-    return resolved && !builtInIds.contains(instrumentID);
-  }
-
-  Future<Instrument> validateCustomTicker(String symbol, String? name, {AssetClass assetClass = AssetClass.stock}) async {
-    final candidate = CustomInstrument(symbol: symbol, name: name, assetClass: assetClass);
-    await repository.probePrice(candidate.instrument);
-    return candidate.instrument;
-  }
-
-  Future<Instrument> addCustomTicker(String symbol, String? name, {AssetClass assetClass = AssetClass.stock}) async {
-    final candidate = CustomInstrument(symbol: symbol, name: name, assetClass: assetClass);
-    await customInstrumentStore.upsert(candidate);
-    final customs = await customInstrumentStore.load();
-    InstrumentCatalog.reloadCustom(customs.map((c) => c.instrument).toList());
-    unawaited(_markDataChanged());
-    return candidate.instrument;
-  }
-
-  Future<void> removeCustomInstrument(String instrumentID) async {
-    final customs = await customInstrumentStore.load();
-    CustomInstrument? match;
-    for (final c in customs) {
-      if (c.instrumentID == instrumentID) {
-        match = c;
-        break;
-      }
-    }
-    if (match != null) {
-      await customInstrumentStore.delete(match.id);
-      unawaited(_markDataChanged());
-      final reloaded = await customInstrumentStore.load();
-      InstrumentCatalog.reloadCustom(reloaded.map((c) => c.instrument).toList());
-    }
-    final toRemove = state.cards.where((c) => c.instrumentID == instrumentID).map((c) => c.id).toList();
-    for (final id in toRemove) {
-      await removeCard(id);
-    }
-  }
-
-  // ---------------------------------------------------------------------
-  // Settings
-  // ---------------------------------------------------------------------
-
-  Future<void> setBaseCurrency(String value) async {
-    if (value == state.baseCurrency) return;
-    await preferences.setBaseCurrency(value);
-    emit(state.copyWith(baseCurrency: value));
-  }
-
-  Future<void> setAppLanguage(AppLanguage value) async {
-    if (value == state.appLanguage) return;
-    await preferences.setAppLanguage(value);
-    emit(state.copyWith(appLanguage: value));
-  }
-
-  Future<void> setAppearance(Appearance value) async {
-    if (value == state.appearance) return;
-    await preferences.setAppearance(value);
-    emit(state.copyWith(appearance: value));
-  }
-
-  Future<void> setPreferredChartRange(ChartRange value) async {
-    if (value.isExtended || value == state.preferredChartRange) return;
-    await preferences.setPreferredChartRange(value);
-    emit(state.copyWith(preferredChartRange: value));
-  }
-
-  Future<void> setPreferredPortfolioRange(ChartRange value) async {
-    if (!ChartRange.portfolioSelectable.contains(value) || value == state.preferredPortfolioRange) return;
-    await preferences.setPreferredPortfolioRange(value);
-    emit(state.copyWith(preferredPortfolioRange: value));
-  }
-
-  Future<void> setWidgetRefreshInterval(WidgetRefreshInterval value) async {
-    if (value == state.widgetRefreshInterval) return;
-    await preferences.setWidgetRefreshInterval(value);
-    emit(state.copyWith(widgetRefreshInterval: value));
-    // Re-registering replaces the periodic task with the new cadence
-    // (Android: `ExistingPeriodicWorkPolicy.update`; iOS: the next
-    // BGTaskScheduler submission simply uses the new earliest-begin delay —
-    // see `background_refresh.dart`), so this finally gives the setting a
-    // real effect (spec Phase 5).
-    unawaited(BackgroundRefresh.register(interval: value.timeInterval));
-  }
-
-  // ---------------------------------------------------------------------
-  // Privacy: hide balances + app lock
-  // ---------------------------------------------------------------------
-
-  Future<void> toggleHideBalances() async {
-    final value = !state.hideBalances;
-    await preferences.setHideBalances(value);
-    emit(state.copyWith(hideBalances: value));
-  }
-
-  Future<void> setHideBalances(bool value) async {
-    if (value == state.hideBalances) return;
-    await preferences.setHideBalances(value);
-    emit(state.copyWith(hideBalances: value));
-  }
-
-  Future<void> setPlainSummaries(bool value) async {
-    if (value == state.plainSummaries) return;
-    await preferences.setPlainSummaries(value);
-    emit(state.copyWith(plainSummaries: value));
-  }
-
-  Future<void> setOnDeviceModel(bool value) async {
-    if (value == state.onDeviceModel) return;
-    await preferences.setOnDeviceModel(value);
-    emit(state.copyWith(onDeviceModel: value));
-  }
-
-  /// The model features may consult: [aiAssist] when the user turned it on,
-  /// else nothing.
-  AiAssistProvider get assist => state.onDeviceModel ? aiAssist : const NullAiAssistProvider();
-
-  final Map<String, String> _phrased = {};
-
-  /// [sentence] reworded by the on-device model, or [sentence] itself when
-  /// the model is off, unavailable, or its wording fails [acceptPhrasing].
-  /// Remembered per sentence, so a rebuild never asks twice.
-  Future<String> phrased(String sentence, String localeTag) async {
-    if (!state.onDeviceModel) return sentence;
-    final key = '$localeTag|$sentence';
-    final cached = _phrased[key];
-    if (cached != null) return cached;
-    final candidate = await aiAssist.phrase(sentence, localeTag);
-    final result =
-        candidate != null && acceptPhrasing(sentence, candidate) ? restoreIsolates(sentence, candidate.trim()) : sentence;
-    return _phrased[key] = result;
-  }
-
-  /// Enabling app lock requires a successful authentication first — the
-  /// user proves they can actually unlock before the app starts depending on
-  /// it. Returns whether the setting ended up enabled: `true` on success,
-  /// `false` if authentication failed/was cancelled (the switch should
-  /// bounce back to off). Disabling never needs authentication.
-  Future<bool> setAppLockEnabled(bool value, {String reason = 'Confirm it\'s you to enable App lock'}) async {
-    if (!value) {
-      await preferences.setAppLockEnabled(false);
-      emit(state.copyWith(appLockEnabled: false));
-      return true;
-    }
-    final authenticated = await appLockService.authenticate(reason: reason);
-    if (!authenticated) return false;
-    await preferences.setAppLockEnabled(true);
-    emit(state.copyWith(appLockEnabled: true));
-    return true;
-  }
-
-  Future<void> setLockGrace(LockGrace value) async {
-    if (value == state.lockGrace) return;
-    await preferences.setLockGrace(value);
-    emit(state.copyWith(lockGrace: value));
-  }
-
-  // ---------------------------------------------------------------------
-  // Holdings
-  // ---------------------------------------------------------------------
-
-  double? latestUSD(String instrumentID) => state.seriesByID[instrumentID]?.latest?.canonicalUSD;
-
-  List<HoldingLot> lotsFor(Instrument instrument) {
-    final list = state.lots.where((l) => l.instrumentID == instrument.id).toList()
-      ..sort((a, b) => b.date.compareTo(a.date));
-    return list;
-  }
-
-  HoldingValuation? valuationFor(Instrument instrument, String currency) {
-    return HoldingValuation.aggregate(
-      lots: lotsFor(instrument),
-      rates: state.rates,
-      displayCurrency: currency,
-      latestUSD: latestUSD,
-    );
-  }
-
-  HoldingValuation? valuationForLot(HoldingLot lot, String currency) {
-    return HoldingValuation.aggregate(
-      lots: [lot],
-      rates: state.rates,
-      displayCurrency: currency,
-      latestUSD: latestUSD,
-    );
-  }
-
-  HoldingValuation? get portfolioValuation => HoldingValuation.aggregate(
-        lots: state.lots,
-        rates: state.rates,
-        displayCurrency: state.baseCurrency,
-        latestUSD: latestUSD,
-      );
-
-  List<HeldInstrument> get heldInstruments {
-    final seen = <String>{};
-    final result = <HeldInstrument>[];
-    for (final lot in state.lots) {
-      if (seen.contains(lot.instrumentID)) continue;
-      seen.add(lot.instrumentID);
-      final instrument = InstrumentCatalog.instrument(lot.instrumentID);
-      if (instrument == null) continue;
-      final valuation = valuationFor(instrument, state.baseCurrency);
-      if (valuation == null) continue;
-      result.add(HeldInstrument(
-        instrument: instrument,
-        valuation: valuation,
-        transactionCount: state.transactions.where((t) => t.instrumentID == instrument.id).length,
-      ));
-    }
-    result.sort((a, b) => b.valuation.value.amount.compareTo(a.valuation.value.amount));
-    return result;
-  }
-
-  /// Gain realised across the whole ledger, in the base currency — null
-  /// when nothing has been sold or charged yet.
-  Money? get portfolioRealised {
-    var total = CurrencyAmounts.zero;
-    var any = false;
-    for (final p in state.ledger.positions.values) {
-      if (p.disposals.isEmpty && p.realised.isZero) continue;
-      any = true;
-      total = total.add(p.realised);
-    }
-    return any ? total.inCurrency(state.baseCurrency, state.rates) : null;
-  }
-
-  /// Instruments with transactions but nothing left held — sold or moved
-  /// out entirely — with what they realised, largest result first.
-  List<({Instrument instrument, Money realised})> get closedPositions {
-    final result = <({Instrument instrument, Money realised})>[];
-    for (final p in state.ledger.positions.values) {
-      if (p.openLots.isNotEmpty) continue;
-      final instrument = InstrumentCatalog.instrument(p.instrumentID);
-      if (instrument == null) continue;
-      result.add((instrument: instrument, realised: p.realised.inCurrency(state.baseCurrency, state.rates)));
-    }
-    result.sort((a, b) => b.realised.amount.compareTo(a.realised.amount));
-    return result;
-  }
-
-  WatchCard? firstCard(Instrument instrument) {
-    for (final card in state.cards) {
-      if (card.instrumentID == instrument.id) return card;
-    }
-    return null;
-  }
-
-  /// Total held across every lot of [instrument], expressed in [unit] at
-  /// [karat]'s purity (e.g. the originating watch card's unit/karat). Each
-  /// lot's own karat is applied exactly once, inside
-  /// [HoldingLot.fineOunces] — [karat] only controls how that already
-  /// purity-adjusted total is re-expressed for display.
-  double? totalQuantity(Instrument instrument, PriceUnit unit, {GoldKarat? karat}) {
-    final lots = lotsFor(instrument);
-    if (lots.isEmpty) return null;
-    return HoldingTotals.totalHeld(lots: lots, refUnit: unit, refKarat: karat);
-  }
-
-  /// Average cost per [unit] at [karat]'s purity, in [currency], at the
-  /// live FX rate (same rule [HoldingValuation.aggregate] uses).
-  Money? averageCost(Instrument instrument, String currency, PriceUnit unit, {GoldKarat? karat}) {
-    final lots = lotsFor(instrument);
-    return HoldingTotals.averageCost(
-      lots: lots,
-      refUnit: unit,
-      refKarat: karat,
-      displayCurrency: currency,
-      rates: state.rates,
-    );
-  }
-
-  /// Every transaction for [instrument], newest first.
-  List<HoldingTransaction> transactionsFor(Instrument instrument) =>
-      Ledger.ordered(state.transactions.where((t) => t.instrumentID == instrument.id)).reversed.toList();
-
-  /// The sale [transaction] would leave selling more than was held, or null
-  /// when it's safe to save. Checked against the whole ledger: back-dating a
-  /// sell, shrinking a buy or moving a buy later can all break a sale that
-  /// comes after it.
-  HoldingTransaction? conflictForSave(HoldingTransaction transaction) => Ledger.conflict(
-        state.transactions,
-        [...state.transactions.where((t) => t.id != transaction.id), transaction],
-      );
-
-  /// The sale deleting [transaction] would break, or null when it's safe.
-  HoldingTransaction? conflictForDelete(HoldingTransaction transaction) => Ledger.conflict(
-        state.transactions,
-        state.transactions.where((t) => t.id != transaction.id),
-      );
-
-  /// Saves [transaction] unless it would break a sale; returns that sale
-  /// instead of saving when it would.
-  Future<HoldingTransaction?> saveTransaction(HoldingTransaction transaction) async {
-    final conflict = conflictForSave(transaction);
-    if (conflict != null) return conflict;
-    final isNewInstrument = !trackedInstruments.any((i) => i.id == transaction.instrumentID);
-    final transactions = await transactionsStore.upsert(transaction);
-    emit(state.copyWith(transactions: transactions));
-    unawaited(_markDataChanged());
-    if (isNewInstrument) {
-      final instrument = InstrumentCatalog.instrument(transaction.instrumentID);
-      if (instrument != null) unawaited(refresh(instrument));
-    }
-    return null;
-  }
-
-  /// Adds a batch of already-validated rows (a CSV import) and starts
-  /// tracking any asset that's new to the app. Returns their ids, for undo.
-  Future<List<String>> importTransactions(List<HoldingTransaction> transactions) async {
-    if (transactions.isEmpty) return const [];
-    final trackedBefore = trackedInstruments.map((i) => i.id).toSet();
-    final all = await transactionsStore.addAll(transactions);
-    emit(state.copyWith(transactions: all));
-    unawaited(_markDataChanged());
-    final added = {for (final t in transactions) t.instrumentID}.difference(trackedBefore);
-    if (added.isNotEmpty) {
-      for (final id in added) {
-        final instrument = InstrumentCatalog.instrument(id);
-        if (instrument == null) continue;
-        emit(state.copyWith(seriesByID: {...state.seriesByID, id: await repository.cachedSeries(instrument)}));
-      }
-      unawaited(refreshAll(silent: true));
-    }
-    return [for (final t in transactions) t.id];
-  }
-
-  /// Removes everything one import added.
-  Future<void> undoImport(List<String> ids) async {
-    final all = await transactionsStore.deleteAll(ids);
-    emit(state.copyWith(transactions: all));
-    unawaited(_markDataChanged());
-  }
-
-  /// Deletes [transaction] unless that would break a sale; returns that sale
-  /// instead of deleting when it would.
-  Future<HoldingTransaction?> deleteTransaction(HoldingTransaction transaction) async {
-    final conflict = conflictForDelete(transaction);
-    if (conflict != null) return conflict;
-    final transactions = await transactionsStore.delete(transaction.id);
-    emit(state.copyWith(transactions: transactions));
-    unawaited(_markDataChanged());
-    return null;
-  }
-
-  // ---------------------------------------------------------------------
-  // Zakat (v3)
-  // ---------------------------------------------------------------------
-
-  /// Today's zakat calculation over every held lot. Pure and cheap (one
-  /// valuation per held asset), so screens call it on every rebuild.
-  ZakatAssessment get zakatAssessment => ZakatAssessment.compute(
-        lots: state.lots,
-        settings: state.zakatSettings,
-        rates: state.rates,
-        baseCurrency: state.baseCurrency,
-        latestUSD: latestUSD,
-        resolve: InstrumentCatalog.instrument,
-      );
-
-  /// Applies [change] to the settings as they are now, so callers never
-  /// write back a stale copy captured at build time.
-  Future<void> updateZakatSettings(ZakatSettings Function(ZakatSettings current) change) =>
-      setZakatSettings(change(state.zakatSettings));
-
-  Future<void> setZakatSettings(ZakatSettings settings) async {
-    if (settings == state.zakatSettings) return;
-    final turnedOnReminder = settings.remind && !state.zakatSettings.remind;
-    emit(state.copyWith(zakatSettings: settings));
-    await preferences.setZakatSettings(settings);
-    unawaited(_markDataChanged());
-    if (turnedOnReminder) {
-      await requestNotificationPermission();
-      unawaited(_notifyZakatIfDue());
-    }
-  }
-
-  /// The nisab is priced off gold and silver even for someone who holds
-  /// and watches neither, so the zakat screen fetches whichever of the two
-  /// isn't already part of the regular refresh. Quiet: never touches
-  /// [AppState.phase] or the refresh error banner.
-  Future<void> ensureNisabPrices() async {
-    final tracked = trackedInstruments.map((i) => i.id).toSet();
-    for (final basis in NisabBasis.values) {
-      if (tracked.contains(basis.instrumentID) && latestUSD(basis.instrumentID) != null) continue;
-      final instrument = InstrumentCatalog.instrument(basis.instrumentID);
-      if (instrument == null) continue;
-      QuoteSeries series;
-      try {
-        series = await repository.refresh(instrument);
-      } catch (e) {
-        // Offline: the last cached price still beats an unknown threshold.
-        debugPrint('AppCubit: nisab price for ${instrument.id} failed: $e');
-        series = await repository.cachedSeries(instrument);
-      }
-      if (isClosed) return;
-      emit(state.copyWith(seriesByID: {...state.seriesByID, instrument.id: series}));
-    }
-  }
-
-  // ---------------------------------------------------------------------
-  // Price alerts
-  // ---------------------------------------------------------------------
-
-  List<PriceAlert> alertsFor(String cardID) => state.alerts.where((a) => a.cardID == cardID).toList();
-
-  Future<void> saveAlert(PriceAlert alert) async {
-    final alerts = await alertsStore.upsert(alert);
-    emit(state.copyWith(alerts: alerts));
-    unawaited(_markDataChanged());
-  }
-
-  Future<void> deleteAlert(PriceAlert alert) async {
-    final alerts = await alertsStore.delete(alert.id);
-    emit(state.copyWith(alerts: alerts));
-    unawaited(_markDataChanged());
-  }
-
-  Future<void> setAlertEnabled(PriceAlert alert, bool enabled) async {
-    if (alert.enabled == enabled) return;
-    await saveAlert(alert.copyWith(enabled: enabled));
-  }
-
-  /// The alert's per-device runtime state (last fired time, armed) — read
-  /// straight from [alertRuntimeStore] since it's deliberately not part of
-  /// [AppState]/[PriceAlert] (never synced, see `alert_runtime_state.dart`).
-  Future<AlertRuntimeState> runtimeStateFor(String alertId) async {
-    final all = await alertRuntimeStore.loadAll();
-    return alertRuntimeStore.stateFor(all, alertId);
-  }
-
-  Future<void> setDeliverAlertsOnThisDevice(bool value) async {
-    if (value == state.deliverAlertsOnThisDevice) return;
-    await preferences.setDeliverAlertsOnThisDevice(value);
-    emit(state.copyWith(deliverAlertsOnThisDevice: value));
-  }
-
-  /// Requests OS notification permission (Android 13+, iOS/macOS) and
-  /// refreshes [AppState.notificationsEnabled] from the result, so the
-  /// Alerts/Settings screens' "Notifications are off" banner updates
-  /// immediately rather than waiting for the next unrelated rebuild.
-  Future<bool> requestNotificationPermission() async {
-    final granted = await notificationService.requestPermission();
-    await refreshNotificationStatus();
-    return granted;
-  }
-
-  Future<void> refreshNotificationStatus() async {
-    final enabled = await notificationService.isEnabled();
-    if (enabled != state.notificationsEnabled) {
-      emit(state.copyWith(notificationsEnabled: enabled));
-    }
-  }
-
-  // ---------------------------------------------------------------------
-  // Backup & restore (spec Phase 6)
-  // ---------------------------------------------------------------------
-
-  /// Applies an already-decoded, already-decrypted [payload] to every store
-  /// in [mode] via [BackupService.import], then reloads every store and
-  /// preference back into [AppState] — so the app reflects the restored
-  /// data immediately rather than requiring a restart. Called only after
-  /// `ImportPreviewScreen` has a fully validated [BackupPayload] in hand
-  /// (see `BackupCodec.decodePayload`), so nothing here can partially apply
-  /// a corrupt/mistyped file.
-  Future<void> restoreFromBackup(BackupPayload payload, {required BackupImportMode mode}) async {
-    await backupService.import(payload, mode: mode);
-    await _reloadAllStores();
-    await _refreshBackupReminder();
-  }
-
-  /// Re-reads every synced collection and syncable preference from disk and
-  /// re-emits them into [AppState] — used after a restore (and safe to call
-  /// any time local storage might have changed out from under the in-memory
-  /// state).
-  Future<void> _reloadAllStores() async {
-    final customs = await customInstrumentStore.load();
-    InstrumentCatalog.reloadCustom(customs.map((c) => c.instrument).toList());
-
-    final cards = await watchlistStore.load();
-    final transactions = await transactionsStore.load();
-    final alerts = await alertsStore.load();
-    final baseCurrency = await preferences.baseCurrency;
-    final appLanguage = await preferences.appLanguage;
-    final appearance = await preferences.appearance;
-    final preferredChartRange = preferences.preferredChartRange;
-    final widgetRefreshInterval = await preferences.widgetRefreshInterval;
-    final zakatSettings = await preferences.zakatSettings;
-
-    final seriesByID = <String, QuoteSeries>{...state.seriesByID};
-    for (final instrument in _trackedInstrumentsFor(cards, transactions)) {
-      if (seriesByID.containsKey(instrument.id)) continue;
-      seriesByID[instrument.id] = await repository.cachedSeries(instrument);
-    }
-
-    emit(state.copyWith(
-      cards: cards,
-      transactions: transactions,
-      alerts: alerts,
-      baseCurrency: baseCurrency,
-      appLanguage: appLanguage,
-      appearance: appearance,
-      preferredChartRange: preferredChartRange,
-      widgetRefreshInterval: widgetRefreshInterval,
-      zakatSettings: zakatSettings,
-      seriesByID: seriesByID,
-    ));
-
-    unawaited(refreshAll());
-    unawaited(BackgroundRefresh.register(interval: widgetRefreshInterval.timeInterval));
-  }
-
-  // ---------------------------------------------------------------------
-  // Portfolio history (watchlist hero chart)
-  // ---------------------------------------------------------------------
-
-  /// Memoization cache for [portfolioHistory], keyed on the exact set of
-  /// inputs that can change its output. [PortfolioHistory.build] walks every
-  /// tracked lot's full quote/FX series, which is too expensive to redo on
-  /// every `build()` (e.g. every scrub-driven rebuild of the hero chart) —
-  /// so this cubit computes it once per distinct (range, ledger, seriesByID,
-  /// fxHistory, baseCurrency) tuple and reuses the result until one of those
-  /// actually changes. [AppState] fields are immutable/structurally-equal
-  /// (`Equatable`/unmodifiable lists), so identity/equality checks here are
-  /// cheap and correct.
-  ChartRange? _historyCacheRange;
-  Ledger? _historyCacheLedger;
-  Map<String, QuoteSeries>? _historyCacheSeries;
-  FXHistory? _historyCacheFxHistory;
-  String? _historyCacheBaseCurrency;
-  DateTime? _historyCacheDay;
-  List<PortfolioHistoryPoint>? _historyCacheResult;
-
-  /// Day-by-day portfolio value/cost for [range], computed fresh from the ledger
-  /// and quote/FX history (never snapshotted — see `portfolio_history.dart`).
-  /// Cheap to call repeatedly: results are memoized until holdings, prices, FX
-  /// history or the base currency actually change, or a new calendar day
-  /// starts (so "All"/"1Y" etc. extend to include today).
-  List<PortfolioHistoryPoint> portfolioHistory(ChartRange range) {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    if (_historyCacheRange == range &&
-        identical(_historyCacheLedger, state.ledger) &&
-        identical(_historyCacheSeries, state.seriesByID) &&
-        identical(_historyCacheFxHistory, state.fxHistory) &&
-        _historyCacheBaseCurrency == state.baseCurrency &&
-        _historyCacheDay == today) {
-      return _historyCacheResult!;
-    }
-
-    final result = PortfolioHistory.build(
-      ledger: state.ledger,
-      seriesByID: state.seriesByID,
-      rates: state.rates,
-      fxHistory: state.fxHistory,
-      baseCurrency: state.baseCurrency,
-      range: range,
-      now: now,
-    );
-
-    _historyCacheRange = range;
-    _historyCacheLedger = state.ledger;
-    _historyCacheSeries = state.seriesByID;
-    _historyCacheFxHistory = state.fxHistory;
-    _historyCacheBaseCurrency = state.baseCurrency;
-    _historyCacheDay = today;
-    _historyCacheResult = result;
-    return result;
-  }
-
-  /// Change in GAIN (value − cost), not value, over [range] — so adding a
-  /// new lot mid-range is never shown as if it were profit. See
-  /// [PortfolioRangeChange.from].
-  PortfolioRangeChange? portfolioChange(ChartRange range) =>
-      PortfolioRangeChange.from(portfolioHistory(range), range);
-
-  (Ledger, Map<String, QuoteSeries>, FXHistory, FXRates, String, DateTime)? _summaryKey;
-  PeriodSummary? _summary;
-
-  /// The past month as facts for the summary sentence (v4 phase 3), or null
-  /// when nothing was held. One history walk per held instrument, so it is
-  /// memoized like [portfolioHistory].
-  PeriodSummary? periodSummary() {
-    final now = DateTime.now();
-    final key = (state.ledger, state.seriesByID, state.fxHistory, state.rates, state.baseCurrency, DateTime(now.year, now.month, now.day));
-    final cached = _summaryKey;
-    if (cached != null &&
-        identical(cached.$1, key.$1) &&
-        identical(cached.$2, key.$2) &&
-        identical(cached.$3, key.$3) &&
-        identical(cached.$4, key.$4) &&
-        cached.$5 == key.$5 &&
-        cached.$6 == key.$6) {
-      return _summary;
-    }
-    _summaryKey = key;
-    return _summary = PeriodSummary.build(
-      ledger: state.ledger,
-      transactions: state.transactions,
-      seriesByID: state.seriesByID,
-      rates: state.rates,
-      fxHistory: state.fxHistory,
-      baseCurrency: state.baseCurrency,
-      now: now,
-    );
-  }
-
-  // ---------------------------------------------------------------------
-  // Home-screen widgets (Android Glance + iOS/macOS WidgetKit)
-  // ---------------------------------------------------------------------
-
-  /// Every state change that could move a widget-visible number (a price
-  /// tick, an FX rate refresh, a watchlist or holdings edit) republishes the
-  /// widget data contract — see [HomeWidgetService] for the payload shape
-  /// and the "first card stands in for the configured instrument"
-  /// limitation. This is the single choke point for that fan-out so no
-  /// individual mutator method needs to remember to call it.
-  @override
-  void onChange(Change<AppState> change) {
-    super.onChange(change);
-    final next = change.nextState;
-    if (!next.initialized) return;
-    final prev = change.currentState;
-    final widgetRelevant = prev.seriesByID != next.seriesByID ||
-        prev.rates != next.rates ||
-        prev.fxHistory != next.fxHistory ||
-        prev.cards != next.cards ||
-        prev.lots != next.lots ||
-        prev.baseCurrency != next.baseCurrency ||
-        prev.hideBalances != next.hideBalances;
-    if (widgetRelevant) {
-      unawaited(HomeWidgetService.publish(next));
-    }
+  Future<void> dismissGetStarted() async {
+    if (state.getStartedDismissed) return;
+    await _settings.preferences.setGetStartedDismissed(true);
+    emit(state.copyWith(getStartedDismissed: true));
   }
 }

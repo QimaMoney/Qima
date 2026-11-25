@@ -2,24 +2,30 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:uuid/uuid.dart';
 
-import '../blocs/app_cubit.dart';
-import '../blocs/app_state.dart';
+import '../blocs/holdings_cubit.dart';
+import '../blocs/holdings_state.dart';
+import '../blocs/market_cubit.dart';
+import '../blocs/money_cubit.dart';
+import '../blocs/settings_cubit.dart';
 import '../l10n/app_localizations.dart';
 import '../models/asset.dart';
 import '../models/holding_totals.dart';
 import '../models/holding_transaction.dart';
 import '../models/ledger.dart';
 import '../models/metal_breakdown.dart';
+import '../models/book_account.dart';
 import '../models/money.dart';
 import '../theme/design_system.dart';
 import '../theme/help_topics.dart';
 import '../theme/instrument_theme.dart';
 import '../theme/masking.dart';
+import '../theme/money_labels.dart';
 import '../theme/qima_colors.dart';
 import '../theme/strings.dart';
 import '../widgets/currency_field.dart';
 import '../widgets/help_button.dart';
 import '../widgets/section_header.dart';
+import '../widgets/trade_failure.dart';
 import 'holdings_screen.dart';
 
 /// The four choices at the top of the editor; [TransactionKind] splits
@@ -76,6 +82,14 @@ class _TransactionEditorScreenState extends State<TransactionEditorScreen> {
   late String _currency;
   late DateTime _date;
 
+  /// The Money side: the account a trade is paid from or into, and its cash
+  /// leg, are kept in the book it is saved in.
+  late final MoneyCubit _money = context.read<MoneyCubit>();
+
+  /// The account a buy, sell or fee was paid from or into; null when no
+  /// cash moved (something already held).
+  String? _cashAccountId;
+
   @override
   void initState() {
     super.initState();
@@ -93,6 +107,8 @@ class _TransactionEditorScreenState extends State<TransactionEditorScreen> {
     _note = TextEditingController(text: e?.note ?? '');
     _currency = e?.currency ?? widget.defaultCurrency;
     _date = e?.date ?? _today();
+    final existing = widget.existing;
+    _cashAccountId = existing == null ? null : _money.holdingCashAccount(existing.id)?.id;
     if (e != null) {
       _unit = e.unit;
       _karat = e.karat;
@@ -100,7 +116,7 @@ class _TransactionEditorScreenState extends State<TransactionEditorScreen> {
       // A new row starts in the unit and karat already held when they're
       // all the same — selling some of a 21K holding should start at 21K,
       // whatever card the user came from.
-      final held = context.read<AppCubit>().lotsFor(widget.instrument);
+      final held = context.read<HoldingsCubit>().lotsFor(widget.instrument);
       final uniform = held.isNotEmpty && held.every((l) => l.unit == held.first.unit && l.karat == held.first.karat);
       _unit = uniform ? held.first.unit : (widget.defaultUnit ?? widget.instrument.quotation.defaultUnit);
       final karat = uniform ? held.first.karat : widget.defaultKarat;
@@ -167,7 +183,7 @@ class _TransactionEditorScreenState extends State<TransactionEditorScreen> {
       );
 
   /// Why Save is disabled, if it is — shown under the form.
-  String? _problem(AppCubit cubit) {
+  String? _problem(HoldingsCubit cubit) {
     final l10n = AppLocalizations.of(context)!;
     final c = _candidate;
     if (_kind == _Kind.fee) return c.fee > 0 ? null : l10n.transactionNeedsFee;
@@ -183,7 +199,7 @@ class _TransactionEditorScreenState extends State<TransactionEditorScreen> {
   }
 
   /// What was held just before [c], expressed in the editor's unit/karat.
-  double _heldBefore(AppCubit cubit, HoldingTransaction c) {
+  double _heldBefore(HoldingsCubit cubit, HoldingTransaction c) {
     final others = cubit.state.transactions.where((t) => t.id != c.id && t.instrumentID == c.instrumentID);
     final ordered = Ledger.ordered([...others, c]);
     final before = ordered.takeWhile((t) => t.id != c.id);
@@ -191,14 +207,71 @@ class _TransactionEditorScreenState extends State<TransactionEditorScreen> {
     return fine / _unit.multiplier / c.purity;
   }
 
-  Future<void> _save(AppCubit cubit) async {
-    final conflict = await cubit.saveTransaction(_candidate);
+  bool get _movesCash => _kind == _Kind.buy || _kind == _Kind.sell || _kind == _Kind.fee;
+
+  /// Accounts the trade can be paid from or into: cash, bank and card
+  /// accounts whose currency converts to the trade's.
+  List<BookAccount> _cashAccounts() {
+    final money = _money;
+    final b = money.builder;
+    bool converts(String? c) {
+      if (c == null) return false;
+      try {
+        b.rateOf(c);
+        b.rateOf(_currency);
+        return true;
+      } on ArgumentError {
+        return false;
+      }
+    }
+    return [for (final a in money.holdingCashAccounts) if (a.currency == _currency || converts(a.currency)) a];
+  }
+
+  Future<void> _save(HoldingsCubit cubit) async {
+    final candidate = _candidate;
+    final account = _movesCash && _cashAccounts().any((a) => a.id == _cashAccountId) ? _cashAccountId : null;
+    final label = displayLabel(context, widget.instrument.nameKey);
+    final messenger = ScaffoldMessenger.of(context);
+    final l10n = AppLocalizations.of(context)!;
+    // The trade and the cash it moved are one record: saved together, or
+    // refused together, and the screen stays open.
+    final HoldingTransaction? conflict;
+    try {
+      final cash = _money.cashLegFor(candidate, account);
+      conflict = await cubit.saveTransaction(candidate, cash: cash, label: cash == null ? '' : label);
+    } catch (error) {
+      debugPrint('Saving the trade failed: $error');
+      messenger.showSnackBar(SnackBar(content: Text(tradeFailureText(l10n, error))));
+      return;
+    }
     if (!mounted) return;
     if (conflict != null) {
       await showLedgerConflict(context, conflict, deleting: false);
       return;
     }
     Navigator.of(context).pop();
+  }
+
+  Widget _cashPicker(AppLocalizations l10n, QimaColors colors) {
+    final accounts = _cashAccounts();
+    final value = accounts.any((a) => a.id == _cashAccountId) ? _cashAccountId : null;
+    return DropdownButtonFormField<String?>(
+      key: const ValueKey('holdingCashAccount'),
+      initialValue: value,
+      isExpanded: true,
+      decoration: InputDecoration(
+        labelText: _kind == _Kind.sell ? l10n.holdingPaidInto : l10n.holdingPaidFrom,
+        helperText: value == null ? null : l10n.holdingCashHelp,
+        helperMaxLines: 2,
+        border: const OutlineInputBorder(),
+      ),
+      items: [
+        DropdownMenuItem<String?>(value: null, child: Text(l10n.holdingNoCash, overflow: TextOverflow.ellipsis)),
+        for (final a in accounts)
+          DropdownMenuItem<String?>(value: a.id, child: Text('${l10n.accountName(a)} · ${a.currency}', overflow: TextOverflow.ellipsis)),
+      ],
+      onChanged: (v) => setState(() => _cashAccountId = v),
+    );
   }
 
   Future<void> _pickDate() async {
@@ -221,7 +294,7 @@ class _TransactionEditorScreenState extends State<TransactionEditorScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final cubit = context.read<AppCubit>();
+    final cubit = context.read<HoldingsCubit>();
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
     final accent = InstrumentTheme.accentColor(widget.instrument, colors);
@@ -244,7 +317,7 @@ class _TransactionEditorScreenState extends State<TransactionEditorScreen> {
                   if (deleted && context.mounted) Navigator.of(context).pop();
                 },
               ),
-            BlocBuilder<AppCubit, AppState>(
+            BlocBuilder<HoldingsCubit, HoldingsState>(
               builder: (context, _) => TextButton(
                 onPressed: _problem(cubit) == null ? () => _save(cubit) : null,
                 child: Text(l10n.holdingsSave),
@@ -252,8 +325,14 @@ class _TransactionEditorScreenState extends State<TransactionEditorScreen> {
             ),
           ],
         ),
-        body: BlocBuilder<AppCubit, AppState>(
-          builder: (context, state) {
+        // Checks the sale against the ledger, previews it at the current rates
+        // and masks it by the hide setting, and the fields offer the base
+        // currency and the rates' currencies.
+        body: Builder(
+          builder: (context) {
+            final holdingsState = context.watch<HoldingsCubit>().state;
+            final rates = context.watch<MarketCubit>().state.rates;
+            final settings = context.watch<SettingsCubit>().state;
             final problem = _problem(cubit);
             return GestureDetector(
               // Tapping outside a field closes the number pad, which has no
@@ -295,7 +374,7 @@ class _TransactionEditorScreenState extends State<TransactionEditorScreen> {
                   ],
                   if (_kind == _Kind.sell && problem == null) ...[
                     const SizedBox(height: DS.spaceMD),
-                    _SellPreview(candidate: _candidate, state: state, unit: _unit),
+                    _SellPreview(candidate: _candidate, transactions: holdingsState.transactions, rates: rates, hidden: settings.hideBalances, unit: _unit),
                   ],
                 ],
               ),
@@ -307,7 +386,6 @@ class _TransactionEditorScreenState extends State<TransactionEditorScreen> {
   }
 
   Widget _fields(BuildContext context, Color accent) {
-    final cubit = context.read<AppCubit>();
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
     final unitLabel = displayLabel(context, _unit.labelKey);
@@ -391,8 +469,8 @@ class _TransactionEditorScreenState extends State<TransactionEditorScreen> {
         CurrencyField(
           label: l10n.currencyFieldTransaction,
           selected: _currency,
-          baseCurrency: cubit.state.baseCurrency,
-          currencies: cubit.state.rates.availableCurrencies,
+          baseCurrency: context.read<SettingsCubit>().state.baseCurrency,
+          currencies: context.read<MarketCubit>().state.rates.availableCurrencies,
           onChanged: (code) => setState(() => _currency = code),
           accent: accent,
         ),
@@ -403,6 +481,10 @@ class _TransactionEditorScreenState extends State<TransactionEditorScreen> {
           trailing: Text(transactionDateLabel(context, _date), style: TextStyle(color: colors.textSecondary)),
           onTap: _pickDate,
         ),
+        if (_movesCash && _cashAccounts().isNotEmpty) ...[
+          _cashPicker(l10n, colors),
+          const SizedBox(height: DS.spaceMD),
+        ],
         TextField(
           controller: _note,
           maxLength: 120,
@@ -465,24 +547,25 @@ class _TransactionEditorScreenState extends State<TransactionEditorScreen> {
 /// Everything in the sale's own currency.
 class _SellPreview extends StatelessWidget {
   final HoldingTransaction candidate;
-  final AppState state;
+  final List<HoldingTransaction> transactions;
+  final FXRates rates;
+  final bool hidden;
   final PriceUnit unit;
 
-  const _SellPreview({required this.candidate, required this.state, required this.unit});
+  const _SellPreview({required this.candidate, required this.transactions, required this.rates, required this.hidden, required this.unit});
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
-    final hidden = state.hideBalances;
     final currency = candidate.currency;
-    final next = Ledger.derive([...state.transactions.where((t) => t.id != candidate.id), candidate]);
+    final next = Ledger.derive([...transactions.where((t) => t.id != candidate.id), candidate]);
     final position = next[candidate.instrumentID];
     final effect = position?.disposals[candidate.id];
     if (position == null || effect == null) return const SizedBox.shrink();
 
-    final released = effect.basisReleased.inCurrency(currency, state.rates);
-    final gain = effect.realised.inCurrency(currency, state.rates);
+    final released = effect.basisReleased.inCurrency(currency, rates);
+    final gain = effect.realised.inCurrency(currency, rates);
     // What stays held, at the sale's own unit and karat.
     final remainingLots = position.openLots;
     final remainingQty = HoldingTotals.totalHeld(lots: remainingLots, refUnit: unit, refKarat: candidate.karat);
@@ -491,7 +574,7 @@ class _SellPreview extends StatelessWidget {
       refUnit: unit,
       refKarat: candidate.karat,
       displayCurrency: currency,
-      rates: state.rates,
+      rates: rates,
     );
     final unitText = displayLabel(context, unit.abbreviationKey ?? unit.labelKey);
 

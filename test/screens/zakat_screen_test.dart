@@ -1,7 +1,13 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:qima/blocs/app_cubit.dart';
+import 'package:qima/services/local_file_store.dart';
+import 'package:qima/theme/money_labels.dart';
+import 'package:qima/models/minor_units.dart';
+import 'package:qima/models/book_account.dart';
+import 'package:qima/blocs/money_cubit.dart';
+import 'package:qima/blocs/app_blocs.dart';
 import 'package:qima/l10n/app_localizations.dart';
 import 'package:qima/l10n/app_localizations_ar.dart';
 import 'package:qima/l10n/app_localizations_en.dart';
@@ -24,6 +30,10 @@ import 'package:qima/theme/app_theme.dart';
 import 'package:qima/theme/masking.dart';
 import 'package:qima/theme/strings.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import '../helpers/money_provider.dart';
+
+import '../helpers/app_blocs.dart';
 
 /// Serves fixed prices and never touches the network or disk.
 class _FakeRepository extends PriceRepository {
@@ -84,7 +94,7 @@ void main() {
         date: DateTime(2025),
       );
 
-  Future<AppCubit> cubitWith(
+  Future<AppBlocs> cubitWith(
     List<HoldingLot> lots, {
     Map<String, double>? prices,
     ZakatSettings settings = const ZakatSettings(),
@@ -92,9 +102,11 @@ void main() {
   }) async {
     final effective = prices ?? {'metal.XAU': goldOz, 'metal.XAG': silverOz, 'crypto.BTC': 50000, 'stock.AAPL': 200};
     final repo = _FakeRepository(effective);
-    final cubit = AppCubit(repository: repo, notificationService: _FakeNotificationService());
-    cubit.preferences = await Preferences.create();
-    cubit.emit(cubit.state.copyWith(
+    final blocs = AppBlocs(repository: repo, notificationService: _FakeNotificationService());
+    final preferences = await Preferences.create();
+    blocs.settings.preferences = preferences;
+    await blocs.zakat.load(preferences);
+    blocs.seed(
       initialized: true,
       lots: lots,
       seriesByID: {for (final id in effective.keys) id: await repo.cachedSeries(InstrumentCatalog.instrument(id)!)},
@@ -103,12 +115,11 @@ void main() {
       baseCurrency: 'USD',
       zakatSettings: settings,
       hideBalances: hidden,
-    ));
-    return cubit;
+    );
+    return blocs;
   }
 
-  Widget harness(AppCubit cubit, Widget home, {Locale locale = const Locale('en')}) => BlocProvider<AppCubit>.value(
-        value: cubit,
+  Widget harness(AppBlocs blocs, Widget home, {Locale locale = const Locale('en')}) => MultiBlocProvider(providers: [...blocs.providers, testMoneyProvider(blocs)],
         child: MaterialApp(
           locale: locale,
           localizationsDelegates: AppLocalizations.localizationsDelegates,
@@ -123,8 +134,8 @@ void main() {
   group('ZakatScreen', () {
     testWidgets('no holdings shows the empty state', (tester) async {
       phone(tester);
-      final cubit = await cubitWith(const []);
-      await tester.pumpWidget(harness(cubit, const ZakatScreen()));
+      final blocs = await cubitWith(const []);
+      await tester.pumpWidget(harness(blocs, const ZakatScreen()));
       await tester.pumpAndSettle();
       expect(find.text(en.zakatEmptyTitle), findsOneWidget);
       expect(find.text(en.zakatDueLabel('2.5%').toUpperCase()), findsNothing);
@@ -132,8 +143,8 @@ void main() {
 
     testWidgets('above nisab shows 2.5% of the base and asks for a hawl date', (tester) async {
       phone(tester);
-      final cubit = await cubitWith([lot('crypto.BTC', 1)]);
-      await tester.pumpWidget(harness(cubit, const ZakatScreen()));
+      final blocs = await cubitWith([lot('crypto.BTC', 1)]);
+      await tester.pumpWidget(harness(blocs, const ZakatScreen()));
       await tester.pumpAndSettle();
       expect(find.text(en.zakatStatusAbove), findsOneWidget);
       expect(find.text(usd(1250)), findsOneWidget);
@@ -144,8 +155,8 @@ void main() {
 
     testWidgets('below nisab owes nothing and says why', (tester) async {
       phone(tester);
-      final cubit = await cubitWith([lot('metal.XAU', 10, unit: PriceUnit.gram)]);
-      await tester.pumpWidget(harness(cubit, const ZakatScreen()));
+      final blocs = await cubitWith([lot('metal.XAU', 10, unit: PriceUnit.gram)]);
+      await tester.pumpWidget(harness(blocs, const ZakatScreen()));
       await tester.pumpAndSettle();
       expect(find.text(en.zakatStatusBelow), findsOneWidget);
       expect(find.text(usd(0)), findsOneWidget);
@@ -155,11 +166,11 @@ void main() {
     testWidgets('a hawl in progress names its completion date', (tester) async {
       final now = DateTime.now();
       final start = DateTime(now.year, now.month, now.day).subtract(const Duration(days: 30));
-      final cubit = await cubitWith([lot('crypto.BTC', 1)],
+      final blocs = await cubitWith([lot('crypto.BTC', 1)],
           settings: ZakatSettings(hawlStart: start, calendar: HawlCalendar.gregorian));
-      await tester.pumpWidget(harness(cubit, const ZakatScreen()));
+      await tester.pumpWidget(harness(blocs, const ZakatScreen()));
       await tester.pumpAndSettle();
-      final schedule = HawlSchedule.of(cubit.state.zakatSettings, now)!;
+      final schedule = HawlSchedule.of(blocs.zakat.state.settings, now)!;
       final context = tester.element(find.byType(ZakatScreen));
       final date = dateWithYear(context, schedule.next);
       expect(find.text(en.zakatExplainAboveUpcoming(usd(50000), date, schedule.daysUntilNext)), findsOneWidget);
@@ -167,8 +178,8 @@ void main() {
 
     testWidgets('hidden balances mask the due amount and base but not the market threshold', (tester) async {
       phone(tester);
-      final cubit = await cubitWith([lot('crypto.BTC', 1)], hidden: true);
-      await tester.pumpWidget(harness(cubit, const ZakatScreen()));
+      final blocs = await cubitWith([lot('crypto.BTC', 1)], hidden: true);
+      await tester.pumpWidget(harness(blocs, const ZakatScreen()));
       await tester.pumpAndSettle();
       expect(find.text(usd(1250)), findsNothing);
       expect(find.text(usd(50000)), findsNothing);
@@ -178,8 +189,8 @@ void main() {
 
     testWidgets('switching an asset off removes it from the base', (tester) async {
       phone(tester);
-      final cubit = await cubitWith([lot('crypto.BTC', 1), lot('metal.XAU', 100, unit: PriceUnit.gram)]);
-      await tester.pumpWidget(harness(cubit, const ZakatScreen()));
+      final blocs = await cubitWith([lot('crypto.BTC', 1), lot('metal.XAU', 100, unit: PriceUnit.gram)]);
+      await tester.pumpWidget(harness(blocs, const ZakatScreen()));
       await tester.pumpAndSettle();
       expect(find.text(usd(60000 * 0.025)), findsOneWidget);
 
@@ -189,17 +200,42 @@ void main() {
       await tester.tap(bitcoinRow);
       await tester.pumpAndSettle();
 
-      expect(cubit.state.zakatSettings.holdingOverrides, {'crypto.BTC': false});
+      expect(blocs.zakat.state.settings.holdingOverrides, {'crypto.BTC': false});
       await tester.drag(find.byType(ListView), const Offset(0, 2000));
       await tester.pumpAndSettle();
       expect(find.text(usd(250)), findsOneWidget);
+      await tester.dragUntilVisible(find.textContaining(en.zakatExcludedHolding), find.byType(ListView), const Offset(0, -150));
       expect(find.textContaining(en.zakatExcludedHolding), findsOneWidget);
+    });
+
+    testWidgets('the amount to pay counts cash, money owed to you and debts, not the holdings alone', (tester) async {
+      phone(tester);
+      final dir = (await tester.runAsync(() => Directory.systemTemp.createTemp('qima_zakat')))!;
+      LocalFileStore.overrideDirectoryForTesting(dir);
+      addTearDown(() => dir.delete(recursive: true));
+      final blocs = await cubitWith([lot('crypto.BTC', 1)]);
+      await tester.pumpWidget(harness(blocs, const ZakatScreen()));
+      await tester.pumpAndSettle();
+      final money = tester.element(find.byType(ZakatScreen)).read<MoneyCubit>();
+      final bank = BookAccount(id: 'bank', name: 'Bank', side: AccountSide.own, type: AccountType.debit, currency: 'USD');
+      final card = BookAccount(id: 'card', name: 'Card', side: AccountSide.owe, type: AccountType.credit, currency: 'USD');
+      await tester.runAsync(() async {
+        // Let the book finish loading first, so it doesn't replace these.
+        await money.load();
+        await money.addAccount(bank, opening: MinorUnits.fromMajor(12000, 'USD'), openedOn: DateTime(2026));
+        await money.addAccount(card, opening: MinorUnits.fromMajor(2000, 'USD'), openedOn: DateTime(2026));
+      });
+      await tester.pumpAndSettle();
+      expect(find.text(usd(60000 * 0.025)), findsOneWidget);
+      // 50,000 in bitcoin + 12,000 cash − 2,000 on the card = 60,000.
+      await tester.dragUntilVisible(find.byKey(const ValueKey('zakatBase')), find.byType(ListView), const Offset(0, -150));
+      expect(find.descendant(of: find.byKey(const ValueKey('zakatBase')), matching: find.text(moneyText(60000, 'USD', hidden: false))), findsOneWidget);
     });
 
     testWidgets('equities are listed as excluded by class by default', (tester) async {
       phone(tester);
-      final cubit = await cubitWith([lot('crypto.BTC', 1), lot('stock.AAPL', 10)]);
-      await tester.pumpWidget(harness(cubit, const ZakatScreen()));
+      final blocs = await cubitWith([lot('crypto.BTC', 1), lot('stock.AAPL', 10)]);
+      await tester.pumpWidget(harness(blocs, const ZakatScreen()));
       await tester.pumpAndSettle();
       await tester.dragUntilVisible(find.textContaining(en.zakatExcludedClass(en.assetGroupEquities)), find.byType(ListView), const Offset(0, -150));
       await tester.pumpAndSettle();
@@ -208,8 +244,8 @@ void main() {
 
     testWidgets('without a gold price the status is unknown and offers a retry', (tester) async {
       phone(tester);
-      final cubit = await cubitWith([lot('crypto.BTC', 1)], prices: {'metal.XAG': silverOz, 'crypto.BTC': 50000});
-      await tester.pumpWidget(harness(cubit, const ZakatScreen()));
+      final blocs = await cubitWith([lot('crypto.BTC', 1)], prices: {'metal.XAG': silverOz, 'crypto.BTC': 50000});
+      await tester.pumpWidget(harness(blocs, const ZakatScreen()));
       await tester.pumpAndSettle();
       expect(find.text(en.zakatStatusUnknown), findsOneWidget);
       expect(find.text(en.zakatRetry), findsOneWidget);
@@ -218,8 +254,8 @@ void main() {
 
     testWidgets('an unpriced asset is flagged, not silently dropped', (tester) async {
       phone(tester);
-      final cubit = await cubitWith([lot('crypto.BTC', 1), lot('crypto.ETH', 2)]);
-      await tester.pumpWidget(harness(cubit, const ZakatScreen()));
+      final blocs = await cubitWith([lot('crypto.BTC', 1), lot('crypto.ETH', 2)]);
+      await tester.pumpWidget(harness(blocs, const ZakatScreen()));
       await tester.pumpAndSettle();
       expect(find.text(en.zakatUnpricedNote), findsOneWidget);
       await tester.dragUntilVisible(find.textContaining('· ${en.zakatExcludedNoPrice}'), find.byType(ListView), const Offset(0, -150));
@@ -230,15 +266,17 @@ void main() {
     testWidgets('fetches nisab metals the user does not track', (tester) async {
       phone(tester);
       final repo = _FakeRepository({'metal.XAU': goldOz, 'metal.XAG': silverOz, 'crypto.BTC': 50000});
-      final cubit = AppCubit(repository: repo, notificationService: _FakeNotificationService());
-      cubit.preferences = await Preferences.create();
-      cubit.emit(cubit.state.copyWith(
+      final blocs = AppBlocs(repository: repo, notificationService: _FakeNotificationService());
+      final preferences = await Preferences.create();
+    blocs.settings.preferences = preferences;
+    await blocs.zakat.load(preferences);
+      blocs.seed(
         initialized: true,
         lots: [lot('crypto.BTC', 1)],
         seriesByID: {'crypto.BTC': await repo.cachedSeries(InstrumentCatalog.instrument('crypto.BTC')!)},
         rates: FXRates(base: 'USD', rates: const {'USD': 1}, updatedAt: DateTime(2026)),
-      ));
-      await tester.pumpWidget(harness(cubit, const ZakatScreen()));
+      );
+      await tester.pumpWidget(harness(blocs, const ZakatScreen()));
       await tester.pumpAndSettle();
       expect(repo.refreshCalls, 2);
       expect(find.text(en.zakatStatusAbove), findsOneWidget);
@@ -247,9 +285,9 @@ void main() {
     testWidgets('renders in Arabic without overflow', (tester) async {
       phone(tester);
       final ar = AppLocalizationsAr();
-      final cubit = await cubitWith([lot('crypto.BTC', 1), lot('stock.AAPL', 10)],
+      final blocs = await cubitWith([lot('crypto.BTC', 1), lot('stock.AAPL', 10)],
           settings: ZakatSettings(hawlStart: DateTime(2025, 3, 12)));
-      await tester.pumpWidget(harness(cubit, const ZakatScreen(), locale: const Locale('ar')));
+      await tester.pumpWidget(harness(blocs, const ZakatScreen(), locale: const Locale('ar')));
       await tester.pumpAndSettle();
       expect(find.text(ar.zakatStatusAbove), findsOneWidget);
       expect(find.text(ar.zakatTitle), findsOneWidget);
@@ -260,8 +298,8 @@ void main() {
 
     testWidgets('formats the rate for the locale', (tester) async {
       phone(tester);
-      final cubit = await cubitWith([lot('crypto.BTC', 1)]);
-      await tester.pumpWidget(harness(cubit, const ZakatScreen(), locale: const Locale('fr')));
+      final blocs = await cubitWith([lot('crypto.BTC', 1)]);
+      await tester.pumpWidget(harness(blocs, const ZakatScreen(), locale: const Locale('fr')));
       await tester.pumpAndSettle();
       expect(find.textContaining('2,5%'), findsOneWidget);
     });
@@ -270,8 +308,8 @@ void main() {
   group('ZakatSettingsScreen', () {
     testWidgets('marks gold as the higher threshold and silver as the lower', (tester) async {
       phone(tester);
-      final cubit = await cubitWith([lot('crypto.BTC', 1)]);
-      await tester.pumpWidget(harness(cubit, const ZakatSettingsScreen()));
+      final blocs = await cubitWith([lot('crypto.BTC', 1)]);
+      await tester.pumpWidget(harness(blocs, const ZakatSettingsScreen()));
       await tester.pumpAndSettle();
       expect(find.text(en.zakatBasisHigher(usd(8500))), findsOneWidget);
       expect(find.text(en.zakatBasisLower(usd(595))), findsOneWidget);
@@ -279,30 +317,30 @@ void main() {
 
     testWidgets('choosing silver saves and persists', (tester) async {
       phone(tester);
-      final cubit = await cubitWith([lot('crypto.BTC', 1)]);
-      await tester.pumpWidget(harness(cubit, const ZakatSettingsScreen()));
+      final blocs = await cubitWith([lot('crypto.BTC', 1)]);
+      await tester.pumpWidget(harness(blocs, const ZakatSettingsScreen()));
       await tester.pumpAndSettle();
       await tester.tap(find.byType(RadioListTile<NisabBasis>).last);
       await tester.pumpAndSettle();
-      expect(cubit.state.zakatSettings.basis, NisabBasis.silver);
-      expect((await cubit.preferences.zakatSettings).basis, NisabBasis.silver);
+      expect(blocs.zakat.state.settings.basis, NisabBasis.silver);
+      expect((await blocs.settings.preferences.zakatSettings).basis, NisabBasis.silver);
     });
 
     testWidgets('toggling equities on includes them', (tester) async {
       phone(tester);
-      final cubit = await cubitWith([lot('stock.AAPL', 10)]);
-      await tester.pumpWidget(harness(cubit, const ZakatSettingsScreen()));
+      final blocs = await cubitWith([lot('stock.AAPL', 10)]);
+      await tester.pumpWidget(harness(blocs, const ZakatSettingsScreen()));
       await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(SwitchListTile, en.assetGroupEquities));
       await tester.pumpAndSettle();
-      expect(cubit.state.zakatSettings.includedClasses, contains(AssetGroup.equities));
-      expect(cubit.zakatAssessment.base.amount, closeTo(2000, 1e-6));
+      expect(blocs.zakat.state.settings.includedClasses, contains(AssetGroup.equities));
+      expect(blocs.zakat.assessment.base.amount, closeTo(2000, 1e-6));
     });
 
     testWidgets('the reminder needs a hawl date first', (tester) async {
       phone(tester);
-      final cubit = await cubitWith([lot('crypto.BTC', 1)]);
-      await tester.pumpWidget(harness(cubit, const ZakatSettingsScreen()));
+      final blocs = await cubitWith([lot('crypto.BTC', 1)]);
+      await tester.pumpWidget(harness(blocs, const ZakatSettingsScreen()));
       await tester.pumpAndSettle();
       final reminder = find.widgetWithText(SwitchListTile, en.zakatRemind);
       await tester.dragUntilVisible(reminder, find.byType(ListView), const Offset(0, -150));
@@ -313,8 +351,8 @@ void main() {
 
     testWidgets('a Hijri start is picked by day, month and year, and a future day is refused', (tester) async {
       phone(tester);
-      final cubit = await cubitWith([lot('crypto.BTC', 1)]);
-      await tester.pumpWidget(harness(cubit, const ZakatSettingsScreen()));
+      final blocs = await cubitWith([lot('crypto.BTC', 1)]);
+      await tester.pumpWidget(harness(blocs, const ZakatSettingsScreen()));
       await tester.pumpAndSettle();
       await tester.dragUntilVisible(find.text(en.zakatHawlSet), find.byType(ListView), const Offset(0, -150));
       await tester.pumpAndSettle();
@@ -343,7 +381,7 @@ void main() {
       await tester.tap(find.widgetWithText(FilledButton, en.commonDone));
       await tester.pumpAndSettle();
 
-      final start = cubit.state.zakatSettings.hawlStart!;
+      final start = blocs.zakat.state.settings.hawlStart!;
       expect(start.isAfter(DateTime.now()), isFalse);
       final picked = HijriDate.fromGregorian(start)!;
       if (futureMonth != null) {
@@ -354,36 +392,36 @@ void main() {
 
     testWidgets('clearing the hawl date also turns the reminder off', (tester) async {
       phone(tester);
-      final cubit = await cubitWith([lot('crypto.BTC', 1)],
+      final blocs = await cubitWith([lot('crypto.BTC', 1)],
           settings: ZakatSettings(hawlStart: DateTime(2025, 3, 12), remind: true));
-      await tester.pumpWidget(harness(cubit, const ZakatSettingsScreen()));
+      await tester.pumpWidget(harness(blocs, const ZakatSettingsScreen()));
       await tester.pumpAndSettle();
       await tester.dragUntilVisible(find.text(en.zakatHawlClear), find.byType(ListView), const Offset(0, -150));
       await tester.pumpAndSettle();
       await tester.tap(find.text(en.zakatHawlClear));
       await tester.pumpAndSettle();
-      expect(cubit.state.zakatSettings.hawlStart, isNull);
-      expect(cubit.state.zakatSettings.remind, isFalse);
+      expect(blocs.zakat.state.settings.hawlStart, isNull);
+      expect(blocs.zakat.state.settings.remind, isFalse);
     });
 
     testWidgets('per-asset choices can be reset in one tap', (tester) async {
       phone(tester);
-      final cubit = await cubitWith([lot('crypto.BTC', 1)],
+      final blocs = await cubitWith([lot('crypto.BTC', 1)],
           settings: const ZakatSettings(holdingOverrides: {'crypto.BTC': false, 'stock.AAPL': true}));
-      await tester.pumpWidget(harness(cubit, const ZakatSettingsScreen()));
+      await tester.pumpWidget(harness(blocs, const ZakatSettingsScreen()));
       await tester.pumpAndSettle();
       expect(find.text(en.zakatOverridesCount(2)), findsOneWidget);
       await tester.tap(find.text(en.zakatOverridesReset));
       await tester.pumpAndSettle();
-      expect(cubit.state.zakatSettings.holdingOverrides, isEmpty);
+      expect(blocs.zakat.state.settings.holdingOverrides, isEmpty);
     });
   });
 
   group('Portfolio entry', () {
     testWidgets('shows what is due and opens the zakat screen', (tester) async {
       phone(tester);
-      final cubit = await cubitWith([lot('crypto.BTC', 1)]);
-      await tester.pumpWidget(harness(cubit, const PortfolioDetailScreen()));
+      final blocs = await cubitWith([lot('crypto.BTC', 1)]);
+      await tester.pumpWidget(harness(blocs, const PortfolioDetailScreen()));
       await tester.pumpAndSettle();
       expect(find.text(en.zakatEntryDue(usd(1250))), findsOneWidget);
       await tester.tap(find.text(en.zakatTitle));
@@ -393,8 +431,8 @@ void main() {
 
     testWidgets('masks the amount when balances are hidden', (tester) async {
       phone(tester);
-      final cubit = await cubitWith([lot('crypto.BTC', 1)], hidden: true);
-      await tester.pumpWidget(harness(cubit, const PortfolioDetailScreen()));
+      final blocs = await cubitWith([lot('crypto.BTC', 1)], hidden: true);
+      await tester.pumpWidget(harness(blocs, const PortfolioDetailScreen()));
       await tester.pumpAndSettle();
       expect(find.text(en.zakatEntryDue(usd(1250))), findsNothing);
       expect(find.text(en.zakatEntryDue(Masking.mask)), findsOneWidget);
@@ -402,8 +440,8 @@ void main() {
 
     testWidgets('is absent with no holdings', (tester) async {
       phone(tester);
-      final cubit = await cubitWith(const []);
-      await tester.pumpWidget(harness(cubit, const PortfolioDetailScreen()));
+      final blocs = await cubitWith(const []);
+      await tester.pumpWidget(harness(blocs, const PortfolioDetailScreen()));
       await tester.pumpAndSettle();
       expect(find.text(en.zakatTitle), findsNothing);
     });

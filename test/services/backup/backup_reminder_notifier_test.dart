@@ -7,7 +7,7 @@ import 'package:qima/services/backup/backup_reminder_notifier.dart';
 import 'package:qima/services/backup/backup_service.dart';
 import 'package:qima/services/cloud_kv_store.dart';
 import 'package:qima/services/custom_instrument_store.dart';
-import 'package:qima/services/holdings_store.dart';
+import 'package:qima/services/book_store.dart';
 import 'package:qima/services/local_file_store.dart';
 import 'package:qima/services/notification_service.dart';
 import 'package:qima/services/preferences.dart';
@@ -43,7 +43,7 @@ void main() {
     final cloud = LocalOnlyCloudKVStore();
     return BackupService(
       watchlistStore: WatchlistStore(cloud: cloud),
-      holdingsStore: HoldingsStore(cloud: cloud),
+      bookStore: BookStore(cloud: cloud),
       customInstrumentStore: CustomInstrumentStore(cloud: cloud),
       alertsStore: AlertsStore(cloud: cloud),
       preferences: await Preferences.create(cloud: cloud),

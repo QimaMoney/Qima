@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
-import '../blocs/app_cubit.dart';
+import '../blocs/watchlist_cubit.dart';
 import '../l10n/app_localizations.dart';
 import '../models/watch_card.dart';
 import '../theme/strings.dart';
@@ -13,7 +13,7 @@ import 'instrument_detail_screen.dart';
 /// intermediate add-flow screen — then surfaces a confirmation snackbar.
 ///
 /// [created] and [customInstrumentID] come straight from
-/// `AppCubit.addCard`'s result and (for a freshly-created custom ticker) the
+/// `WatchlistCubit.addCard`'s result and (for a freshly-created custom ticker) the
 /// `isCustom` check the caller made *before* calling `addCustomTicker` — see
 /// each call site for why that ordering matters.
 ///
@@ -33,7 +33,7 @@ void completeAdd(
   // position they're looked up from, and `pushAndRemoveUntil` tears down
   // everything above the watchlist, including whatever `context` this was
   // resolved from.
-  final cubit = context.read<AppCubit>();
+  final cubit = context.read<WatchlistCubit>();
   final navigator = Navigator.of(context);
   final messenger = ScaffoldMessenger.of(context);
   final l10n = AppLocalizations.of(context)!;

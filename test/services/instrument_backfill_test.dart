@@ -17,11 +17,12 @@ class _FakeHistoryProvider extends YahooHistoryProvider {
   final DateTime from;
   final DateTime to;
   final double close;
-  final List<Bar> intraday;
+  List<Bar> intraday;
+  final List<Bar>? daily;
   final List<String> requestedRanges = [];
   int intradayRequests = 0;
 
-  _FakeHistoryProvider(this.from, this.to, {this.close = 4000, this.intraday = const []});
+  _FakeHistoryProvider(this.from, this.to, {this.close = 4000, this.intraday = const [], this.daily});
 
   @override
   Future<List<Bar>> bars(String symbol, {String range = '5y', String interval = '1d'}) async {
@@ -30,6 +31,7 @@ class _FakeHistoryProvider extends YahooHistoryProvider {
       return intraday;
     }
     requestedRanges.add(range);
+    if (daily != null) return daily!;
     return [
       for (var d = from; !d.isAfter(to); d = d.add(const Duration(days: 1)))
         Bar(date: d, close: close, currency: 'USD'),
@@ -184,6 +186,55 @@ void main() {
     });
   });
 
+  group('a new listing', () {
+    const listing = Instrument(id: 'stock.ZZTEST', symbol: 'ZZTEST', assetClass: AssetClass.stock, nameKey: 'asset.zztest');
+    final listingDay = DateTime.utc(2026, 10, 18);
+
+    /// The first day as the feed served it: a reference price at the open, a
+    /// stretch of empty bars (which the feed leaves out), then trading that
+    /// opened far higher, ranged widely and closed lower.
+    List<Bar> firstDay() => [
+          Bar(date: listingDay.add(const Duration(hours: 14, minutes: 30)), close: 10, high: 10, low: 10, currency: 'USD'),
+          Bar(date: listingDay.add(const Duration(hours: 16, minutes: 30)), close: 24, high: 30, low: 20, currency: 'USD'),
+          Bar(date: listingDay.add(const Duration(hours: 18)), close: 12, high: 26, low: 8, currency: 'USD'),
+          Bar(date: listingDay.add(const Duration(hours: 20, minutes: 45)), close: 16, high: 17, low: 11, currency: 'USD'),
+        ];
+
+    /// The day's daily bar: stamped at the open, carrying the close and the
+    /// day's true extremes.
+    Bar dailyBar() => Bar(date: listingDay.add(const Duration(hours: 14, minutes: 30)), close: 16, high: 30, low: 8, currency: 'USD');
+
+    PriceRepository repository(_FakeHistoryProvider provider) =>
+        PriceRepository(historyProvider: provider, metalCryptoProvider: _FakeSpot(null), quoteHistoryStore: store);
+
+    test('still starts at its first price, with the true high and low, once the day is old', () async {
+      final first = listingDay.add(const Duration(hours: 21));
+      // Day one: everything is inside the intraday window and kept whole.
+      final provider = _FakeHistoryProvider(listingDay, listingDay, intraday: firstDay(), daily: [dailyBar()]);
+      await repository(provider).backfillInstruments([listing], FXHistory.empty, now: first);
+      expect((await store.load(listing.id)).quotes, hasLength(4));
+
+      // Three days later the feed's five days still reach back, but the
+      // stored day has been collapsed by the merges in between.
+      final later = listingDay.add(const Duration(days: 3, hours: 13));
+      provider.intraday = [
+        Bar(date: later.subtract(const Duration(hours: 20)), close: 17, high: 18, low: 16, currency: 'USD'),
+        Bar(date: later.subtract(const Duration(minutes: 15)), close: 17.5, high: 18, low: 17, currency: 'USD'),
+      ];
+      await repository(provider).backfillInstruments([listing], FXHistory.empty, now: later);
+
+      final series = await store.load(listing.id);
+      expect(series.quotes.first.canonicalUSD, 10, reason: 'the price the listing started at');
+      expect(series.quotes.first.timestamp, firstDay().first.date);
+      final dayLast = series.quotes.firstWhere((q) => q.timestamp == firstDay().last.date);
+      expect(dayLast.canonicalUSD, 16);
+      final high = series.quotes.map((q) => q.high ?? q.canonicalUSD).reduce((a, b) => a > b ? a : b);
+      final low = series.quotes.map((q) => q.low ?? q.canonicalUSD).reduce((a, b) => a < b ? a : b);
+      expect(high, 30);
+      expect(low, 8);
+    });
+  });
+
   group('metals and crypto', () {
     test("gold's futures bars are scaled to meet the live spot price", () async {
       final provider = _FakeHistoryProvider(
@@ -243,5 +294,21 @@ void main() {
       await repository.backfillInstruments([gold], FXHistory.empty, now: now.add(const Duration(minutes: 20)));
       expect(provider.requestedRanges, ['5y'], reason: 'leveled now; the tail waits for its interval');
     });
+  });
+
+  test("a currency's closes kept from a feed since found wrong are cleared, and today's live samples stay", () async {
+    final sar = InstrumentCatalog.instrument('fx.SAR')!;
+    await store.save(QuoteSeries(instrumentID: sar.id, quotes: [
+      for (var d = DateTime.utc(2026, 6, 1); d.isBefore(DateTime.utc(2026, 10, 15)); d = d.add(const Duration(days: 1)))
+        Quote(instrumentID: sar.id, timestamp: d, canonicalUSD: 1 / 3.64),
+      Quote(instrumentID: sar.id, timestamp: now, canonicalUSD: 1 / 3.75),
+    ]));
+    final provider = _FakeHistoryProvider(now, now);
+
+    // The checked history has no SAR: its feed disagreed with the live rate.
+    await repositoryWith(provider).backfillInstruments([sar], FXHistory.empty, force: true, now: now);
+
+    final series = await store.load(sar.id);
+    expect(series.quotes.map((q) => q.canonicalUSD), [1 / 3.75]);
   });
 }
