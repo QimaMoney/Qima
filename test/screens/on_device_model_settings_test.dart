@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:qima/blocs/app_cubit.dart';
+import 'package:qima/blocs/app_blocs.dart';
 import 'package:qima/blocs/money_cubit.dart';
 import 'package:qima/l10n/app_localizations.dart';
 import 'package:qima/screens/settings_screen.dart';
@@ -16,10 +16,12 @@ import 'package:qima/services/preferences.dart';
 import 'package:qima/theme/app_theme.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../helpers/app_blocs.dart';
+
 void main() {
   const channel = MethodChannel('com.devlabtechnologies.qima/ai');
 
-  Future<(AppCubit, List<String>)> show(WidgetTester tester, TargetPlatform platform, {AiAssistProvider? aiAssist}) async {
+  Future<(AppBlocs, List<String>)> show(WidgetTester tester, TargetPlatform platform, {AiAssistProvider? aiAssist}) async {
     debugDefaultTargetPlatformOverride = platform;
     final dir = await tester.runAsync(() => Directory.systemTemp.createTemp('qima_model'));
     addTearDown(() => dir!.deleteSync(recursive: true));
@@ -32,16 +34,16 @@ void main() {
     });
     addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, null));
 
-    final app = AppCubit(aiAssist: aiAssist);
-    app.preferences = await Preferences.create();
-    app.emit(app.state.copyWith(initialized: true));
-    final money = MoneyCubit(store: app.bookStore, baseCurrency: () => app.state.baseCurrency, rates: () => app.state.rates);
+    final app = AppBlocs(aiAssist: aiAssist);
+    app.settings.preferences = await Preferences.create();
+    app.seed(initialized: true);
+    final money = MoneyCubit(store: app.sync.bookStore, baseCurrency: () => app.settings.state.baseCurrency, rates: () => app.market.state.rates);
     await tester.runAsync(money.load);
-    final ai = (await tester.runAsync(() async => AiApps(app: app, money: money)))!;
+    final ai = (await tester.runAsync(() async => AiApps(app: app.app, settings: app.settings, market: app.market, holdings: app.holdings, money: money)))!;
     await tester.pumpWidget(MultiBlocProvider(
       providers: [
         RepositoryProvider<AiApps>.value(value: ai),
-        BlocProvider<AppCubit>.value(value: app),
+        ...app.providers,
         BlocProvider<MoneyCubit>.value(value: money),
       ],
       child: MaterialApp(
@@ -67,7 +69,7 @@ void main() {
 
       await tester.tap(toggle);
       await tester.pumpAndSettle();
-      expect(app.state.onDeviceModel, isTrue);
+      expect(app.settings.state.onDeviceModel, isTrue);
       expect(calls, ['availability']);
       expect(find.text(l10n.modelReady), findsOneWidget);
     } finally {
@@ -102,7 +104,7 @@ void main() {
 
       await tester.tap(toggle);
       await tester.pumpAndSettle();
-      expect(app.state.onDeviceModel, isTrue);
+      expect(app.settings.state.onDeviceModel, isTrue);
       expect(model.asked, 1);
       expect(find.text(l10n.modelNotReady), findsOneWidget);
 

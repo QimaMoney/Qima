@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:qima/blocs/app_cubit.dart';
+import 'package:qima/blocs/app_blocs.dart';
 import 'package:qima/l10n/app_localizations.dart';
 import 'package:qima/models/instrument_catalog.dart';
 import 'package:qima/models/metal_breakdown.dart';
@@ -32,8 +32,8 @@ final en = lookupAppLocalizations(const Locale('en'));
 void main() {
   Future<void> openSheet(WidgetTester tester, {required DictationAvailability dictation, required bool scan}) async {
     await tester.pumpWidget(
-      BlocProvider<AppCubit>.value(
-        value: AppCubit(dictation: _Dictation(dictation), textRecognition: _Recognition(scan)),
+      MultiBlocProvider(
+        providers: AppBlocs(dictation: _Dictation(dictation), textRecognition: _Recognition(scan)).providers,
         child: MaterialApp(
           localizationsDelegates: AppLocalizations.localizationsDelegates,
           supportedLocales: AppLocalizations.supportedLocales,

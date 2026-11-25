@@ -4,8 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../blocs/app_cubit.dart';
-import '../blocs/app_state.dart';
+import '../blocs/market_cubit.dart';
+import '../blocs/market_state.dart';
 import '../blocs/money_cubit.dart';
+import '../blocs/settings_cubit.dart';
+import '../blocs/settings_state.dart';
+import '../blocs/watchlist_cubit.dart';
 import '../l10n/app_localizations.dart';
 import '../l10n/currency_names.dart';
 import '../models/money_settings.dart';
@@ -76,13 +80,13 @@ class _SetupFlowScreenState extends State<SetupFlowScreen> {
     super.initState();
     _answers = widget.rerun ? (context.read<AppCubit>().state.setup ?? const SetupAnswers()) : const SetupAnswers();
     _step = _steps.first;
-    _currencyBefore = context.read<AppCubit>().state.baseCurrency;
+    _currencyBefore = context.read<SettingsCubit>().state.baseCurrency;
     // On first launch nothing has fetched rates or prices yet (the home
     // shell does that, and it isn't up), and the currency list and the
     // suggested prices need them.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      unawaited(context.read<AppCubit>().refreshIfStale());
+      unawaited(context.read<MarketCubit>().refreshIfStale());
       _leaveIfAlreadyInUse(context.read<MoneyCubit>().state);
     });
   }
@@ -100,13 +104,13 @@ class _SetupFlowScreenState extends State<SetupFlowScreen> {
   /// the prices screen shows what each one costs. A failure leaves the row
   /// without a price and is tried again the next time the screen opens.
   void _loadPreviews() {
-    final app = context.read<AppCubit>();
-    for (final s in _suggestions(app.state.baseCurrency)) {
+    final market = context.read<MarketCubit>();
+    for (final s in _suggestions(context.read<SettingsCubit>().state.baseCurrency)) {
       final instrument = s.card.instrument;
-      if (instrument == null || app.state.seriesByID.containsKey(instrument.id) || !_previewing.add(instrument.id)) continue;
+      if (instrument == null || market.state.seriesByID.containsKey(instrument.id) || !_previewing.add(instrument.id)) continue;
       unawaited(() async {
         try {
-          final series = await app.repository.refresh(instrument);
+          final series = await market.repository.refresh(instrument);
           if (mounted) setState(() => _previews[instrument.id] = series);
         } catch (e) {
           debugPrint('Setup: price for ${instrument.id} failed: $e');
@@ -172,10 +176,11 @@ class _SetupFlowScreenState extends State<SetupFlowScreen> {
     if (_busy) return;
     setState(() => _busy = true);
     final app = context.read<AppCubit>();
+    final watchlist = context.read<WatchlistCubit>();
     final money = context.read<MoneyCubit>();
     final navigator = Navigator.of(context);
     final answers = _answers.pruned;
-    final cards = _pickedCards(app.state.baseCurrency);
+    final cards = _pickedCards(context.read<SettingsCubit>().state.baseCurrency);
     try {
       // The book loads right after the app does; on first launch setup can
       // be finished before it has, and a save now would be overwritten.
@@ -192,7 +197,7 @@ class _SetupFlowScreenState extends State<SetupFlowScreen> {
       // what is stored); setup still finishes, and the features can be
       // switched on later from Settings.
       if (money.state.loaded) await money.applySetup(answers.features);
-      await app.adoptSetupWatchlist(cards);
+      await watchlist.adoptSetupWatchlist(cards);
       await app.saveSetup(answers);
       _applied = true;
       if (widget.rerun) {
@@ -249,7 +254,7 @@ class _SetupFlowScreenState extends State<SetupFlowScreen> {
         } else if (widget.rerun && !_applied) {
           // Backed out of a rerun: nothing else was changed, so the
           // currency goes back to what it was too.
-          unawaited(context.read<AppCubit>().setBaseCurrency(_currencyBefore));
+          unawaited(context.read<SettingsCubit>().setBaseCurrency(_currencyBefore));
         }
       },
       child: BlocListener<MoneyCubit, MoneyState>(
@@ -262,18 +267,21 @@ class _SetupFlowScreenState extends State<SetupFlowScreen> {
             child: Center(
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 560),
-                child: BlocBuilder<AppCubit, AppState>(
-                  buildWhen: (a, b) => a.baseCurrency != b.baseCurrency || a.rates != b.rates || a.seriesByID != b.seriesByID,
-                  builder: (context, app) => switch (_step) {
-                    SetupStep.welcome => _welcome(l10n, colors),
-                    SetupStep.currency => _currency(l10n, colors, app),
-                    SetupStep.uses => _uses(l10n),
-                    SetupStep.products => _products(l10n),
-                    SetupStep.prices => _prices(l10n, colors, app),
-                    SetupStep.goals => _goals(l10n),
-                    SetupStep.capture => _capture(l10n, colors),
-                    SetupStep.summary => _summary(l10n, colors, app),
-                  },
+                child: BlocBuilder<SettingsCubit, SettingsState>(
+                  buildWhen: (a, b) => a.baseCurrency != b.baseCurrency,
+                  builder: (context, settings) => BlocBuilder<MarketCubit, MarketState>(
+                    buildWhen: (a, b) => a.rates != b.rates || a.seriesByID != b.seriesByID,
+                    builder: (context, market) => switch (_step) {
+                      SetupStep.welcome => _welcome(l10n, colors),
+                      SetupStep.currency => _currency(l10n, colors, settings.baseCurrency, market.rates.availableCurrencies),
+                      SetupStep.uses => _uses(l10n),
+                      SetupStep.products => _products(l10n),
+                      SetupStep.prices => _prices(l10n, colors, settings.baseCurrency),
+                      SetupStep.goals => _goals(l10n),
+                      SetupStep.capture => _capture(l10n, colors),
+                      SetupStep.summary => _summary(l10n, colors, settings.baseCurrency),
+                    },
+                  ),
                 ),
               ),
             ),
@@ -336,14 +344,13 @@ class _SetupFlowScreenState extends State<SetupFlowScreen> {
     );
   }
 
-  Widget _currency(AppLocalizations l10n, QimaColors colors, AppState app) {
-    final cubit = context.read<AppCubit>();
+  Widget _currency(AppLocalizations l10n, QimaColors colors, String baseCurrency, List<String> available) {
+    final cubit = context.read<SettingsCubit>();
     final language = Localizations.localeOf(context).languageCode;
-    final region = cubit.deviceRegionCurrency;
-    final available = app.rates.availableCurrencies;
+    final region = context.read<AppCubit>().deviceRegionCurrency;
     final shown = <String>[];
-    for (final code in [?region, app.baseCurrency, 'USD', 'EUR', 'SAR', 'AED', 'EGP', 'KWD', 'GBP']) {
-      if (shown.length < 6 && !shown.contains(code) && (available.contains(code) || code == app.baseCurrency)) shown.add(code);
+    for (final code in [?region, baseCurrency, 'USD', 'EUR', 'SAR', 'AED', 'EGP', 'KWD', 'GBP']) {
+      if (shown.length < 6 && !shown.contains(code) && (available.contains(code) || code == baseCurrency)) shown.add(code);
     }
 
     return _question(
@@ -355,7 +362,7 @@ class _SetupFlowScreenState extends State<SetupFlowScreen> {
         DSCard(
           padding: const EdgeInsets.symmetric(vertical: DS.spaceXS),
           child: RadioGroup<String>(
-            groupValue: app.baseCurrency,
+            groupValue: baseCurrency,
             onChanged: (code) {
               if (code != null) unawaited(cubit.setBaseCurrency(code));
             },
@@ -365,10 +372,10 @@ class _SetupFlowScreenState extends State<SetupFlowScreen> {
                   RadioListTile<String>(
                     value: code,
                     controlAffinity: ListTileControlAffinity.trailing,
-                    secondary: _CodeBadge(code: code, selected: code == app.baseCurrency),
+                    secondary: _CodeBadge(code: code, selected: code == baseCurrency),
                     title: Text(
                       currencyDisplayName(code, language),
-                      style: TextStyle(color: colors.textPrimary, fontWeight: code == app.baseCurrency ? FontWeight.w700 : FontWeight.w400),
+                      style: TextStyle(color: colors.textPrimary, fontWeight: code == baseCurrency ? FontWeight.w700 : FontWeight.w400),
                     ),
                     subtitle: code == region ? Text(l10n.setupCurrencyFromRegion, style: TextStyle(color: colors.brandText, fontSize: 13)) : null,
                   ),
@@ -377,7 +384,7 @@ class _SetupFlowScreenState extends State<SetupFlowScreen> {
                   leading: Icon(Icons.search, color: colors.brandText),
                   title: Text(l10n.setupCurrencyMore, style: TextStyle(color: colors.brandText, fontWeight: FontWeight.w600)),
                   onTap: () async {
-                    final selected = await CurrencyPicker.show(context, selected: app.baseCurrency, currencies: available);
+                    final selected = await CurrencyPicker.show(context, selected: baseCurrency, currencies: available);
                     if (selected != null) await cubit.setBaseCurrency(selected);
                   },
                 ),
@@ -444,14 +451,14 @@ class _SetupFlowScreenState extends State<SetupFlowScreen> {
     );
   }
 
-  Widget _prices(AppLocalizations l10n, QimaColors colors, AppState app) {
-    final cubit = context.read<AppCubit>();
-    final suggestions = _suggestions(app.baseCurrency);
+  Widget _prices(AppLocalizations l10n, QimaColors colors, String baseCurrency) {
+    final cubit = context.read<MarketCubit>();
+    final suggestions = _suggestions(baseCurrency);
     final picked = _pickedFor(suggestions);
     return _question(
       step: SetupStep.prices,
       title: l10n.setupPricesTitle,
-      body: l10n.setupPricesBody(app.baseCurrency),
+      body: l10n.setupPricesBody(baseCurrency),
       primaryLabel: l10n.setupPricesAdd(picked.length),
       onPrimary: picked.isEmpty
           ? null
@@ -563,11 +570,11 @@ class _SetupFlowScreenState extends State<SetupFlowScreen> {
     );
   }
 
-  Widget _summary(AppLocalizations l10n, QimaColors colors, AppState app) {
+  Widget _summary(AppLocalizations l10n, QimaColors colors, String baseCurrency) {
     final language = Localizations.localeOf(context).languageCode;
     final answers = _answers.pruned;
     final features = answers.features;
-    final cards = _pickedCards(app.baseCurrency);
+    final cards = _pickedCards(baseCurrency);
     final onHome = [
       l10n.netWorth,
       if (answers.asksMoney) l10n.homeCard(HomeCard.accounts),
@@ -581,7 +588,7 @@ class _SetupFlowScreenState extends State<SetupFlowScreen> {
       if (answers.captures.contains(SetupCapture.statement)) l10n.setupCaptureStatement,
     ];
     final rows = [
-      (SetupStep.currency, Icons.payments_outlined, l10n.setupSummaryCurrency, '${currencyDisplayName(app.baseCurrency, language)} (${app.baseCurrency})'),
+      (SetupStep.currency, Icons.payments_outlined, l10n.setupSummaryCurrency, '${currencyDisplayName(baseCurrency, language)} ($baseCurrency)'),
       (SetupStep.uses, Icons.home_outlined, l10n.setupSummaryHome, onHome.join(l10n.setupListSeparator)),
       if (answers.asksMoney)
         (

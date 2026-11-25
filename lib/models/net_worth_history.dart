@@ -63,6 +63,17 @@ class NetWorthHistory {
     }
 
     final held = {for (final p in holdings) _day(p.date): p.value};
+    // Over one day the holdings come a quarter of an hour apart, worked out
+    // a moment before this, so each point takes the latest of them at or
+    // before it instead of the one for its day.
+    final intraday = range == ChartRange.day1;
+    var heldAt = 0;
+    double? heldThrough(DateTime t) {
+      while (heldAt + 1 < holdings.length && !holdings[heldAt + 1].date.isAfter(t)) {
+        heldAt++;
+      }
+      return holdings.isEmpty || holdings[heldAt].date.isAfter(t) ? null : holdings[heldAt].value;
+    }
     // Historic rates are per US dollar; live rates may be against another
     // base. A pair uses history only when both sides have it.
     final cursors = <String, _Rate>{};
@@ -78,10 +89,9 @@ class NetWorthHistory {
     }
 
     final points = <DisplayPoint>[];
-    for (var d = start; !d.isAfter(today); d = DateTime(d.year, d.month, d.day + 1)) {
-      final endOfDay = DateTime(d.year, d.month, d.day + 1).subtract(const Duration(microseconds: 1));
+    for (final (d, endOfDay) in PortfolioHistory.steps(range, start, now)) {
       postThrough(endOfDay);
-      var value = held[d] ?? 0.0;
+      var value = (intraday ? heldThrough(endOfDay) : held[d]) ?? 0.0;
       net.forEach((ccy, minor) {
         if (minor != 0) value += convert(MinorUnits.toMajor(minor, ccy), ccy, endOfDay) ?? 0;
       });

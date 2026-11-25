@@ -73,6 +73,8 @@
   "addCustomTickerSymbolRequired": "Enter a ticker symbol.",
   "addCustomTickerError": "Could not verify this ticker. Check the symbol and try again.",
   "addCustomTickerSubmit": "Add ticker",
+  "addCustomTickerConfirmBody": "This is what the price feed has under this symbol. Add it only if it is the one you mean.",
+  "addCustomTickerConfirmNo": "Not this one",
   "cardConfigAddToWatchlist": "Add to watchlist",
   "commonCurrency": "Currency",
   "currencyPickerSearchHint": "Search currency",
@@ -150,7 +152,7 @@
   "settingsKarat": "Karat",
   "settingsBaseCurrencyFooter": "Used to total your portfolio value.",
   "settingsDefaultRange": "Default chart range",
-  "settingsDefaultRangeFooter": "Used when opening an asset for the first time.",
+  "settingsDefaultRangeFooter": "Charts on Home and on an asset open on this range. Choosing a range on an asset's chart updates it.",
   "settingsWidgetRefresh": "Widget refresh interval",
   "settingsWidgetRefreshFooter": "How often background widgets fetch new prices.",
   "settingsLanguage": "Language",
@@ -463,6 +465,25 @@
   "settingsICloudSyncStatusSyncing": "Syncing…",
   "settingsICloudSyncStatusNotSignedIn": "Not signed in to iCloud",
   "settingsICloudSyncStatusStorageFull": "iCloud storage for Qima is full",
+  "settingsCloudLogSyncSwitch": "Faster sync (early version)",
+  "settingsCloudLogSyncFooter": "A new way to sync your book through iCloud, still being tested. It runs beside the sync above and deletes nothing when you turn it off.",
+  "settingsCloudLogSyncStatusUpToDate": "Up to date · {time}",
+  "@settingsCloudLogSyncStatusUpToDate": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsCloudLogSyncStatusSyncing": "Syncing…",
+  "settingsCloudLogSyncStatusWaiting": "Waiting for another device to finish sending",
+  "settingsCloudLogSyncStatusOffline": "Can't reach iCloud. Trying again soon.",
+  "settingsCloudLogSyncStatusQuota": "iCloud storage is full",
+  "settingsCloudLogSyncStatusNotSignedIn": "Not signed in to iCloud",
+  "settingsCloudLogSyncStatusUnavailable": "Not available in this build",
+  "settingsCloudLogSyncStatusZoneMissing": "The synced data is missing in iCloud and could not be made again",
+  "settingsCloudLogSyncStatusNewerVersion": "Another device uses a newer version. Update Qima.",
+  "settingsCloudLogSyncStatusOther": "Sync stopped. Trying again soon.",
   "backupTitle": "Backup & restore",
   "backupStatusTitle": "Stored only on this phone",
   "backupStatusMessage": "Your data lives on this device only. Back it up so you can restore it here or on another device.",
@@ -2740,6 +2761,7 @@
   "budgetMonthly": "Each month",
   "budgetZeroHelp": "Zero removes it.",
   "budgetNone": "No budget",
+  "budgetAdd": "New budget",
   "budgetOf": "Budget {amount}",
   "@budgetOf": {
     "placeholders": {
@@ -2908,6 +2930,8 @@
   "importMessageFrom": "Message from {sender}",
   "@importMessageFrom": {"placeholders": {"sender": {"type": "String"}}},
   "importMoveMessage": "Move to another account",
+  "importRowAccount": "Card or account",
+  "importRowAccountWholeFile": "Moves every row from this file",
   "bankMessagesNotifyTitle": "Bank messages to check",
   "bankMessagesNotifyBody": "Open Qima to check them before they’re added.",
   "bankMessagesAutoAdded": "{count, plural, =1{Added 1 transaction from a bank message} other{Added {count} transactions from bank messages}}",

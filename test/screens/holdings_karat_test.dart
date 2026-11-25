@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:qima/blocs/app_cubit.dart';
+import 'package:qima/blocs/app_blocs.dart';
+import '../helpers/app_blocs.dart';
 import 'package:qima/l10n/app_localizations.dart';
 import 'package:qima/l10n/app_localizations_en.dart';
 import 'package:qima/models/asset.dart';
@@ -29,10 +30,10 @@ void main() {
 
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
-  Future<AppCubit> emptyCubit() async {
-    final cubit = AppCubit();
-    cubit.preferences = await Preferences.create();
-    cubit.emit(cubit.state.copyWith(
+  Future<AppBlocs> emptyCubit() async {
+    final cubit = AppBlocs();
+    cubit.settings.preferences = await Preferences.create();
+    cubit.seed(
       initialized: true,
       cards: const [],
       lots: const [],
@@ -44,19 +45,19 @@ void main() {
       rates: FXRates(base: 'USD', rates: const {'USD': 1}, updatedAt: DateTime(2024, 6, 10)),
       fxHistory: FXHistory.empty,
       baseCurrency: 'USD',
-    ));
+    );
     return cubit;
   }
 
-  Future<AppCubit> populatedCubit(List<HoldingLot> lots) async {
+  Future<AppBlocs> populatedCubit(List<HoldingLot> lots) async {
     final cubit = await emptyCubit();
-    cubit.emit(cubit.state.copyWith(lots: lots));
+    cubit.seed(lots: lots);
     return cubit;
   }
 
-  Widget harness({required Widget home, required AppCubit cubit}) {
+  Widget harness({required Widget home, required AppBlocs cubit}) {
     return MultiBlocProvider(
-      providers: [BlocProvider<AppCubit>.value(value: cubit), testMoneyProvider(cubit)],
+      providers: [...cubit.providers, testMoneyProvider(cubit)],
       child: MaterialApp(
         localizationsDelegates: AppLocalizations.localizationsDelegates,
         supportedLocales: AppLocalizations.supportedLocales,
@@ -188,7 +189,7 @@ void main() {
         date: DateTime(2024, 6, 1),
       );
       final cubit = await populatedCubit([lot]);
-      await cubit.toggleHideBalances();
+      await cubit.settings.toggleHideBalances();
       final l10n = AppLocalizationsEn();
 
       await tester.pumpWidget(harness(

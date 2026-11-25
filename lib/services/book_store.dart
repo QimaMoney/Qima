@@ -7,6 +7,8 @@ import '../models/syncable.dart';
 import 'book_db/ledger_plan.dart';
 import 'book_records.dart';
 import 'cloud_kv_store.dart';
+import 'sync/book_sync.dart';
+import 'sync/sync_report.dart';
 import 'synced_store.dart';
 
 /// The money ledger on disk: accounts, entries, recurring payments and
@@ -39,7 +41,15 @@ class BookStore {
   final SyncedStore<RecurringPayment> recurring;
   final SyncedStore<MoneySettings> settings;
 
-  BookStore({CloudKVStore? cloud})
+  /// How the book is synced. Key-value storage, as always, unless whoever
+  /// builds the store chooses otherwise.
+  final BookSync sync;
+
+  /// The change log sync of this book, for the caller that runs it; null
+  /// with key-value sync.
+  late final BookChangeLog? changeLog = sync.bind(this);
+
+  BookStore({CloudKVStore? cloud, this.sync = BookSync.keyValue})
       : accounts = _store(accountsKey, LedgerNames.accountsFile, LedgerNames.legacyAccountsFile, BookAccount.fromJson, cloud),
         entries = SyncedStore<BookEntry>(
           filePath: LedgerNames.entriesFile,
@@ -47,7 +57,7 @@ class BookStore {
           itemFromJson: BookEntry.fromJson,
           cloud: cloud ?? LocalOnlyCloudKVStore(),
           seed: () => const [],
-          local: bookEntryRecords(collection: entriesKey, file: LedgerNames.entriesFile, legacyFile: LedgerNames.legacyEntriesFile),
+          local: bookEntryRecords(collection: entriesKey, file: LedgerNames.entriesFile, legacyFile: LedgerNames.legacyEntriesFile, prefer: LegacyCollapse.prefer),
           cloudFormat: CloudFormat.envelope,
           prefer: LegacyCollapse.prefer,
           tombstoneTTL: null,
@@ -55,8 +65,25 @@ class BookStore {
         recurring = _store(recurringKey, LedgerNames.recurringFile, LedgerNames.legacyRecurringFile, RecurringPayment.fromJson, cloud),
         settings = _store(settingsKey, LedgerNames.settingsFile, LedgerNames.legacySettingsFile, MoneySettings.fromJson, cloud);
 
+  /// Told after every change made through the four stores, see
+  /// [SyncedStore.onSaved].
+  set onSaved(void Function()? listener) {
+    accounts.onSaved = listener;
+    entries.onSaved = listener;
+    recurring.onSaved = listener;
+    settings.onSaved = listener;
+  }
+
   /// A collection kept as documents. [legacyFile] is the JSON file earlier
   /// versions used, and is what the database imports from.
+  ///
+  /// Two different records with one id and one stamp are settled by
+  /// [LegacyCollapse.settles], the same way on every device and whichever
+  /// way they reach it (the cloud key, the change log, an old key): a rule
+  /// that depended on the order of arrival would have two devices, or two
+  /// ways of syncing on one device, keep exchanging the two for ever. The
+  /// default categories are such records: every device adds them with one
+  /// fixed stamp, and builds need not agree on what they hold.
   static SyncedStore<T> _store<T extends Syncable>(String key, String file, String legacyFile, T Function(Map<String, dynamic>) fromJson, CloudKVStore? cloud) {
     return SyncedStore<T>(
       filePath: file,
@@ -64,8 +91,9 @@ class BookStore {
       itemFromJson: fromJson,
       cloud: cloud ?? LocalOnlyCloudKVStore(),
       seed: () => const [],
-      local: bookDocumentRecords<T>(collection: key, file: file, legacyFile: legacyFile, itemFromJson: fromJson),
+      local: bookDocumentRecords<T>(collection: key, file: file, legacyFile: legacyFile, itemFromJson: fromJson, prefer: LegacyCollapse.settles),
       cloudFormat: CloudFormat.envelope,
+      prefer: LegacyCollapse.settles,
       tombstoneTTL: null,
     );
   }

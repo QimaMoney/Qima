@@ -2,8 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:intl/intl.dart';
 
-import '../blocs/app_cubit.dart';
-import '../blocs/app_state.dart';
+import '../blocs/holdings_cubit.dart';
+import '../blocs/market_cubit.dart';
+import '../blocs/settings_cubit.dart';
 import '../l10n/app_localizations.dart';
 import '../models/asset.dart';
 import '../models/holding.dart';
@@ -46,7 +47,7 @@ class HoldingsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cubit = context.read<AppCubit>();
+    final cubit = context.read<HoldingsCubit>();
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
     final unit = refUnit ?? instrument.quotation.defaultUnit;
@@ -79,11 +80,15 @@ class HoldingsScreen extends StatelessWidget {
             ),
           ],
         ),
-        body: BlocBuilder<AppCubit, AppState>(
-          builder: (context, state) {
+        // The summary is valued at the current prices and masked by the hide
+        // setting, so this listens to all three.
+        body: Builder(
+          builder: (context) {
+            final holdingsState = context.watch<HoldingsCubit>().state;
+            final rates = context.watch<MarketCubit>().state.rates;
+            final hidden = context.select<SettingsCubit, bool>((c) => c.state.hideBalances);
             final transactions = cubit.transactionsFor(instrument);
-            final position = state.ledger[instrument.id];
-            final hidden = state.hideBalances;
+            final position = holdingsState.ledger[instrument.id];
 
             if (transactions.isEmpty) {
               return ListView(
@@ -120,7 +125,8 @@ class HoldingsScreen extends StatelessWidget {
                     unit: unit,
                     karat: refKarat,
                     displayCurrency: displayCurrency,
-                    state: state,
+                    hidden: hidden,
+                    rates: rates,
                   ),
                 ),
                 const SizedBox(height: DS.spaceMD),
@@ -156,7 +162,8 @@ class _Summary extends StatelessWidget {
   final PriceUnit unit;
   final GoldKarat? karat;
   final String displayCurrency;
-  final AppState state;
+  final bool hidden;
+  final FXRates rates;
 
   const _Summary({
     required this.instrument,
@@ -165,15 +172,15 @@ class _Summary extends StatelessWidget {
     required this.unit,
     required this.karat,
     required this.displayCurrency,
-    required this.state,
+    required this.hidden,
+    required this.rates,
   });
 
   @override
   Widget build(BuildContext context) {
-    final cubit = context.read<AppCubit>();
+    final cubit = context.read<HoldingsCubit>();
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
-    final hidden = state.hideBalances;
     final valuation = cubit.valuationFor(instrument, displayCurrency);
     final held = HoldingTotals.totalHeld(lots: lots, refUnit: unit, refKarat: karat);
     final average = HoldingTotals.averageCost(
@@ -181,10 +188,10 @@ class _Summary extends StatelessWidget {
       refUnit: unit,
       refKarat: karat,
       displayCurrency: displayCurrency,
-      rates: state.rates,
+      rates: rates,
     );
     final position = this.position;
-    final realised = position?.realised.inCurrency(displayCurrency, state.rates);
+    final realised = position?.realised.inCurrency(displayCurrency, rates);
     final showRealised = position != null && (position.disposals.isNotEmpty || !position.realised.isZero);
     final unitText = displayLabel(context, unit.abbreviationKey ?? unit.labelKey);
 
@@ -264,7 +271,7 @@ class _TransactionRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cubit = context.read<AppCubit>();
+    final cubit = context.read<HoldingsCubit>();
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
     final t = transaction;
@@ -428,7 +435,7 @@ String transactionDateLabel(BuildContext context, DateTime date) => dateWithYear
 /// Asks before deleting [transaction], then deletes it — unless that would
 /// leave a later sale selling more than was held, in which case it explains
 /// which sale and keeps the row. Returns whether it was deleted.
-Future<bool> confirmDeleteTransaction(BuildContext context, AppCubit cubit, HoldingTransaction transaction) async {
+Future<bool> confirmDeleteTransaction(BuildContext context, HoldingsCubit cubit, HoldingTransaction transaction) async {
   final l10n = AppLocalizations.of(context)!;
   final blocking = cubit.conflictForDelete(transaction);
   if (blocking != null) {
@@ -438,7 +445,7 @@ Future<bool> confirmDeleteTransaction(BuildContext context, AppCubit cubit, Hold
   final confirmed = await confirmDelete(
     context,
     title: l10n.confirmDeleteTransactionTitle,
-    message: l10n.confirmDeleteTransactionMessage(transactionSummary(context, transaction, hidden: cubit.state.hideBalances)),
+    message: l10n.confirmDeleteTransactionMessage(transactionSummary(context, transaction, hidden: context.read<SettingsCubit>().state.hideBalances)),
     confirmLabel: l10n.commonDelete,
   );
   if (!confirmed) return false;

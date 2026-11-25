@@ -1,7 +1,14 @@
 // The demo portfolio every store capture starts from (App Store and Play
 // screenshots, Mac screenshots and the Mac app preview), so all store media
 // shows the same data.
+import 'package:flutter/widgets.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:qima/blocs/app_cubit.dart';
+import 'package:qima/blocs/holdings_cubit.dart';
+import 'package:qima/blocs/market_cubit.dart';
+import 'package:qima/blocs/settings_cubit.dart';
+import 'package:qima/blocs/watchlist_cubit.dart';
+import 'package:qima/blocs/zakat_cubit.dart';
 import 'package:qima/models/asset.dart';
 import 'package:qima/models/chart_range.dart';
 import 'package:qima/models/holding.dart';
@@ -15,15 +22,21 @@ import 'package:qima/services/preferences.dart';
 /// dark mode, past onboarding, with prices and history loaded. Idempotent
 /// across runs: re-adding a card id removed earlier would fight the store's
 /// tombstones, so existing demo cards are kept and only others removed.
-Future<void> seedStoreDemo(AppCubit cubit, {AppLanguage language = AppLanguage.en, String currency = 'USD'}) async {
-  await cubit.completeOnboarding();
-  await cubit.setAppLanguage(language);
-  await cubit.setAppearance(Appearance.dark);
-  await cubit.setBaseCurrency(currency);
+Future<void> seedStoreDemo(BuildContext context, {AppLanguage language = AppLanguage.en, String currency = 'USD'}) async {
+  final app = context.read<AppCubit>();
+  final settings = context.read<SettingsCubit>();
+  final market = context.read<MarketCubit>();
+  final watchlist = context.read<WatchlistCubit>();
+  final holdings = context.read<HoldingsCubit>();
+  final zakat = context.read<ZakatCubit>();
+  await app.completeOnboarding();
+  await settings.setAppLanguage(language);
+  await settings.setAppearance(Appearance.dark);
+  await settings.setBaseCurrency(currency);
   // Every run starts from the same ranges: walkthroughs tap other ones, and
   // tapping an already-selected chip does nothing.
-  await cubit.setPreferredPortfolioRange(ChartRange.all);
-  await cubit.setPreferredChartRange(ChartRange.month3);
+  await settings.setPreferredPortfolioRange(ChartRange.all);
+  await settings.setPreferredChartRange(ChartRange.month3);
   const cards = [
     WatchCard(id: 'shot-xau', instrumentID: 'metal.XAU', currency: 'USD', unit: PriceUnit.troyOunce),
     WatchCard(id: 'shot-xau21', instrumentID: 'metal.XAU', currency: 'SAR', unit: PriceUnit.gram, karat: GoldKarat.k21),
@@ -34,12 +47,12 @@ Future<void> seedStoreDemo(AppCubit cubit, {AppLanguage language = AppLanguage.e
     WatchCard(id: 'shot-eur', instrumentID: 'fx.EUR', currency: 'USD', unit: PriceUnit.each),
   ];
   final wanted = {for (final card in cards) card.id};
-  for (final card in List.of(cubit.state.cards)) {
-    if (!wanted.contains(card.id)) await cubit.removeCard(card.id);
+  for (final card in List.of(watchlist.state.cards)) {
+    if (!wanted.contains(card.id)) await watchlist.removeCard(card.id);
   }
-  final existing = {for (final card in cubit.state.cards) card.id};
+  final existing = {for (final card in watchlist.state.cards) card.id};
   for (final card in cards) {
-    if (!existing.contains(card.id)) await cubit.addCard(card);
+    if (!existing.contains(card.id)) await watchlist.addCard(card);
   }
 
   final lots = [
@@ -90,10 +103,10 @@ Future<void> seedStoreDemo(AppCubit cubit, {AppLanguage language = AppLanguage.e
     ),
   ];
   for (final lot in lots) {
-    await cubit.saveTransaction(HoldingTransaction.fromLot(lot));
+    await holdings.saveTransaction(HoldingTransaction.fromLot(lot));
   }
   // One sale, so the ledger and the portfolio show a realised gain.
-  await cubit.saveTransaction(HoldingTransaction(
+  await holdings.saveTransaction(HoldingTransaction(
     id: 'shot-tx-sell-1',
     instrumentID: 'metal.XAU',
     kind: TransactionKind.sell,
@@ -105,7 +118,7 @@ Future<void> seedStoreDemo(AppCubit cubit, {AppLanguage language = AppLanguage.e
   ));
   // Default zakat classes with a hawl under way, so the zakat screen shows
   // what's due and when instead of asking for a start date.
-  await cubit.updateZakatSettings((_) => ZakatSettings(hawlStart: DateTime(2025, 3, 30)));
-  await cubit.refreshAll();
-  await cubit.backfillHistoryIfNeeded();
+  await zakat.updateSettings((_) => ZakatSettings(hawlStart: DateTime(2025, 3, 30)));
+  await market.refreshAll();
+  await market.backfillHistoryIfNeeded();
 }

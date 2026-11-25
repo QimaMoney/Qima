@@ -28,7 +28,12 @@ import 'synced_store.dart';
 ///   tombstones. A record is taken when its id was never seen here or its
 ///   stamp is strictly later than the stored one (see [SyncedStore.absorb]),
 ///   so an old build rewriting a whole collection with unchanged stamps
-///   changes nothing.
+///   changes nothing. A different record with the same stamp is never taken
+///   either, whatever the store's tie rule would say: the old keys are never
+///   cleared, so a tie taken from one would be taken by every device and
+///   for ever. The default categories are such records (one fixed stamp on
+///   every device), and what an earlier build left of them under the old key
+///   must not undo what this build makes of them.
 /// * Settings only while the ledger holds no settings record at all, not even
 ///   a deleted one. After that the ledger's copy is the one the person edits.
 /// * Entries, trades and lots together, always: [LegacyCollapse.collapse]
@@ -154,14 +159,14 @@ class LegacyAbsorber {
         for (final r in oldAccounts)
           if (!(r.deleted && used.contains(r.item.id))) r,
       ];
-      if (taken.isNotEmpty && await accounts.absorb(taken)) changed.add(BookStore.accountsKey);
+      if (taken.isNotEmpty && await accounts.absorb(taken, strict: true)) changed.add(BookStore.accountsKey);
     }
 
     final oldRecurring = _decode<RecurringPayment>(raw[LedgerNames.legacyRecurring], LedgerNames.legacyRecurring, RecurringPayment.fromJson, problems);
-    if (oldRecurring != null && oldRecurring.isNotEmpty && await recurring.absorb(oldRecurring)) changed.add(BookStore.recurringKey);
+    if (oldRecurring != null && oldRecurring.isNotEmpty && await recurring.absorb(oldRecurring, strict: true)) changed.add(BookStore.recurringKey);
 
     final oldSettings = _decode<MoneySettings>(raw[LedgerNames.legacySettings], LedgerNames.legacySettings, MoneySettings.fromJson, problems);
-    if (oldSettings != null && oldSettings.isNotEmpty && (await settings.exportRecords()).isEmpty && await settings.absorb(oldSettings)) {
+    if (oldSettings != null && oldSettings.isNotEmpty && (await settings.exportRecords()).isEmpty && await settings.absorb(oldSettings, strict: true)) {
       changed.add(BookStore.settingsKey);
     }
 

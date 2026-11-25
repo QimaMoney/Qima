@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:intl/intl.dart' hide TextDirection;
 
-import '../../blocs/app_cubit.dart';
+import '../../blocs/settings_cubit.dart';
 import '../../blocs/money_cubit.dart';
 import '../../l10n/app_localizations.dart';
 import '../../models/book_account.dart';
@@ -30,7 +30,7 @@ class EntryDetailScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
-    final hidden = context.select<AppCubit, bool>((c) => c.state.hideBalances);
+    final hidden = context.select<SettingsCubit, bool>((c) => c.state.hideBalances);
     final state = context.watch<MoneyCubit>().state;
     final entry = state.listed.where((e) => e.id == entryId).firstOrNull;
     if (entry == null) {
@@ -203,7 +203,7 @@ class _AllTransactionsScreenState extends State<AllTransactionsScreen> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
-    final hidden = context.select<AppCubit, bool>((c) => c.state.hideBalances);
+    final hidden = context.select<SettingsCubit, bool>((c) => c.state.hideBalances);
     final state = context.watch<MoneyCubit>().state;
     final book = state.book;
     final q = _query.trim().toLowerCase();

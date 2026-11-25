@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
-import '../blocs/app_cubit.dart';
-import '../blocs/app_state.dart';
+import '../blocs/holdings_cubit.dart';
+import '../blocs/holdings_state.dart';
+import '../blocs/market_cubit.dart';
+import '../blocs/settings_cubit.dart';
 import '../l10n/app_localizations.dart';
 import '../models/holding_transaction.dart';
 import '../models/instrument_catalog.dart';
@@ -48,17 +50,18 @@ class _CsvImportScreenState extends State<CsvImportScreen> {
   @override
   void initState() {
     super.initState();
-    _mapping = CsvImporter.autoMap(_table, fallbackCurrency: context.read<AppCubit>().state.baseCurrency);
+    _mapping = CsvImporter.autoMap(_table, fallbackCurrency: context.read<SettingsCubit>().state.baseCurrency);
   }
 
   void _buildPlan() {
-    final state = context.read<AppCubit>().state;
+    final holdings = context.read<HoldingsCubit>().state;
+    final market = context.read<MarketCubit>().state;
     setState(() {
       _plan = CsvImporter.plan(
         _table,
         _mapping,
-        existing: state.transactions,
-        availableCurrencies: state.rates.availableCurrencies,
+        existing: holdings.transactions,
+        availableCurrencies: market.rates.availableCurrencies,
         now: DateTime.now(),
       );
       _onlyProblems = false;
@@ -74,7 +77,7 @@ class _CsvImportScreenState extends State<CsvImportScreen> {
     final l10n = AppLocalizations.of(context)!;
     final List<String> ids;
     try {
-      ids = await context.read<AppCubit>().importTransactions(plan.ready);
+      ids = await context.read<HoldingsCubit>().importTransactions(plan.ready);
     } catch (error) {
       // Nothing was added: the file can be fixed and tried again.
       debugPrint('Importing the trades failed: $error');
@@ -92,7 +95,7 @@ class _CsvImportScreenState extends State<CsvImportScreen> {
 
   Future<void> _undo() async {
     setState(() => _busy = true);
-    await context.read<AppCubit>().undoImport(_importedIds);
+    await context.read<HoldingsCubit>().undoImport(_importedIds);
     if (!mounted) return;
     final l10n = AppLocalizations.of(context)!;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(l10n.csvImportUndone(_importedIds.length))));
@@ -127,7 +130,6 @@ class _CsvImportScreenState extends State<CsvImportScreen> {
   Widget _mappingStep(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
-    final cubit = context.read<AppCubit>();
     final dateColumn = _mapping[CsvField.date];
     final ambiguousDates = dateColumn != null && CsvImporter.hasAmbiguousDates(_table, dateColumn);
 
@@ -196,7 +198,7 @@ class _CsvImportScreenState extends State<CsvImportScreen> {
                   final selected = await CurrencyPicker.show(
                     context,
                     selected: _mapping.fallbackCurrency,
-                    currencies: cubit.state.rates.availableCurrencies,
+                    currencies: context.read<MarketCubit>().state.rates.availableCurrencies,
                   );
                   if (selected != null) setState(() => _mapping = _mapping.copyWith(fallbackCurrency: selected));
                 },
@@ -266,7 +268,7 @@ class _CsvImportScreenState extends State<CsvImportScreen> {
     final colors = context.colors;
     final plan = _plan!;
     final rows = _onlyProblems ? plan.rows.where((r) => !r.ready).toList() : plan.rows;
-    final hidden = context.read<AppCubit>().state.hideBalances;
+    final hidden = context.read<SettingsCubit>().state.hideBalances;
 
     return Column(
       children: [
@@ -359,7 +361,7 @@ class _CsvImportScreenState extends State<CsvImportScreen> {
   Widget _doneStep(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
-    return BlocBuilder<AppCubit, AppState>(
+    return BlocBuilder<HoldingsCubit, HoldingsState>(
       builder: (context, _) => ListView(
         padding: const EdgeInsets.all(DS.spaceMD),
         children: [

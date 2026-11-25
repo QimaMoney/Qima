@@ -191,6 +191,12 @@ abstract final class LegacyCollapse {
     return out;
   }
 
+  /// [prefer] for a collection that has no provenance: of two different
+  /// records with the same id and `updatedAt`, whether [incoming] is the one to
+  /// keep. The order is [_compare], so the answer does not depend on which of
+  /// the two is [incoming], and every device keeps the same one.
+  static bool settles(Record<Syncable> incoming, Record<Syncable> stored) => _compare(incoming, stored) > 0;
+
   /// Newest stamp first, then a deletion over a live record, then order, then
   /// the text of the record: a total order, so duplicates settle the same way
   /// whichever comes first.

@@ -87,7 +87,14 @@ final _backends = [
   _Backend(
     'the database',
     (filePath) => DocumentRecords<_Item>(collection: filePath, filePath: filePath, itemFromJson: _Item.fromJson),
-    (filePath, records) => DocumentRecords<_Item>(collection: filePath, filePath: filePath, itemFromJson: _Item.fromJson).write(records),
+    // A write never puts an older record over a newer one, so what is held
+    // is purged first: the rows end up being exactly [records].
+    (filePath, records) async {
+      final rows = DocumentRecords<_Item>(collection: filePath, filePath: filePath, itemFromJson: _Item.fromJson);
+      await rows.read();
+      await rows.write(const []);
+      await rows.write(records);
+    },
   ),
 ];
 

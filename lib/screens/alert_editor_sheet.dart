@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:uuid/uuid.dart';
 
-import '../blocs/app_cubit.dart';
+import '../blocs/alerts_cubit.dart';
+import '../blocs/market_cubit.dart';
 import '../l10n/app_localizations.dart';
 import '../models/money.dart';
 import '../models/price_alert.dart';
@@ -92,10 +93,10 @@ class _AlertEditorSheetState extends State<AlertEditorSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final cubit = context.read<AppCubit>();
+    final cubit = context.read<AlertsCubit>();
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
-    final presentation = cubit.presentation(widget.card);
+    final presentation = context.read<MarketCubit>().presentation(widget.card);
     final currentPrice = presentation.latestMoney;
 
     return SafeArea(
@@ -279,7 +280,7 @@ class _AlertEditorSheetState extends State<AlertEditorSheet> {
     );
   }
 
-  Future<void> _save(BuildContext context, AppCubit cubit) async {
+  Future<void> _save(BuildContext context, AlertsCubit cubit) async {
     final navigator = Navigator.of(context);
     final alert = PriceAlert(
       id: widget.existing?.id ?? const Uuid().v4(),
@@ -303,7 +304,7 @@ class _AlertEditorSheetState extends State<AlertEditorSheet> {
     if (navigator.mounted) navigator.pop();
   }
 
-  Future<void> _delete(BuildContext context, AppCubit cubit, AppLocalizations l10n) async {
+  Future<void> _delete(BuildContext context, AlertsCubit cubit, AppLocalizations l10n) async {
     final existing = widget.existing;
     if (existing == null) return;
     final confirmed = await confirmDelete(

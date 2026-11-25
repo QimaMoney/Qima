@@ -94,5 +94,7 @@
 	<string>Qima turns what you say into text on this device, to record a purchase. Nothing is sent to a server.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Qima uses the camera only when you scan a receipt in Add. The photo is read on this device and not kept.</string>
+	<key>QimaCloudSyncEnabled</key>
+	<true/>
 </dict>
 </plist>

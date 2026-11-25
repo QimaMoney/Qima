@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:intl/intl.dart' hide TextDirection;
 
-import '../../blocs/app_cubit.dart';
-import '../../blocs/app_state.dart';
+import '../../blocs/market_cubit.dart';
 import '../../blocs/money_cubit.dart';
+import '../../blocs/settings_cubit.dart';
+import '../../blocs/settings_state.dart';
 import '../../l10n/app_localizations.dart';
 import '../../models/book_account.dart';
+import '../../models/money.dart';
 import '../../models/money_analysis.dart';
 import '../../models/money_settings.dart';
 import '../../theme/design_system.dart';
@@ -44,16 +46,17 @@ class _MoneyScreenState extends State<MoneyScreen> {
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
     final locale = Localizations.localeOf(context).toLanguageTag();
-    return BlocBuilder<AppCubit, AppState>(
-      buildWhen: (a, b) => a.hideBalances != b.hideBalances || a.baseCurrency != b.baseCurrency || a.rates != b.rates,
+    return BlocBuilder<SettingsCubit, SettingsState>(
+      buildWhen: (a, b) => a.hideBalances != b.hideBalances || a.baseCurrency != b.baseCurrency,
       builder: (context, app) {
+        final rates = context.select<MarketCubit, FXRates>((c) => c.state.rates);
         final state = context.watch<MoneyCubit>().state;
         final hidden = app.hideBalances;
         final ccy = app.baseCurrency;
         final book = state.book;
         final settings = state.settings;
         final now = DateTime.now();
-        final a = context.read<MoneyCubit>().monthAnalysis(_month, currency: ccy, rates: app.rates);
+        final a = context.read<MoneyCubit>().monthAnalysis(_month, currency: ccy, rates: rates);
         final isThisMonth = _month.year == now.year && _month.month == now.month;
         final recent = [for (final e in state.entriesNewestFirst) if (!e.date.isBefore(_month) && e.date.isBefore(a.end)) e];
         String name(String id) {
@@ -166,7 +169,7 @@ class _MoneyScreenState extends State<MoneyScreen> {
         ));
 
         // The trend across months.
-        final trend = MonthAnalysis.trend(book, _month, currency: ccy, rates: app.rates);
+        final trend = MonthAnalysis.trend(book, _month, currency: ccy, rates: rates);
         if (trend.any((t) => t.$2 > 0)) {
           final top = trend.map((t) => t.$2).reduce((x, y) => x > y ? x : y);
           sections.add(MoneySection(

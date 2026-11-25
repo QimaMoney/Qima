@@ -188,6 +188,13 @@ mixin _Rows on _ReaderCore, _Dates, _Amounts, _Layout, _Reconcile {
           continue;
         }
 
+        // Miles and points earned are counted in whole numbers with no
+        // currency: a count, not money, on a line that carries no date.
+        if (header == null && dates.isEmpty && amounts.isNotEmpty && lineCurrency == null && _Facts._rewards.hasMatch(description) && amounts.every((a) => a.$1.value.whole && a.$1.value.currency == null)) {
+          pendingText = '';
+          continue;
+        }
+
         // A line that only says what is left (a balance, a limit) gives
         // the balance after the row above it, and is never a transaction.
         if (header == null && amounts.isNotEmpty) {
@@ -203,7 +210,16 @@ mixin _Rows on _ReaderCore, _Dates, _Amounts, _Layout, _Reconcile {
             if (sure || (takes && _leftLabel.hasMatch(label))) {
               if (takes) {
                 final f = figures.first.value;
-                rows.last = above.copyWith(balance: f.major * (f.sign < 0 ? -1 : 1));
+                // A piece of the line set apart from the label and its
+                // figure is the row's second line ("Online purchase" across
+                // from "Balance 250.00").
+                bool ofBalance(DocToken c) {
+                  final t = _Text.normalize(c.text);
+                  return _amounts(t, const []).isNotEmpty || _leftLabel.hasMatch('$t ') || _Amounts._currencyOf(_Text._clean(t)) != null;
+                }
+
+                final said = _Text._clean([for (final c in line.cells) if (!ofBalance(c)) _Text.normalize(c.text)].join(' '));
+                rows.last = above.copyWith(balance: f.major * (f.sign < 0 ? -1 : 1), detail: [above.detail, said].where((s) => s.isNotEmpty).join(' '));
               }
               pendingText = '';
               continue;
@@ -212,6 +228,16 @@ mixin _Rows on _ReaderCore, _Dates, _Amounts, _Layout, _Reconcile {
         }
 
         if (amounts.isEmpty) {
+          // A day's name with a time and nothing else ("Tuesday 3:10 PM"
+          // between two days' messages) heads what is under it, like a
+          // date on its own. Without the time it may be a shop's name.
+          final named = header == null && dates.isEmpty ? _dayLine(_Text.normalize(line.text)) : null;
+          if (named != null && named.timed) {
+            sectionDate = named.day;
+            stackedName = null;
+            pendingText = '';
+            continue;
+          }
           // A chevron or an icon read as a character is nothing.
           if (dates.isEmpty && description.isNotEmpty && !_Text._letterOrDigit.hasMatch(description)) continue;
           if (dates.isNotEmpty && description.length < 3) {
@@ -247,11 +273,18 @@ mixin _Rows on _ReaderCore, _Dates, _Amounts, _Layout, _Reconcile {
             final prev = rowLines.isEmpty ? null : rowLines.last;
             final close = prev != null && rows.isNotEmpty && line.top - prev.bottom < prev.height * 1.2 && line.top > prev.top;
             final under = close && !(centred == true && rowAnchor != null && nearerNext(lines, line, rowAnchor, morePages: !identical(lines, allLines.last)));
-            if (under && pendingText.isEmpty && dates.isEmpty) {
+            // A date with only a small word beside it ("on 14:05 03/10/26",
+            // or a stray letter recognition left) under a row that has no
+            // date yet closes that row: it is the row's day, not a heading
+            // over the next. A date under a label of its own ("Maturity
+            // date: ...") is not.
+            final closes = under && pendingText.isEmpty && header == null && rows.last.dateGuessed && !RegExp(r'\p{L}{3,}', unicode: true).hasMatch(description);
+            final ends = closes ? heading(dates) : null;
+            if (under && pendingText.isEmpty && (dates.isEmpty || ends != null)) {
               final last = rows.removeLast();
               rows.add(StatementRow(
-                date: last.date,
-                dateGuessed: last.dateGuessed,
+                date: ends ?? last.date,
+                dateGuessed: ends == null && last.dateGuessed,
                 description: last.description.isEmpty ? description : last.description,
                 detail: last.description.isEmpty ? last.detail : [last.detail, description].where((s) => s.isNotEmpty).join(' '),
                 amount: last.amount,
@@ -428,7 +461,58 @@ mixin _Rows on _ReaderCore, _Dates, _Amounts, _Layout, _Reconcile {
     final sided = _balanceSide(local, balanceFirst);
     // Balance printed first: each row's amount is its second figure.
     if (!identical(sided, local)) amountX.addAll(flipX);
-    return (_signsFromMarkers(_signsFromColumns(_signsFromBalances(_withDocumentCurrency(_amountsFromBalances(sided, fromBalance))), amountX)), bubbleLines);
+    return (_signsFromWords(_signsFromMarkers(_signsFromColumns(_signsFromBalances(_withDocumentCurrency(_amountsFromBalances(sided, fromBalance))), amountX))), bubbleLines);
+  }
+
+  // What a list's row is called when the name itself says which way the
+  // money went. Kept to the words that say it outright: "payment" is money
+  // out of an account and money in to a card, a "transfer" or a "deposit"
+  // goes either way, so those leave the direction a guess.
+  static final _rowRefund = RegExp(
+    r'refund|cash ?back|استرداد|مسترد|استرجاع|مسترجع|remboursement|reembolso|devolución',
+    caseSensitive: false,
+  );
+  static final _rowReversal = RegExp(r'reversal|reversed|\brev\b|عكس', caseSensitive: false);
+  static final _rowIncoming = RegExp(
+    r'\bincoming\b|حوالة واردة|تحويل وارد|virement reçu|transferencia recibida',
+    caseSensitive: false,
+  );
+  static final _rowOut = RegExp(
+    r'purchase|\bpos\b|withdrawal|\boutgoing\b|'
+    r'شراء|مشتريات|نقاط البيع|سحب|حوالة صادرة|تحويل صادر|\bachat\b|\bretrait\b|virement émis|\bcompra\b|\bretiro\b|transferencia enviada',
+    caseSensitive: false,
+  );
+  // Beside one of the words above these make the row unclear: a purchase
+  // returned or cancelled, a cash deposit at an ATM, a card's payment, the
+  // fee on a transfer received.
+  static final _rowUnclear = RegExp(
+    r'return|\bret\b|cancel|\bvoid|\bcredit|deposit|payment|\breceived\b|مرتجع|ملغ|إلغاء|الغاء|إيداع|ايداع|سداد|\bretour\b|\bavoir\b|annul|\bcrédit\b|\babono\b|\bdepósito\b',
+    caseSensitive: false,
+  );
+  static final _rowFee = RegExp(r'\bfees?\b|charge|commission|رسوم|عمولة|\bfrais\b|comisión', caseSensitive: false);
+
+  /// A row with no sign, no column and no balance to say its direction
+  /// still says it when its own name does ("Online purchase", "Refund",
+  /// "حوالة صادرة"). Only rows whose direction was a guess change.
+  List<StatementRow> _signsFromWords(List<StatementRow> rows) => [
+        for (final r in rows)
+          if (r.signGuessed)
+            switch (_saidDirection('${r.description} ${r.detail}')) { 0 => r, final d => r.copyWith(amount: r.amount.abs() * d, signGuessed: false) }
+          else
+            r,
+      ];
+
+  /// 1 in, -1 out, 0 when the words don't say or say both.
+  static int _saidDirection(String text) {
+    final refund = _rowRefund.hasMatch(text), incoming = _rowIncoming.hasMatch(text), out = _rowOut.hasMatch(text);
+    final unclear = _rowUnclear.hasMatch(text);
+    // What a reversal gives back depends on what it reverses: a purchase
+    // reversed is money in, a refund or a payment reversed is not.
+    if (_rowReversal.hasMatch(text)) return refund || incoming || unclear ? 0 : 1;
+    // Money given back is money in whatever it was for.
+    if (refund) return 1;
+    if (incoming) return out || unclear || _rowFee.hasMatch(text) ? 0 : 1;
+    return out && !unclear ? -1 : 0;
   }
 
   /// The full Gregorian dates in the cells at the start of a line and at
@@ -464,66 +548,48 @@ mixin _Rows on _ReaderCore, _Dates, _Amounts, _Layout, _Reconcile {
   /// lines with no gap between them that read as sentences (a dozen words
   /// or more over two lines or more) with the amount inside a sentence. In
   /// a list the amount is a piece of text of its own, beside the name.
+  ///
+  /// A page of messages shows itself by the line between two days of them:
+  /// a day and a time alone in the middle of the page ("Yesterday 8:40 PM").
+  /// There every block is a bubble however its pieces sit: recognition
+  /// loses or misplaces pieces of a line that mixes two scripts, which
+  /// leaves a figure looking set apart. And there the bubble cut off by the
+  /// top of the screen runs into the first whole one, so the page's first
+  /// block, when it reads as no message, is tried again without its first
+  /// lines.
   Map<int, List<_Line>> _messageBlocks(List<_Line> lines) {
     final out = <int, List<_Line>>{};
-    var start = 0;
-    void close(int end) {
-      final block = lines.sublist(start, end);
-      final words = block.fold(0, (n, l) => n + l.text.trim().split(RegExp(r'\s+')).length);
-      if (block.length < 2) return;
-      // A block set apart that says what happened and holds one figure
-      // that moved is a message however briefly it is written ("Purchase /
-      // SAR 41.00 / from X / remaining 350.00"), and so is a one-time code
-      // that quotes the amount it is for.
-      // A list sets the amount apart, across the row from the name; a
-      // message is one column of text.
-      // (A gap between words is only a piece the recognition missed.)
-      bool figureOnly(DocToken c) {
-        final t = _Text.normalize(c.text);
-        final found = _amounts(t, const []);
-        if (found.isEmpty) return false;
-        final rest = found.fold(t, (r, a) => r.replaceRange(a.span.start, a.span.end, ' '.padRight(a.span.end - a.span.start)));
-        return !_Facts._hasWord.hasMatch(rest);
-      }
+    bool betweenDays(_Line l) {
+      final right = l.cells.map((c) => c.right).reduce(math.max);
+      if (right - l.left > 0.6 || ((l.left + right) / 2 - 0.5).abs() > 0.12) return false;
+      return _dayLine(_Text.normalize(l.text))?.timed ?? false;
+    }
 
-      final oneColumn = block.every((l) {
-        var right = l.cells.first.right;
-        var before = l.cells.first;
-        for (final c in l.cells.skip(1)) {
-          if (c.x - right > 0.12 && (figureOnly(c) || figureOnly(before))) return false;
-          if (c.right > right) {
-            right = c.right;
-            before = c;
-          }
-        }
-        return true;
-      });
-      final flat = [for (final l in block) _Layout._logical(_Text.normalize(l.text))].join(' ');
-      if (oneColumn && messageIntent(flat) != MessageIntent.unknown) {
-        final figures = _amounts(flat, [..._dates(flat).$2, for (final m in _Dates._time.allMatches(flat)) _Span(m.start, m.end)]);
-        final moved = figures.where((a) => !_leftLabel.hasMatch(flat.substring(math.max(0, a.span.start - 40), a.span.start))).length;
-        if (moved == 1) {
-          out[start] = block;
-          return;
-        }
+    final firstDayLine = lines.indexWhere(betweenDays);
+    final chat = firstDayLine >= 0;
+    var start = 0;
+    // The first block of two lines or more is still to come.
+    var top = true;
+    void close(int end) {
+      if (end - start < 2) return;
+      final whole = lines.sublist(start, end);
+      // Without its first lines only where a cut-off bubble can be: at the
+      // top of a page of messages, above the first day's line. What is
+      // left must say what happened and hold one figure that moved; the
+      // end of the cut-off bubble alone says neither.
+      final cut = top && chat && start < firstDayLine;
+      top = false;
+      if (_isMessage(whole, chat: chat)) {
+        out[start] = whole;
+        return;
       }
-      if (words < 12) return;
-      var inSentence = false;
-      // In one column of text a line is read whole: text recognition cuts
-      // a line of two scripts into pieces wherever the script changes.
-      final pieces = oneColumn ? [for (final l in block) l.text] : [for (final c in block.expand((l) => l.cells)) c.text];
-      for (final piece in pieces) {
-        final text = _Text.normalize(piece);
-        final found = _amounts(text, _dates(text).$2);
-        if (found.isEmpty) continue;
-        final rest = found.fold(text, (t, a) => t.replaceRange(a.span.start, a.span.end, ' '.padRight(a.span.end - a.span.start)));
-        final restWords = rest.split(RegExp(r'\s+')).where((w) => RegExp(r'\p{L}{2,}', unicode: true).hasMatch(w) && _Amounts._currencyOf(w) == null).length;
-        // A message written as fields ("Amount: SAR 13.00") names each
-        // figure with one word.
-        if (restWords < 2 && !StatementReader._fieldLabel.hasMatch(text)) return;
-        inSentence = true;
+      if (!cut) return;
+      for (var from = start + 1; from <= end - 2; from++) {
+        final rest = lines.sublist(from, end);
+        if (!_isMessage(rest, chat: true, said: true)) continue;
+        out[from] = rest;
+        return;
       }
-      if (inSentence) out[start] = block;
     }
 
     for (var i = 1; i <= lines.length; i++) {
@@ -538,5 +604,63 @@ mixin _Rows on _ReaderCore, _Dates, _Amounts, _Layout, _Reconcile {
       }
     }
     return out;
+  }
+
+  /// Whether a block of lines reads as one message. [chat]: on a page of
+  /// messages, where how the pieces sit says nothing. [said]: only when
+  /// its words say what happened, not for reading as sentences alone.
+  bool _isMessage(List<_Line> block, {required bool chat, bool said = false}) {
+    final words = block.fold(0, (n, l) => n + l.text.trim().split(RegExp(r'\s+')).length);
+    if (block.length < 2) return false;
+    // A block set apart that says what happened and holds one figure
+    // that moved is a message however briefly it is written ("Purchase /
+    // SAR 41.00 / from X / remaining 350.00"), and so is a one-time code
+    // that quotes the amount it is for.
+    // A list sets the amount apart, across the row from the name; a
+    // message is one column of text.
+    // (A gap between words is only a piece the recognition missed.)
+    bool figureOnly(DocToken c) {
+      final t = _Text.normalize(c.text);
+      final found = _amounts(t, const []);
+      if (found.isEmpty) return false;
+      final rest = found.fold(t, (r, a) => r.replaceRange(a.span.start, a.span.end, ' '.padRight(a.span.end - a.span.start)));
+      return !_Facts._hasWord.hasMatch(rest);
+    }
+
+    final oneColumn = block.every((l) {
+      var right = l.cells.first.right;
+      var before = l.cells.first;
+      for (final c in l.cells.skip(1)) {
+        if (c.x - right > 0.12 && (figureOnly(c) || figureOnly(before))) return false;
+        if (c.right > right) {
+          right = c.right;
+          before = c;
+        }
+      }
+      return true;
+    });
+    final flat = [for (final l in block) _Layout._logical(_Text.normalize(l.text))].join(' ');
+    if ((oneColumn || chat) && messageIntent(flat) != MessageIntent.unknown) {
+      final figures = _amounts(flat, [..._dates(flat).$2, for (final m in _Dates._time.allMatches(flat)) _Span(m.start, m.end)]);
+      final moved = figures.where((a) => !_leftLabel.hasMatch(flat.substring(math.max(0, a.span.start - 40), a.span.start))).length;
+      if (moved == 1) return true;
+    }
+    if (said || words < 12) return false;
+    var inSentence = false;
+    // In one column of text a line is read whole: text recognition cuts
+    // a line of two scripts into pieces wherever the script changes.
+    final pieces = oneColumn || chat ? [for (final l in block) l.text] : [for (final c in block.expand((l) => l.cells)) c.text];
+    for (final piece in pieces) {
+      final text = _Text.normalize(piece);
+      final found = _amounts(text, _dates(text).$2);
+      if (found.isEmpty) continue;
+      final rest = found.fold(text, (t, a) => t.replaceRange(a.span.start, a.span.end, ' '.padRight(a.span.end - a.span.start)));
+      final restWords = rest.split(RegExp(r'\s+')).where((w) => RegExp(r'\p{L}{2,}', unicode: true).hasMatch(w) && _Amounts._currencyOf(w) == null).length;
+      // A message written as fields ("Amount: SAR 13.00") names each
+      // figure with one word.
+      if (restWords < 2 && !StatementReader._fieldLabel.hasMatch(text)) return false;
+      inSentence = true;
+    }
+    return inSentence;
   }
 }

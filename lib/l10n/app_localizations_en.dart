@@ -97,6 +97,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String get addCustomTickerSubmit => 'Add ticker';
 
   @override
+  String get addCustomTickerConfirmBody =>
+      'This is what the price feed has under this symbol. Add it only if it is the one you mean.';
+
+  @override
+  String get addCustomTickerConfirmNo => 'Not this one';
+
+  @override
   String get cardConfigAddToWatchlist => 'Add to watchlist';
 
   @override
@@ -249,7 +256,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settingsDefaultRangeFooter =>
-      'Used when opening an asset for the first time.';
+      'Charts on Home and on an asset open on this range. Choosing a range on an asset\'s chart updates it.';
 
   @override
   String get settingsWidgetRefresh => 'Widget refresh interval';
@@ -820,6 +827,51 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get settingsICloudSyncStatusStorageFull =>
       'iCloud storage for Qima is full';
+
+  @override
+  String get settingsCloudLogSyncSwitch => 'Faster sync (early version)';
+
+  @override
+  String get settingsCloudLogSyncFooter =>
+      'A new way to sync your book through iCloud, still being tested. It runs beside the sync above and deletes nothing when you turn it off.';
+
+  @override
+  String settingsCloudLogSyncStatusUpToDate(String time) {
+    return 'Up to date · $time';
+  }
+
+  @override
+  String get settingsCloudLogSyncStatusSyncing => 'Syncing…';
+
+  @override
+  String get settingsCloudLogSyncStatusWaiting =>
+      'Waiting for another device to finish sending';
+
+  @override
+  String get settingsCloudLogSyncStatusOffline =>
+      'Can\'t reach iCloud. Trying again soon.';
+
+  @override
+  String get settingsCloudLogSyncStatusQuota => 'iCloud storage is full';
+
+  @override
+  String get settingsCloudLogSyncStatusNotSignedIn => 'Not signed in to iCloud';
+
+  @override
+  String get settingsCloudLogSyncStatusUnavailable =>
+      'Not available in this build';
+
+  @override
+  String get settingsCloudLogSyncStatusZoneMissing =>
+      'The synced data is missing in iCloud and could not be made again';
+
+  @override
+  String get settingsCloudLogSyncStatusNewerVersion =>
+      'Another device uses a newer version. Update Qima.';
+
+  @override
+  String get settingsCloudLogSyncStatusOther =>
+      'Sync stopped. Trying again soon.';
 
   @override
   String get backupTitle => 'Backup & restore';
@@ -4195,6 +4247,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get budgetNone => 'No budget';
 
   @override
+  String get budgetAdd => 'New budget';
+
+  @override
   String budgetOf(String amount) {
     return 'Budget $amount';
   }
@@ -4537,6 +4592,12 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get importMoveMessage => 'Move to another account';
+
+  @override
+  String get importRowAccount => 'Card or account';
+
+  @override
+  String get importRowAccountWholeFile => 'Moves every row from this file';
 
   @override
   String get bankMessagesNotifyTitle => 'Bank messages to check';

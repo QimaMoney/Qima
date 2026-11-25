@@ -4,7 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:qima/blocs/app_cubit.dart';
+import 'package:qima/blocs/app_blocs.dart';
 import 'package:qima/models/asset.dart';
 import 'package:qima/models/book_entry.dart';
 import 'package:qima/models/fx_history.dart';
@@ -105,10 +105,10 @@ void main() {
     messenger.setMockStreamHandler(eventChannel, null);
   });
 
-  Future<AppCubit> device(Directory dir, {bool sync = true}) async {
+  Future<AppBlocs> device(Directory dir, {bool sync = true}) async {
     LocalFileStore.overrideDirectoryForTesting(dir);
     SharedPreferences.setMockInitialValues({'iCloudSyncEnabled': sync});
-    final cubit = AppCubit(repository: _NoopRepository(), cloudStore: SwitchableCloudKVStore(), notificationService: _FakeNotificationService());
+    final cubit = AppBlocs(repository: _NoopRepository(), cloudStore: SwitchableCloudKVStore(), notificationService: _FakeNotificationService());
     await cubit.init();
     return cubit;
   }
@@ -140,8 +140,8 @@ void main() {
         updatedAt: DateTime.parse(stamp),
       );
 
-  Future<void> cleanUp(AppCubit c, Directory d) async {
-    await c.disposeCloudSync();
+  Future<void> cleanUp(AppBlocs c, Directory d) async {
+    await c.sync.disposeCloudSync();
     await d.delete(recursive: true);
   }
 
@@ -150,21 +150,21 @@ void main() {
     final cubit = await device(dir);
     final reloaded = <String?>[];
     cubit.onBookChanged = (key) async => reloaded.add(key);
-    expect(cubit.state.transactions, isEmpty);
+    expect(cubit.holdings.state.transactions, isEmpty);
 
     cloudValues[LedgerNames.legacyTransactions] = list([trade('t1', 4)]);
     broadcastChange(LedgerNames.legacyTransactions);
-    await until(() => cubit.state.transactions.isNotEmpty);
+    await until(() => cubit.holdings.state.transactions.isNotEmpty);
 
-    expect(cubit.state.transactions.single.id, 't1');
-    expect(cubit.state.transactions.single.quantity, 4);
+    expect(cubit.holdings.state.transactions.single.id, 't1');
+    expect(cubit.holdings.state.transactions.single.quantity, 4);
     expect(reloaded, contains(BookStore.entriesKey));
     expect(oldWrites, isEmpty);
 
     // An edit on the old device arrives the same way.
     cloudValues[LedgerNames.legacyTransactions] = list([trade('t1', 9).copyWith(updatedAt: DateTime.parse(stamp).add(const Duration(minutes: 1)))]);
     broadcastChange(LedgerNames.legacyTransactions);
-    await until(() => cubit.state.transactions.isNotEmpty && cubit.state.transactions.single.quantity == 9);
+    await until(() => cubit.holdings.state.transactions.isNotEmpty && cubit.holdings.state.transactions.single.quantity == 9);
     expect(oldWrites, isEmpty);
     await cleanUp(cubit, dir);
   });
@@ -179,7 +179,7 @@ void main() {
     broadcastChange(LedgerNames.legacyEntries);
     await until(() => reloaded.contains(BookStore.entriesKey));
 
-    expect((await cubit.bookStore.entries.load()).map((e) => e.id), ['e1']);
+    expect((await cubit.sync.bookStore.entries.load()).map((e) => e.id), ['e1']);
     await cleanUp(cubit, dir);
   });
 
@@ -201,10 +201,10 @@ void main() {
     cloudValues[LedgerNames.legacyTransactions] = list([trade('t1', 4)]);
     broadcastChange(LedgerNames.legacyEntries);
     broadcastChange(LedgerNames.legacyTransactions);
-    await until(() => cubit.state.transactions.isNotEmpty);
-    await cubit.bookStore.entries.load();
+    await until(() => cubit.holdings.state.transactions.isNotEmpty);
+    await cubit.sync.bookStore.entries.load();
 
-    final live = (await cubit.bookStore.entries.load());
+    final live = (await cubit.sync.bookStore.entries.load());
     expect(live.map((e) => e.id), ['t1']);
     expect(reloaded.where((k) => k == BookStore.entriesKey), isNotEmpty);
     await cleanUp(cubit, dir);
@@ -214,8 +214,8 @@ void main() {
     cloudValues[LedgerNames.legacyTransactions] = list([trade('t1', 4)]);
     final dir = await Directory.systemTemp.createTemp('qima_legacy_d');
     final cubit = await device(dir);
-    expect(cubit.state.transactions.map((t) => t.id), ['t1']);
-    expect(cubit.legacyAbsorbProblem, isNull);
+    expect(cubit.holdings.state.transactions.map((t) => t.id), ['t1']);
+    expect(cubit.sync.legacyAbsorbProblem, isNull);
     await cleanUp(cubit, dir);
   });
 
@@ -223,11 +223,11 @@ void main() {
     cloudValues[LedgerNames.legacyTransactions] = list([trade('t1', 4)]);
     final dir = await Directory.systemTemp.createTemp('qima_legacy_e');
     final cubit = await device(dir, sync: false);
-    expect(cubit.state.transactions, isEmpty);
+    expect(cubit.holdings.state.transactions, isEmpty);
     expect(oldReads, isEmpty);
 
-    await cubit.setICloudSyncEnabled(true);
-    expect(cubit.state.transactions.map((t) => t.id), ['t1']);
+    await cubit.sync.setICloudSyncEnabled(true);
+    expect(cubit.holdings.state.transactions.map((t) => t.id), ['t1']);
     expect(oldWrites, isEmpty);
     await cleanUp(cubit, dir);
   });
@@ -238,22 +238,22 @@ void main() {
     final dir = await Directory.systemTemp.createTemp('qima_legacy_f');
     final cubit = await device(dir, sync: false);
     broadcastChange(LedgerNames.legacyTransactions);
-    await cubit.adoptCloudChanges();
-    await cubit.holdings.load();
+    await cubit.sync.adoptCloudChanges();
+    await cubit.holdings.ledgerStore.load();
 
-    expect(cubit.state.transactions, isEmpty);
-    expect(await cubit.bookStore.entries.load(), isEmpty);
+    expect(cubit.holdings.state.transactions, isEmpty);
+    expect(await cubit.sync.bookStore.entries.load(), isEmpty);
     expect(oldReads, isEmpty);
 
     // Switching it off again stops it too.
-    await cubit.setICloudSyncEnabled(true);
-    expect(cubit.state.transactions, isNotEmpty);
-    await cubit.setICloudSyncEnabled(false);
+    await cubit.sync.setICloudSyncEnabled(true);
+    expect(cubit.holdings.state.transactions, isNotEmpty);
+    await cubit.sync.setICloudSyncEnabled(false);
     oldReads.clear();
     cloudValues[LedgerNames.legacyTransactions] = list([trade('t1', 4), trade('t2', 1)]);
-    await cubit.adoptCloudChanges();
+    await cubit.sync.adoptCloudChanges();
     expect(oldReads, isEmpty);
-    expect(cubit.state.transactions.map((t) => t.id), ['t1']);
+    expect(cubit.holdings.state.transactions.map((t) => t.id), ['t1']);
     await cleanUp(cubit, dir);
   });
 }

@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:intl/intl.dart';
 
-import '../blocs/app_cubit.dart';
-import '../blocs/app_state.dart';
+import '../blocs/market_cubit.dart';
+import '../blocs/market_state.dart';
+import '../blocs/settings_cubit.dart';
+import '../blocs/watchlist_cubit.dart';
 import '../l10n/app_localizations.dart';
 import '../models/asset.dart';
 import '../models/chart_range.dart';
@@ -63,8 +65,8 @@ class _InstrumentDetailScreenState extends State<InstrumentDetailScreen> {
   void initState() {
     super.initState();
     _card = widget.card;
-    final cubit = context.read<AppCubit>();
-    final preferred = cubit.state.preferredChartRange;
+    final cubit = context.read<MarketCubit>();
+    final preferred = context.read<SettingsCubit>().state.preferredChartRange;
     _range = _detailRanges.contains(preferred) ? preferred : ChartRange.fallbackDefault;
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -79,11 +81,11 @@ class _InstrumentDetailScreenState extends State<InstrumentDetailScreen> {
   /// Triggers a lazy history backfill the first time a range that needs
   /// data older than what's cached is selected — the replacement for the
   /// old explicit "Load history" button. Cheap to call repeatedly:
-  /// `AppCubit.loadHistory` itself no-ops while already loading, and this
+  /// `MarketCubit.loadHistory` itself no-ops while already loading, and this
   /// only fires when the currently available points don't reach back far
   /// enough for the requested range.
   void _ensureHistoryFor(ChartRange range) {
-    final cubit = context.read<AppCubit>();
+    final cubit = context.read<MarketCubit>();
     final presentation = cubit.presentation(_card);
     final now = DateTime.now();
     final points = presentation.points;
@@ -97,18 +99,19 @@ class _InstrumentDetailScreenState extends State<InstrumentDetailScreen> {
   void _select(ChartRange range) {
     setState(() => _range = range);
     if (!range.isExtended) {
-      context.read<AppCubit>().setPreferredChartRange(range);
+      context.read<SettingsCubit>().setPreferredChartRange(range);
     }
     _ensureHistoryFor(range);
   }
 
   @override
   Widget build(BuildContext context) {
-    final cubit = context.read<AppCubit>();
+    final cubit = context.read<MarketCubit>();
+    final watchlist = context.read<WatchlistCubit>();
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
 
-    return BlocBuilder<AppCubit, AppState>(
+    return BlocBuilder<MarketCubit, MarketState>(
       builder: (context, state) {
         final presentation = cubit.presentation(_card);
         final instrument = presentation.instrument;
@@ -143,13 +146,13 @@ class _InstrumentDetailScreenState extends State<InstrumentDetailScreen> {
                       if (selected != null) {
                         final updated = _card.copyWith(currency: selected);
                         setState(() => _card = updated);
-                        await cubit.updateCard(updated);
+                        await watchlist.updateCard(updated);
                       }
                     } else if (value.startsWith('unit:')) {
                       final unit = PriceUnit.values.byName(value.substring(5));
                       final updated = _card.copyWith(unit: unit);
                       setState(() => _card = updated);
-                      await cubit.updateCard(updated);
+                      await watchlist.updateCard(updated);
                     }
                   },
                   itemBuilder: (context) => [
@@ -295,7 +298,7 @@ class _InstrumentDetailScreenState extends State<InstrumentDetailScreen> {
     DateTime now,
     RangeChange? windowChange,
     Color accent,
-    AppState state,
+    MarketState state,
   ) {
     final windowed = range.filter(presentation.points, now);
     if (windowed.length < 2) {

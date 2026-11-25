@@ -9,9 +9,15 @@ import 'synced_store.dart';
 ///
 /// [collection] names the rows in the database and [file] is the JSON file on
 /// web. [legacyFile] is the file an earlier build kept the collection in,
-/// which the database imports from.
-LocalRecords<BookEntry> bookEntryRecords({required String collection, required String file, required String legacyFile}) =>
-    platform.entryRecords(collection: collection, file: file, legacyFile: legacyFile);
+/// which the database imports from. [prefer] is the tie rule of the store
+/// that writes through the records, which the database rows are held to.
+LocalRecords<BookEntry> bookEntryRecords({
+  required String collection,
+  required String file,
+  required String legacyFile,
+  bool Function(Record<BookEntry> incoming, Record<BookEntry> stored)? prefer,
+}) =>
+    platform.entryRecords(collection: collection, file: file, legacyFile: legacyFile, prefer: prefer);
 
 /// The steps of the ledger migration that did not finish this run, by name,
 /// with the error. Empty when all did, and always on web. Read it after the
@@ -23,5 +29,6 @@ LocalRecords<T> bookDocumentRecords<T extends Syncable>({
   required String file,
   required String legacyFile,
   required T Function(Map<String, dynamic>) itemFromJson,
+  bool Function(Record<T> incoming, Record<T> stored)? prefer,
 }) =>
-    platform.documentRecords<T>(collection: collection, file: file, legacyFile: legacyFile, itemFromJson: itemFromJson);
+    platform.documentRecords<T>(collection: collection, file: file, legacyFile: legacyFile, itemFromJson: itemFromJson, prefer: prefer);

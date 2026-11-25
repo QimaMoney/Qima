@@ -3,10 +3,10 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:qima/blocs/app_cubit.dart';
+import 'package:qima/blocs/app_blocs.dart';
+import '../helpers/app_blocs.dart';
 import 'package:qima/l10n/app_localizations.dart';
 import 'package:qima/screens/backup_screen.dart';
-import 'package:qima/services/backup/backup_service.dart';
 import 'package:qima/services/local_file_store.dart';
 import 'package:qima/services/preferences.dart';
 import 'package:qima/theme/app_theme.dart';
@@ -29,23 +29,18 @@ void main() {
     }
   });
 
-  Future<AppCubit> populatedCubit() async {
-    final cubit = AppCubit();
-    cubit.preferences = await Preferences.create();
-    cubit.backupService = BackupService(
-      watchlistStore: cubit.watchlistStore,
-      bookStore: cubit.bookStore,
-      customInstrumentStore: cubit.customInstrumentStore,
-      alertsStore: cubit.alertsStore,
-      preferences: cubit.preferences,
-    );
-    cubit.emit(cubit.state.copyWith(initialized: true));
+  Future<AppBlocs> populatedCubit() async {
+    final cubit = AppBlocs();
+    final preferences = await Preferences.create();
+    cubit.settings.preferences = preferences;
+    await cubit.sync.start(preferences);
+    cubit.seed(initialized: true);
     return cubit;
   }
 
-  Widget harness(AppCubit cubit) {
-    return BlocProvider<AppCubit>.value(
-      value: cubit,
+  Widget harness(AppBlocs cubit) {
+    return MultiBlocProvider(
+      providers: cubit.providers,
       child: MaterialApp(
         localizationsDelegates: AppLocalizations.localizationsDelegates,
         supportedLocales: AppLocalizations.supportedLocales,
@@ -66,7 +61,7 @@ void main() {
 
   testWidgets('shows the last backup date once one has been recorded', (tester) async {
     final cubit = await populatedCubit();
-    await cubit.backupService.setLastBackupAt(DateTime(2026, 1, 15));
+    await cubit.sync.backupService.setLastBackupAt(DateTime(2026, 1, 15));
     await tester.pumpWidget(harness(cubit));
     await tester.pump();
 
@@ -85,10 +80,10 @@ void main() {
 
   testWidgets('shows the reminder card when a backup is due', (tester) async {
     final cubit = await populatedCubit();
-    await cubit.backupService.setReminderEnabled(true);
-    await cubit.backupService.setDataChangedSinceLastBackup(true);
-    await cubit.backupService.setLastBackupAt(DateTime.now().subtract(const Duration(days: 45)));
-    cubit.emit(cubit.state.copyWith(backupReminderDue: true));
+    await cubit.sync.backupService.setReminderEnabled(true);
+    await cubit.sync.backupService.setDataChangedSinceLastBackup(true);
+    await cubit.sync.backupService.setLastBackupAt(DateTime.now().subtract(const Duration(days: 45)));
+    cubit.seed(backupReminderDue: true);
 
     await tester.pumpWidget(harness(cubit));
     await tester.pump();
@@ -110,7 +105,7 @@ void main() {
 
   testWidgets('the reminder toggle reflects and updates BackupService.reminderEnabled', (tester) async {
     final cubit = await populatedCubit();
-    await cubit.backupService.setReminderEnabled(true);
+    await cubit.sync.backupService.setReminderEnabled(true);
     await tester.pumpWidget(harness(cubit));
     await tester.pump();
     // The reminder card sits at the bottom of the list, below the fold.
@@ -127,12 +122,12 @@ void main() {
     await tester.runAsync(() async {
       await tester.tap(switchFinder, warnIfMissed: false);
       final deadline = DateTime.now().add(const Duration(seconds: 5));
-      while (cubit.backupService.reminderEnabled && DateTime.now().isBefore(deadline)) {
+      while (cubit.sync.backupService.reminderEnabled && DateTime.now().isBefore(deadline)) {
         await Future<void>.delayed(const Duration(milliseconds: 10));
       }
     });
     await tester.pump();
 
-    expect(cubit.backupService.reminderEnabled, isFalse);
+    expect(cubit.sync.backupService.reminderEnabled, isFalse);
   });
 }

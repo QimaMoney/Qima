@@ -150,7 +150,7 @@ class BackupService {
 
   /// Reads every collection's raw [SyncedStore] records (metadata and
   /// tombstones intact) plus the syncable settings subset, straight from the
-  /// stores — never from in-memory `AppState`, so an export always reflects
+  /// stores — never from in-memory state, so an export always reflects
   /// what's actually on disk. Throws [BackupError] with
   /// [BackupErrorKind.holdingsUnreadable], writing nothing, while the holdings
   /// of an earlier version are not in the book.
@@ -595,7 +595,7 @@ class BackupService {
   }
 
   /// Set whenever ANY user collection mutates (watchlist/holdings/custom
-  /// tickers/alerts) — see `AppCubit`'s wiring — and cleared on a successful
+  /// tickers/alerts) — see `SyncCubit.markDataChanged` — and cleared on a successful
   /// full JSON export. The reminder only fires if data actually changed
   /// since the last backup, not merely because 30 days elapsed on a
   /// portfolio that hasn't moved.

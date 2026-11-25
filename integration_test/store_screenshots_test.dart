@@ -6,6 +6,9 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:qima/blocs/app_cubit.dart';
+import 'package:qima/blocs/market_cubit.dart';
+import 'package:qima/blocs/watchlist_cubit.dart';
+import 'package:qima/blocs/zakat_cubit.dart';
 import 'package:qima/main.dart';
 import 'package:qima/models/zakat.dart';
 import 'package:qima/blocs/money_cubit.dart';
@@ -63,14 +66,15 @@ void main() {
 
   testWidgets('store screenshots ($_language)', (tester) async {
     await tester.pumpWidget(const QimaApp());
-    final cubit = tester.element(find.byType(MaterialApp)).read<AppCubit>();
+    final context = tester.element(find.byType(MaterialApp));
+    final cubit = context.read<AppCubit>();
     // Wait for the stores to load before seeding.
     final ready = DateTime.now().add(const Duration(seconds: 30));
     while (!cubit.state.initialized && DateTime.now().isBefore(ready)) {
       await _wait(const Duration(milliseconds: 250));
     }
     final arabic = _language == 'ar';
-    await seedStoreDemo(cubit, language: arabic ? AppLanguage.ar : AppLanguage.en, currency: 'SAR');
+    await seedStoreDemo(context, language: arabic ? AppLanguage.ar : AppLanguage.en, currency: 'SAR');
     final money = tester.element(find.byType(MaterialApp)).read<MoneyCubit>();
     await seedStoreBook(money, arabic: arabic);
     await _waitFor(find.byType(HomeShell, skipOffstage: false));
@@ -80,7 +84,7 @@ void main() {
     // A fresh simulator can still be fetching when the seed returns; every
     // card needs its price before the first shot.
     final priced = DateTime.now().add(const Duration(seconds: 60));
-    while (!cubit.state.cards.every((c) => cubit.state.seriesByID[c.instrumentID]?.quotes.isNotEmpty ?? false)) {
+    while (!context.read<WatchlistCubit>().state.cards.every((c) => context.read<MarketCubit>().state.seriesByID[c.instrumentID]?.quotes.isNotEmpty ?? false)) {
       if (DateTime.now().isAfter(priced)) throw TestFailure('Prices did not load.');
       await _wait(const Duration(milliseconds: 500));
     }
@@ -115,7 +119,7 @@ void main() {
     _push(tester, const ZakatScreen());
     // The nisab needs live gold and silver prices.
     final nisab = DateTime.now().add(const Duration(seconds: 30));
-    while (cubit.zakatAssessment.status == NisabStatus.thresholdUnknown) {
+    while (context.read<ZakatCubit>().assessment.status == NisabStatus.thresholdUnknown) {
       if (DateTime.now().isAfter(nisab)) throw TestFailure('Nisab prices did not load.');
       await _wait(const Duration(milliseconds: 500));
     }

@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:qima/blocs/app_cubit.dart';
+import 'package:qima/blocs/app_blocs.dart';
+import '../helpers/app_blocs.dart';
 import 'package:qima/l10n/app_localizations.dart';
 import 'package:qima/l10n/app_localizations_en.dart';
 import 'package:qima/models/asset.dart';
@@ -67,19 +68,19 @@ void main() {
     addTearDown(tester.view.reset);
   }
 
-  Future<AppCubit> cubit() async {
-    final c = AppCubit(repository: _OfflineRepository(), holdings: _MemoryHoldings());
-    c.preferences = await Preferences.create();
-    c.emit(c.state.copyWith(
+  Future<AppBlocs> cubit() async {
+    final c = AppBlocs(repository: _OfflineRepository(), holdings: _MemoryHoldings());
+    c.settings.preferences = await Preferences.create();
+    c.seed(
       initialized: true,
       baseCurrency: 'SAR',
       rates: FXRates(base: 'USD', rates: const {'USD': 1, 'SAR': 3.75}, updatedAt: DateTime(2026)),
-    ));
+    );
     return c;
   }
 
-  Widget harness(AppCubit c, Widget home) => BlocProvider<AppCubit>.value(
-        value: c,
+  Widget harness(AppBlocs c, Widget home) => MultiBlocProvider(
+        providers: c.providers,
         child: MaterialApp(
           localizationsDelegates: AppLocalizations.localizationsDelegates,
           supportedLocales: AppLocalizations.supportedLocales,
@@ -124,25 +125,25 @@ void main() {
     await tester.tap(find.text(en.csvImportConfirm(2)));
     await tester.pumpAndSettle();
     expect(find.text(en.csvImportDoneTitle(2)), findsOneWidget);
-    expect(c.state.transactions, hasLength(2));
-    expect(c.state.transactions.firstWhere((t) => t.instrumentID == 'metal.XAU').currency, 'SAR',
+    expect(c.holdings.state.transactions, hasLength(2));
+    expect(c.holdings.state.transactions.firstWhere((t) => t.instrumentID == 'metal.XAU').currency, 'SAR',
         reason: 'an empty currency cell takes the fallback');
 
     await tester.tap(find.text(en.csvImportUndo));
     await tester.pumpAndSettle();
-    expect(c.state.transactions, isEmpty);
+    expect(c.holdings.state.transactions, isEmpty);
   });
 
   testWidgets('a file that cannot be added says so in words, adds nothing, and can be tried again', (tester) async {
     phone(tester);
     final store = _MemoryHoldings();
-    final c = AppCubit(repository: _OfflineRepository(), holdings: store);
-    c.preferences = await Preferences.create();
-    c.emit(c.state.copyWith(
+    final c = AppBlocs(repository: _OfflineRepository(), holdings: store);
+    c.settings.preferences = await Preferences.create();
+    c.seed(
       initialized: true,
       baseCurrency: 'SAR',
       rates: FXRates(base: 'USD', rates: const {'USD': 1, 'SAR': 3.75}, updatedAt: DateTime(2026)),
-    ));
+    );
     await tester.pumpWidget(harness(c, const CsvImportScreen(fileName: 'broker.csv', text: csv)));
     await tester.pumpAndSettle();
     await tester.tap(find.text(en.csvImportReview));
@@ -154,7 +155,7 @@ void main() {
     expect(find.text(en.tradeRejectedNothing), findsOneWidget);
     expect(find.textContaining('holding.metal'), findsNothing, reason: 'no developer text');
     expect(store.rows, isEmpty);
-    expect(c.state.transactions, isEmpty);
+    expect(c.holdings.state.transactions, isEmpty);
     expect(find.text(en.csvImportConfirm(2)), findsOneWidget, reason: 'still on the review');
 
     // The notice is gone before the next try, which it would cover.
@@ -171,7 +172,7 @@ void main() {
     await tester.tap(find.text(en.csvImportConfirm(2)));
     await tester.pumpAndSettle();
     expect(find.text(en.csvImportDoneTitle(2)), findsOneWidget);
-    expect(c.state.transactions, hasLength(2));
+    expect(c.holdings.state.transactions, hasLength(2));
   });
 
   testWidgets('re-importing the same file finds only duplicates', (tester) async {
