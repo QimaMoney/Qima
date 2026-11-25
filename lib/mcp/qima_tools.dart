@@ -97,7 +97,7 @@ abstract final class QimaTools {
         'kind': {
           'type': 'string',
           'description': 'Only this kind of transaction.',
-          'enum': [for (final t in EntryTemplate.values) t.wireName],
+          'enum': [for (final t in EntryTemplate.values) if (!t.isHoldingEntry) t.wireName],
         },
         'limit': {'type': 'integer', 'description': 'At most this many, 1 to 500. Defaults to 50.', 'minimum': 1, 'maximum': 500},
       }),
@@ -217,7 +217,7 @@ abstract final class QimaTools {
     final balances = book.balances();
     final out = <Map<String, dynamic>>[];
     for (final a in book.accounts.values) {
-      if (a.type == AccountType.system) continue;
+      if (a.type == AccountType.system || a.isHolding) continue;
       if (a.archived && !archived) continue;
       final isCategory = !a.side.onBalanceSheet;
       if (isCategory && !categories) continue;
@@ -250,7 +250,7 @@ abstract final class QimaTools {
     final accountId = account == null ? null : _findAccount(book, account).id;
     final text = _string_(args, 'text')?.toLowerCase();
     final kindName = _string_(args, 'kind');
-    final kind = kindName == null ? null : EntryTemplate.values.where((t) => t.wireName == kindName).firstOrNull;
+    final kind = kindName == null ? null : EntryTemplate.values.where((t) => !t.isHoldingEntry && t.wireName == kindName).firstOrNull;
     if (kindName != null && kind == null) throw ToolInputError('No kind "$kindName".');
     final limit = _int(args, 'limit') ?? 50;
     if (limit < 1 || limit > 500) throw const ToolInputError('"limit" must be 1 to 500.');
@@ -260,8 +260,9 @@ abstract final class QimaTools {
         if ((from == null || !e.date.isBefore(from)) &&
             (to == null || e.date.isBefore(_nextDay(to))) &&
             (accountId == null || e.lines.any((l) => l.accountId == accountId)) &&
-            (kind == null || e.template == kind) &&
-            (text == null || e.merchant.toLowerCase().contains(text) || e.note.toLowerCase().contains(text)))
+            (kind == null || _shownKind(e) == kind.wireName) &&
+            (text == null || e.merchant.toLowerCase().contains(text) || e.note.toLowerCase().contains(text)) &&
+            _shownLines(book, e) != null)
           e,
     ]..sort((a, b) => b.date.compareTo(a.date));
 
@@ -291,21 +292,21 @@ abstract final class QimaTools {
     return {
       'month': '${month.year}-${month.month.toString().padLeft(2, '0')}',
       'currency': c,
-      'spent': _round(analysis.spent, c),
-      'income': _round(analysis.income, c),
-      'net': _round(analysis.net, c),
+      'spent': _minor(analysis.spent, c),
+      'income': _minor(analysis.income, c),
+      'net': _minor(analysis.net, c),
       'by_category': [
         for (final (id, v) in analysis.byCategory)
           {
             'category': name(id),
-            'spent': _round(v, c),
-            if (analysis.budgets[id] case final b?) 'budget': _round(b, c),
+            'spent': _minor(v, c),
+            if (analysis.budgets[id] case final b?) 'budget': _minor(b, c),
           },
       ],
       if (analysis.hasBudget) ...{
-        'budget': _round(analysis.budget, c),
-        if (thisMonth) 'planned_still_to_pay': _round(analysis.planned, c),
-        'left_to_spend': _round(analysis.leftToSpend, c),
+        'budget': _minor(analysis.budget, c),
+        if (thisMonth) 'planned_still_to_pay': _minor(analysis.planned, c),
+        'left_to_spend': _minor(analysis.leftToSpend, c),
       },
       if (analysis.missingRates.isNotEmpty) 'left_out_currencies': (analysis.missingRates.toList()..sort()),
       ..._freshness(s),
@@ -377,15 +378,27 @@ abstract final class QimaTools {
         'exchange_rates_at': s.rates.updatedAt.toUtc().toIso8601String(),
       };
 
+  /// The kind the assistant is told: every holdings trade reads as the one
+  /// kind it has always been, never which way a quantity went.
+  static String _shownKind(BookEntry e) => (e.template.isHoldingEntry ? EntryTemplate.holdingTrade : e.template).wireName;
+
+  /// The lines of [e] the assistant may see: none on a holding account, and
+  /// null for a trade that moved no cash (nothing but quantity and cost).
+  static List<EntryLine>? _shownLines(Book book, BookEntry e) {
+    final lines = [for (final l in e.lines) if (!(book.accounts[l.accountId]?.isHolding ?? false)) l];
+    if (e.template.isHoldingEntry && !lines.any((l) => book.accounts[l.accountId]?.onMoneySheet ?? false)) return null;
+    return lines;
+  }
+
   static Map<String, dynamic> _entry(Book book, BookEntry e) => {
         'id': e.id,
         'date': dayToJson(e.date),
-        'kind': e.template.wireName,
+        'kind': _shownKind(e),
         if (e.status != EntryStatus.posted) 'status': e.status.name,
         if (e.merchant.isNotEmpty) 'merchant': e.merchant,
         if (e.note.isNotEmpty) 'note': e.note,
         'lines': [
-          for (final l in e.lines)
+          for (final l in _shownLines(book, e) ?? const <EntryLine>[])
             if (book.accounts[l.accountId] case final a?)
               {
                 'account': a.name,
@@ -410,11 +423,11 @@ abstract final class QimaTools {
 
   static BookAccount _findAccount(Book book, String query) {
     final byId = book.accounts[query];
-    if (byId != null) return byId;
+    if (byId != null && !byId.isHolding) return byId;
     final key = personKey(query);
-    final exact = [for (final a in book.accounts.values) if (personKey(a.name) == key) a];
+    final exact = [for (final a in book.accounts.values) if (!a.isHolding && personKey(a.name) == key) a];
     if (exact.length == 1) return exact.single;
-    final partial = [for (final a in book.accounts.values) if (personKey(a.name).contains(key)) a];
+    final partial = [for (final a in book.accounts.values) if (!a.isHolding && personKey(a.name).contains(key)) a];
     if (exact.isEmpty && partial.length == 1) return partial.single;
     final options = (exact.isNotEmpty ? exact : partial).map((a) => '${a.name} (${a.id})').join(', ');
     if (options.isEmpty) throw ToolInputError('No account or category named "$query". Call list_accounts to see them.');
@@ -430,6 +443,10 @@ abstract final class QimaTools {
         SheetGroup.loans => 'loans',
         SheetGroup.youOwe => 'you_owe',
       };
+
+  /// A ledger figure in whole minor units, as the major amount the tools
+  /// report.
+  static double _minor(int v, String currency) => MinorUnits.toMajor(v, currency);
 
   static double _round(double v, String currency) {
     final scale = MinorUnits.fromMajor(1, currency);

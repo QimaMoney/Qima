@@ -4,8 +4,12 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../models/money.dart';
 import '../models/zakat_book.dart';
 import '../blocs/money_cubit.dart';
-import '../blocs/app_cubit.dart';
-import '../blocs/app_state.dart';
+import '../blocs/holdings_cubit.dart';
+import '../blocs/market_cubit.dart';
+import '../blocs/settings_cubit.dart';
+import '../blocs/settings_state.dart';
+import '../blocs/watchlist_cubit.dart';
+import '../blocs/zakat_cubit.dart';
 import '../l10n/app_localizations.dart';
 import '../models/allocation.dart';
 import '../models/asset_group.dart';
@@ -46,7 +50,8 @@ class PortfolioDetailScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cubit = context.read<AppCubit>();
+    final settings = context.read<SettingsCubit>();
+    final holdings = context.read<HoldingsCubit>();
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
 
@@ -60,36 +65,42 @@ class PortfolioDetailScreen extends StatelessWidget {
           title: Text(l10n.portfolioTitle),
           actions: [
             const HelpButton(topic: HelpTopicId.portfolio),
-            BlocBuilder<AppCubit, AppState>(
+            BlocBuilder<SettingsCubit, SettingsState>(
               buildWhen: (previous, current) => previous.hideBalances != current.hideBalances,
               builder: (context, state) {
                 return IconButton(
                   icon: Icon(state.hideBalances ? Icons.visibility_off_outlined : Icons.visibility_outlined),
                   tooltip: state.hideBalances ? l10n.privacyShowBalances : l10n.privacyHideBalances,
-                  onPressed: cubit.toggleHideBalances,
+                  onPressed: settings.toggleHideBalances,
                 );
               },
             ),
           ],
         ),
-        body: BlocBuilder<AppCubit, AppState>(
-          builder: (context, state) {
-            final hidden = state.hideBalances;
-            final valuation = cubit.portfolioValuation;
-            final heldInstruments = cubit.heldInstruments;
+        // Valued at the current prices, summarised in the base currency and
+        // masked by the hide setting; the zakat entry reads the zakat choices.
+        body: Builder(
+          builder: (context) {
+            final prefs = context.watch<SettingsCubit>().state;
+            context.watch<HoldingsCubit>();
+            context.watch<MarketCubit>();
+            final zakat = context.watch<ZakatCubit>();
+            final hidden = prefs.hideBalances;
+            final valuation = holdings.portfolioValuation;
+            final heldInstruments = holdings.heldInstruments;
             final slices = resolveAllocation(heldInstruments, colors);
             final sliceByID = {for (final s in slices) s.holding.id: s};
-            final realised = cubit.portfolioRealised;
-            final closed = cubit.closedPositions;
-            final byYear = cubit.realisedByYear;
+            final realised = holdings.portfolioRealised;
+            final closed = holdings.closedPositions;
+            final byYear = holdings.realisedByYear;
 
             void openHolding(Instrument instrument) {
-              final card = cubit.firstCard(instrument);
+              final card = context.read<WatchlistCubit>().firstCard(instrument);
               Navigator.of(context).push(MaterialPageRoute(
                 builder: (_) => card != null
                     ? InstrumentDetailScreen(card: card)
                     // Not on the watchlist: straight to its ledger.
-                    : HoldingsScreen(instrument: instrument, displayCurrency: state.baseCurrency),
+                    : HoldingsScreen(instrument: instrument, displayCurrency: prefs.baseCurrency),
               ));
             }
 
@@ -170,22 +181,22 @@ class PortfolioDetailScreen extends StatelessWidget {
                     child: Text(l10n.portfolioEmpty,
                         style: TextStyle(color: colors.textTertiary)),
                   ),
-                if (state.plainSummaries)
-                  if (cubit.periodSummary() case final summary?) ...[
+                if (prefs.plainSummaries)
+                  if (holdings.periodSummary() case final summary?) ...[
                     const SizedBox(height: DS.spaceSM),
                     _SummaryCard(
-                      sentence: periodSummarySentence(context, summary, currency: state.baseCurrency, hidden: hidden),
+                      sentence: periodSummarySentence(context, summary, currency: prefs.baseCurrency, hidden: hidden),
                       hidden: hidden,
                     ),
                   ],
-                if (state.lots.isNotEmpty) ...[
+                if (holdings.state.lots.isNotEmpty) ...[
                   const SizedBox(height: DS.spaceSM),
-                  _ZakatEntry(assessment: cubit.zakatAssessment, hidden: hidden),
+                  _ZakatEntry(assessment: zakat.assessment, hidden: hidden),
                 ],
                 if (heldInstruments.isNotEmpty) ...[
                   const SizedBox(height: DS.spaceSM),
                   _AllocationCard(
-                    groups: Allocation.byGroup(heldInstruments, state.baseCurrency),
+                    groups: Allocation.byGroup(heldInstruments, prefs.baseCurrency),
                     hidden: hidden,
                   ),
                 ],
@@ -292,7 +303,7 @@ class _SummaryCardState extends State<_SummaryCard> {
 
   void _phrase() {
     // Masked sentences have nothing to word better.
-    final cubit = context.read<AppCubit>();
+    final cubit = context.read<SettingsCubit>();
     // Turning the model on or off words the same sentence again.
     final key = '${cubit.state.onDeviceModel}|${widget.sentence}';
     if (widget.hidden || key == _for) return;
@@ -383,8 +394,11 @@ class _ZakatEntry extends StatelessWidget {
     final colors = context.colors;
     // The same figure as the Zakat screen: the whole balance sheet, not
     // the holdings alone.
-    final app = context.read<AppCubit>().state;
-    final z = ZakatOnBook.of(book: context.watch<MoneyCubit>().state.book, holdings: assessment, currency: app.baseCurrency, rates: app.rates);
+    final z = ZakatOnBook.of(
+        book: context.watch<MoneyCubit>().state.book,
+        holdings: assessment,
+        currency: context.read<SettingsCubit>().state.baseCurrency,
+        rates: context.read<MarketCubit>().state.rates);
     final String subtitle = !z.thresholdKnown
         ? l10n.zakatEntryCalculate
         : z.above

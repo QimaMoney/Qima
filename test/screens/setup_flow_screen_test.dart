@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:qima/blocs/app_cubit.dart';
+import 'package:qima/blocs/app_blocs.dart';
 import 'package:qima/blocs/money_cubit.dart';
 import 'package:qima/l10n/app_localizations.dart';
 import 'package:qima/models/asset.dart';
@@ -20,7 +20,9 @@ import 'package:qima/services/price_repository.dart';
 import 'package:qima/theme/app_theme.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Keeps `AppCubit.addCard`'s background refresh and backfill off the
+import '../helpers/app_blocs.dart';
+
+/// Keeps `WatchlistCubit.addCard`'s background refresh and backfill off the
 /// network (same fake as `home_shell_test.dart`).
 class _FakeRepository extends PriceRepository {
   @override
@@ -49,7 +51,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   late Directory tempDir;
-  late AppCubit cubit;
+  late AppBlocs blocs;
   late MoneyCubit money;
   late AppLocalizations l10n;
 
@@ -58,29 +60,29 @@ void main() {
     LocalFileStore.overrideDirectoryForTesting(tempDir);
     SharedPreferences.setMockInitialValues({});
     l10n = await AppLocalizations.delegate.load(const Locale('en'));
-    cubit = AppCubit(repository: _FakeRepository());
-    cubit.preferences = await Preferences.create();
+    blocs = AppBlocs(repository: _FakeRepository());
+    blocs.settings.preferences = await Preferences.create();
     // A fresh install: the seeded watchlist and nothing else.
-    final seed = await cubit.preferences.seedWatchcards();
+    final seed = await blocs.settings.preferences.seedWatchcards();
     for (final card in seed) {
-      await cubit.watchlistStore.upsert(card);
+      await blocs.watchlist.watchlistStore.upsert(card);
     }
-    cubit.emit(cubit.state.copyWith(
+    blocs.seed(
       initialized: true,
       baseCurrency: 'USD',
       cards: seed,
       shouldShowOnboarding: true,
       rates: FXRates(base: 'USD', rates: const {'USD': 1, 'EUR': 0.92, 'EGP': 48, 'SAR': 3.75}, updatedAt: DateTime(2024, 6, 10)),
       fxHistory: FXHistory.empty,
-    ));
+    );
     // Loaded here, on the real clock: the book reads files.
-    money = MoneyCubit(store: cubit.bookStore, baseCurrency: () => cubit.state.baseCurrency, rates: () => cubit.state.rates);
+    money = MoneyCubit(store: blocs.sync.bookStore, baseCurrency: () => blocs.settings.state.baseCurrency, rates: () => blocs.market.state.rates);
     await money.load();
   });
 
   tearDown(() async {
     await money.close();
-    await cubit.close();
+    await blocs.close();
     if (await tempDir.exists()) {
       await tempDir.delete(recursive: true);
     }
@@ -95,7 +97,7 @@ void main() {
 
   Widget harness({Locale locale = const Locale('en'), bool rerun = false, double textScale = 1}) {
     return MultiBlocProvider(
-      providers: [BlocProvider<AppCubit>.value(value: cubit), BlocProvider<MoneyCubit>.value(value: money)],
+      providers: [...blocs.providers, BlocProvider<MoneyCubit>.value(value: money)],
       child: MaterialApp(
         locale: locale,
         localizationsDelegates: AppLocalizations.localizationsDelegates,
@@ -137,7 +139,7 @@ void main() {
   /// default, onboarding marked finished, which is what makes `main.dart`
   /// show the home shell) run on it.
   Future<void> tapToFinish(WidgetTester tester, String text, {bool Function()? done}) async {
-    final isDone = done ?? () => !cubit.state.shouldShowOnboarding;
+    final isDone = done ?? () => !blocs.app.state.shouldShowOnboarding;
     await tester.ensureVisible(find.text(text));
     await tester.pump();
     await tester.runAsync(() async {
@@ -188,19 +190,19 @@ void main() {
     // Nothing has been changed yet.
     expect(find.text(l10n.setupSummaryTitle), findsOneWidget);
     expect(money.state.settings.features, isEmpty);
-    expect(cubit.state.setup, isNull);
-    expect(cubit.state.cards, hasLength(3));
+    expect(blocs.app.state.setup, isNull);
+    expect(blocs.watchlist.state.cards, hasLength(3));
 
     await tapToFinish(tester, l10n.setupSummaryGoHome);
 
-    expect(cubit.state.shouldShowOnboarding, isFalse);
-    expect(cubit.state.tourRequested, isFalse);
+    expect(blocs.app.state.shouldShowOnboarding, isFalse);
+    expect(blocs.app.state.tourRequested, isFalse);
     expect(money.state.settings.features, {MoneyFeature.budget});
-    expect(cubit.state.setup, const SetupAnswers(uses: {SetupUse.money, SetupUse.portfolio}, products: {SetupProduct.metals}, goals: {SetupGoal.budget}));
-    expect(cubit.preferences.onboardingCompleted, isTrue);
-    expect(cubit.preferences.setupAnswers, cubit.state.setup);
+    expect(blocs.app.state.setup, const SetupAnswers(uses: {SetupUse.money, SetupUse.portfolio}, products: {SetupProduct.metals}, goals: {SetupGoal.budget}));
+    expect(blocs.settings.preferences.onboardingCompleted, isTrue);
+    expect(blocs.settings.preferences.setupAnswers, blocs.app.state.setup);
     // The seeded silver and bitcoin make way for the pick; gold was both.
-    expect([for (final c in cubit.state.cards) c.instrumentID], ['metal.XAU']);
+    expect([for (final c in blocs.watchlist.state.cards) c.instrumentID], ['metal.XAU']);
   });
 
   testWidgets('"Show me around" asks for the tour', (tester) async {
@@ -216,9 +218,9 @@ void main() {
     expect(find.text(l10n.setupSummaryTitle), findsOneWidget);
     await tapToFinish(tester, l10n.setupSummaryTour);
 
-    expect(cubit.state.shouldShowOnboarding, isFalse);
-    expect(cubit.state.tourRequested, isTrue);
-    expect(cubit.state.setup, const SetupAnswers(uses: {SetupUse.netWorth}));
+    expect(blocs.app.state.shouldShowOnboarding, isFalse);
+    expect(blocs.app.state.tourRequested, isTrue);
+    expect(blocs.app.state.setup, const SetupAnswers(uses: {SetupUse.netWorth}));
   });
 
   testWidgets('skipping from the welcome screen answers nothing and leaves the app as it was', (tester) async {
@@ -228,12 +230,12 @@ void main() {
 
     await tapToFinish(tester, l10n.setupWelcomeSkip);
 
-    expect(cubit.state.shouldShowOnboarding, isFalse);
-    expect(cubit.state.tourRequested, isFalse);
-    expect(cubit.state.setup, isNull);
-    expect(cubit.preferences.onboardingCompleted, isTrue);
+    expect(blocs.app.state.shouldShowOnboarding, isFalse);
+    expect(blocs.app.state.tourRequested, isFalse);
+    expect(blocs.app.state.setup, isNull);
+    expect(blocs.settings.preferences.onboardingCompleted, isTrue);
     expect(money.state.settings.features, isEmpty);
-    expect(cubit.state.cards, hasLength(3));
+    expect(blocs.watchlist.state.cards, hasLength(3));
   });
 
   testWidgets('Skip on a question keeps the answers so far', (tester) async {
@@ -249,9 +251,9 @@ void main() {
     expect(find.text(l10n.setupGoalsTitle), findsOneWidget);
     await tapToFinish(tester, l10n.onboardingSkip);
 
-    expect(cubit.state.shouldShowOnboarding, isFalse);
-    expect(cubit.state.tourRequested, isFalse);
-    expect(cubit.state.setup?.uses, {SetupUse.zakat, SetupUse.money});
+    expect(blocs.app.state.shouldShowOnboarding, isFalse);
+    expect(blocs.app.state.tourRequested, isFalse);
+    expect(blocs.app.state.setup?.uses, {SetupUse.zakat, SetupUse.money});
     expect(money.state.settings.features, {MoneyFeature.zakat});
   });
 
@@ -270,7 +272,7 @@ void main() {
     expect(find.text(l10n.setupSummaryWatchlistKept), findsOneWidget);
     await tapToFinish(tester, l10n.setupSummaryGoHome);
 
-    expect([for (final c in cubit.state.cards) c.instrumentID], ['metal.XAU', 'metal.XAG', 'crypto.BTC']);
+    expect([for (final c in blocs.watchlist.state.cards) c.instrumentID], ['metal.XAU', 'metal.XAG', 'crypto.BTC']);
   });
 
   testWidgets('picking a currency applies at once, so the prices are offered in it', (tester) async {
@@ -280,7 +282,7 @@ void main() {
 
     await tapText(tester, l10n.onboardingGetStarted);
     await tapText(tester, 'Egyptian Pound');
-    expect(cubit.state.baseCurrency, 'EGP');
+    expect(blocs.settings.state.baseCurrency, 'EGP');
     await tapText(tester, l10n.commonContinue);
     await tapText(tester, l10n.setupUsePrices);
     await tapText(tester, l10n.commonContinue);
@@ -292,7 +294,7 @@ void main() {
     await tapText(tester, l10n.setupPricesAdd(2));
     await tapToFinish(tester, l10n.setupSummaryGoHome);
 
-    expect([for (final c in cubit.state.cards) (c.instrumentID, c.currency, c.unit)], [
+    expect([for (final c in blocs.watchlist.state.cards) (c.instrumentID, c.currency, c.unit)], [
       ('metal.XAU', 'EGP', PriceUnit.gram),
       ('metal.XAU', 'EGP', PriceUnit.gram),
     ]);
@@ -319,7 +321,7 @@ void main() {
   testWidgets('running setup again starts from the last answers and never turns a feature off', (tester) async {
     setSurfaceSize(tester, const Size(400, 900));
     await tester.runAsync(() async {
-      await cubit.saveSetup(const SetupAnswers(uses: {SetupUse.money}, goals: {SetupGoal.budget}));
+      await blocs.app.saveSetup(const SetupAnswers(uses: {SetupUse.money}, goals: {SetupGoal.budget}));
       await money.setFeatures({MoneyFeature.budget, MoneyFeature.loans});
     });
     await tester.pumpWidget(harness(rerun: true));
@@ -338,12 +340,12 @@ void main() {
     await tapText(tester, l10n.setupGoalPeople);
     await tapText(tester, l10n.commonContinue);
     await tapText(tester, l10n.commonContinue);
-    await tapToFinish(tester, l10n.commonDone, done: () => cubit.state.setup?.goals.contains(SetupGoal.people) ?? false);
+    await tapToFinish(tester, l10n.commonDone, done: () => blocs.app.state.setup?.goals.contains(SetupGoal.people) ?? false);
 
     expect(find.byType(SetupFlowScreen), findsNothing);
     expect(money.state.settings.features, {MoneyFeature.budget, MoneyFeature.loans, MoneyFeature.people});
-    expect(cubit.state.setup?.goals, {SetupGoal.people});
-    expect(cubit.state.tourRequested, isFalse);
+    expect(blocs.app.state.setup?.goals, {SetupGoal.people});
+    expect(blocs.app.state.tourRequested, isFalse);
   });
 
   testWidgets('Skip before the prices were confirmed adds none of them', (tester) async {
@@ -359,8 +361,8 @@ void main() {
     // Skipped on the products screen: the suggestions were never shown.
     await tapToFinish(tester, l10n.onboardingSkip);
 
-    expect(cubit.state.setup?.products, {SetupProduct.metals});
-    expect([for (final c in cubit.state.cards) c.instrumentID], ['metal.XAU', 'metal.XAG', 'crypto.BTC']);
+    expect(blocs.app.state.setup?.products, {SetupProduct.metals});
+    expect([for (final c in blocs.watchlist.state.cards) c.instrumentID], ['metal.XAU', 'metal.XAG', 'crypto.BTC']);
   });
 
   testWidgets('the ticked prices survive a change of main currency', (tester) async {
@@ -389,7 +391,7 @@ void main() {
     await tapText(tester, l10n.setupPricesAdd(2));
     await tapToFinish(tester, l10n.setupSummaryGoHome);
 
-    expect({for (final c in cubit.state.cards) (c.instrumentID, c.currency)}, containsAll({('crypto.BTC', 'EGP'), ('crypto.ETH', 'EGP')}));
+    expect({for (final c in blocs.watchlist.state.cards) (c.instrumentID, c.currency)}, containsAll({('crypto.BTC', 'EGP'), ('crypto.ETH', 'EGP')}));
   });
 
   testWidgets('backing out of a rerun puts the currency back', (tester) async {
@@ -400,21 +402,21 @@ void main() {
     await settle(tester);
 
     await tapText(tester, 'Egyptian Pound');
-    expect(cubit.state.baseCurrency, 'EGP');
+    expect(blocs.settings.state.baseCurrency, 'EGP');
     await tester.tap(find.byType(BackButtonIcon));
     await settle(tester);
 
     expect(find.byType(SetupFlowScreen), findsNothing);
-    expect(cubit.state.baseCurrency, 'USD');
-    expect(cubit.state.setup, isNull);
+    expect(blocs.settings.state.baseCurrency, 'USD');
+    expect(blocs.app.state.setup, isNull);
   });
 
   testWidgets('a book that never loads does not hold setup up', (tester) async {
     setSurfaceSize(tester, const Size(400, 900));
-    final unloaded = MoneyCubit(store: cubit.bookStore, baseCurrency: () => cubit.state.baseCurrency, rates: () => cubit.state.rates);
+    final unloaded = MoneyCubit(store: blocs.sync.bookStore, baseCurrency: () => blocs.settings.state.baseCurrency, rates: () => blocs.market.state.rates);
     addTearDown(unloaded.close);
     await tester.pumpWidget(MultiBlocProvider(
-      providers: [BlocProvider<AppCubit>.value(value: cubit), BlocProvider<MoneyCubit>.value(value: unloaded)],
+      providers: [...blocs.providers, BlocProvider<MoneyCubit>.value(value: unloaded)],
       child: MaterialApp(
         localizationsDelegates: AppLocalizations.localizationsDelegates,
         supportedLocales: AppLocalizations.supportedLocales,
@@ -431,13 +433,13 @@ void main() {
     // The wait for the book gives up; the rest of setup is still applied.
     await tester.pump(const Duration(seconds: 9));
     await tester.runAsync(() async {
-      for (var i = 0; i < 60 && cubit.state.shouldShowOnboarding; i++) {
+      for (var i = 0; i < 60 && blocs.app.state.shouldShowOnboarding; i++) {
         await Future<void>.delayed(const Duration(milliseconds: 50));
       }
     });
 
-    expect(cubit.state.shouldShowOnboarding, isFalse);
-    expect(cubit.state.setup?.uses, {SetupUse.zakat});
+    expect(blocs.app.state.shouldShowOnboarding, isFalse);
+    expect(blocs.app.state.setup?.uses, {SetupUse.zakat});
     expect(unloaded.state.loaded, isFalse);
   });
 
@@ -449,14 +451,14 @@ void main() {
     expect(money.state.hasBook, isTrue);
     await tester.pumpWidget(harness());
     await tester.runAsync(() async {
-      for (var i = 0; i < 60 && cubit.state.shouldShowOnboarding; i++) {
+      for (var i = 0; i < 60 && blocs.app.state.shouldShowOnboarding; i++) {
         await tester.pump(const Duration(milliseconds: 50));
         await Future<void>.delayed(const Duration(milliseconds: 20));
       }
     });
 
-    expect(cubit.state.shouldShowOnboarding, isFalse);
-    expect(cubit.state.setup, isNull);
+    expect(blocs.app.state.shouldShowOnboarding, isFalse);
+    expect(blocs.app.state.setup, isNull);
   });
 
   testWidgets('lays out in Arabic on a small screen with large text', (tester) async {

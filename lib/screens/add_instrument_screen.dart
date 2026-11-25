@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
-import '../blocs/app_cubit.dart';
+import '../blocs/market_cubit.dart';
+import '../blocs/settings_cubit.dart';
+import '../blocs/watchlist_cubit.dart';
 import '../l10n/app_localizations.dart';
 import '../models/asset.dart';
 import '../models/instrument_aliases.dart';
@@ -74,7 +76,7 @@ class _AddInstrumentScreenState extends State<AddInstrumentScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final cubit = context.read<AppCubit>();
+    final cubit = context.read<WatchlistCubit>();
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
     final query = _query.trim();
@@ -134,7 +136,7 @@ class _AddInstrumentScreenState extends State<AddInstrumentScreen> {
   // Empty query: the plain catalog, grouped by asset class.
   // -------------------------------------------------------------------
 
-  Widget _catalogList(BuildContext context, AppCubit cubit) {
+  Widget _catalogList(BuildContext context, WatchlistCubit cubit) {
     return ListView(
       padding: const EdgeInsets.fromLTRB(DS.spaceMD, 0, DS.spaceMD, DS.spaceMD),
       children: [
@@ -143,7 +145,7 @@ class _AddInstrumentScreenState extends State<AddInstrumentScreen> {
     );
   }
 
-  Widget _section(BuildContext context, AppCubit cubit, AssetClass assetClass) {
+  Widget _section(BuildContext context, WatchlistCubit cubit, AssetClass assetClass) {
     final instruments = InstrumentCatalog.all.where((i) => i.assetClass == assetClass).toList();
     final showsCustomTickerRow = assetClass == AssetClass.stock || assetClass == AssetClass.indices;
     if (instruments.isEmpty && !showsCustomTickerRow) return const SizedBox.shrink();
@@ -187,7 +189,7 @@ class _AddInstrumentScreenState extends State<AddInstrumentScreen> {
   // Non-empty query: grouped search results, or a no-results state.
   // -------------------------------------------------------------------
 
-  Widget _searchResults(BuildContext context, AppCubit cubit, String query) {
+  Widget _searchResults(BuildContext context, WatchlistCubit cubit, String query) {
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
     final groups = InstrumentSearch.search(
@@ -196,7 +198,7 @@ class _AddInstrumentScreenState extends State<AddInstrumentScreen> {
       displayName: (i) => displayLabel(context, i.nameKey),
       aliases: (i) => [...labelsInAllLocales(i.nameKey), ...InstrumentAliases.of(i.id)],
     );
-    final draft = TransactionCapture.parse(query, captureContextOf(context, cubit.state));
+    final draft = TransactionCapture.parse(query, captureContextOf(context, baseCurrency: context.read<SettingsCubit>().state.baseCurrency, rates: context.read<MarketCubit>().state.rates));
 
     if (draft != null) {
       // A described purchase isn't a ticker to add, so no custom-ticker
@@ -247,7 +249,7 @@ class _AddInstrumentScreenState extends State<AddInstrumentScreen> {
     );
   }
 
-  Widget _searchGroup(BuildContext context, AppCubit cubit, InstrumentSearchGroup group) {
+  Widget _searchGroup(BuildContext context, WatchlistCubit cubit, InstrumentSearchGroup group) {
     final header = '${displayLabel(context, group.assetClass.titleKey).toUpperCase()} · ${group.matches.length}';
     return Padding(
       padding: const EdgeInsets.only(bottom: DS.spaceLG),
@@ -283,13 +285,13 @@ class _AddInstrumentScreenState extends State<AddInstrumentScreen> {
 
   /// Parses again with the model's help when one is available — the card
   /// shows the deterministic parse, which a model can only add to.
-  Future<void> _openCapture(BuildContext context, AppCubit cubit, String query) async {
-    final captureContext = captureContextOf(context, cubit.state);
+  Future<void> _openCapture(BuildContext context, WatchlistCubit cubit, String query) async {
+    final captureContext = captureContextOf(context, baseCurrency: context.read<SettingsCubit>().state.baseCurrency, rates: context.read<MarketCubit>().state.rates);
     final navigator = Navigator.of(context);
     final draft = await captureTransaction(
       query,
       captureContext,
-      provider: cubit.assist,
+      provider: context.read<SettingsCubit>().assist,
       localeTag: Localizations.localeOf(context).toLanguageTag(),
     );
     if (draft == null || !mounted) return;
@@ -304,7 +306,7 @@ class _AddInstrumentScreenState extends State<AddInstrumentScreen> {
       navigator.push(MaterialPageRoute(builder: (_) => CardConfigScreen(instrument: instrument)));
       return;
     }
-    final currency = context.read<AppCubit>().state.baseCurrency;
+    final currency = context.read<SettingsCubit>().state.baseCurrency;
     navigator.pushReplacement(
       MaterialPageRoute(builder: (_) => HoldingsScreen(instrument: instrument, displayCurrency: currency)),
     );

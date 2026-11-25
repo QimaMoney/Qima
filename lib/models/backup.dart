@@ -24,7 +24,16 @@ class BackupEnvelope extends Equatable {
   ///
   /// 3 (v5): the money ledger (`book`). A 4.x app refuses these rather than
   /// restoring the holdings alone and silently dropping every account.
-  static const int currentVersion = 3;
+  ///
+  /// 4 (v5): trades are entries of the book (`book.entries`, quantity lines and
+  /// all); there is no `holdings` or `transactions` list. Files of versions 1
+  /// to 3 are still restored.
+  static const int currentVersion = 4;
+
+  /// The first version whose payload is the ledger alone (see
+  /// [BackupPayload.isLedger]); older files list their trades apart from the
+  /// book.
+  static const int ledgerVersion = 4;
 
   final String format;
   final int version;
@@ -188,27 +197,35 @@ class BackupSettings extends Equatable {
 /// `List<Map<String, dynamic>>` (rather than typed `Record<T>` lists) since
 /// this model has no generic type parameter to decode against; callers
 /// (`BackupService`) do the typed decode/merge via `SyncedStore.importRecords`.
+///
+/// Two shapes exist. A version-4 payload (what is written now, see
+/// [isLedger]) has the book with every trade in it as an entry, and neither
+/// [holdings] nor [transactions]. An older one lists the trades apart:
+/// [transactions] (version 3), or only the lots in [holdings] (versions 1
+/// and 2), with the cash each trade moved as a `holding_trade` entry in
+/// [book] when it has one.
 class BackupPayload extends Equatable {
   final List<Map<String, dynamic>> watchcards;
-  /// Legacy lot records (`holdings.records`), still carried so a restore
-  /// keeps the migration source in step.
+
+  /// Lot records (`holdings.records`) of a version-1 or version-2 file; empty
+  /// in a newer one.
   final List<Map<String, dynamic>> holdings;
 
-  /// The ledger (v3). Null in a backup written before it existed; its lots
-  /// are restored as buys instead.
+  /// The trades of a version-3 file. Null in a version-4 file, and in a file
+  /// from before the ledger, whose lots are restored as buys instead.
   final List<Map<String, dynamic>>? transactions;
   final List<Map<String, dynamic>> customInstruments;
   final List<Map<String, dynamic>> alerts;
   final BackupSettings settings;
 
-  /// The money ledger (v5): raw records per collection, keyed `accounts`,
+  /// The money ledger: raw records per collection, keyed `accounts`,
   /// `entries`, `recurring` and `settings`. Null in a backup written before
-  /// it existed; restoring one of those leaves the ledger untouched.
+  /// it existed; restoring one of those leaves the money entries untouched.
   final Map<String, List<Map<String, dynamic>>>? book;
 
   const BackupPayload({
     required this.watchcards,
-    required this.holdings,
+    this.holdings = const [],
     this.transactions,
     required this.customInstruments,
     required this.alerts,
@@ -216,9 +233,13 @@ class BackupPayload extends Equatable {
     this.book,
   });
 
+  /// Whether this is the version-4 shape: the book holds everything, trades
+  /// included, and nothing is listed apart from it.
+  bool get isLedger => book != null && transactions == null && holdings.isEmpty;
+
   Map<String, dynamic> toJson() => {
         'watchcards': watchcards,
-        'holdings': holdings,
+        if (holdings.isNotEmpty) 'holdings': holdings,
         if (transactions != null) 'transactions': transactions,
         'customInstruments': customInstruments,
         'alerts': alerts,
@@ -226,7 +247,12 @@ class BackupPayload extends Equatable {
         if (book != null) 'book': book,
       };
 
-  factory BackupPayload.fromJson(Map<String, dynamic> json) {
+  /// [version] is the envelope's. From [BackupEnvelope.ledgerVersion] on, the
+  /// book is required and a `holdings` or `transactions` list is not read;
+  /// before it, `holdings` is required, and a file with a book but no
+  /// `transactions` is read as having no trades listed apart (so it is not
+  /// mistaken for a version-4 file).
+  factory BackupPayload.fromJson(Map<String, dynamic> json, {int version = BackupEnvelope.currentVersion}) {
     List<Map<String, dynamic>> listOf(String key) {
       final raw = json[key];
       if (raw is! List) throw FormatException('invalid $key');
@@ -241,14 +267,24 @@ class BackupPayload extends Equatable {
       throw const FormatException('missing settings');
     }
 
+    final book = _bookOf(json['book']);
+    final ledger = version >= BackupEnvelope.ledgerVersion;
+    if (ledger && book == null) throw const FormatException('missing book');
+
     return BackupPayload(
       watchcards: listOf('watchcards'),
-      holdings: listOf('holdings'),
-      transactions: json.containsKey('transactions') ? listOf('transactions') : null,
+      holdings: ledger ? const [] : listOf('holdings'),
+      transactions: ledger
+          ? null
+          : json.containsKey('transactions')
+              ? listOf('transactions')
+              : book != null
+                  ? const []
+                  : null,
       customInstruments: listOf('customInstruments'),
       alerts: listOf('alerts'),
       settings: BackupSettings.fromJson(settingsJson),
-      book: _bookOf(json['book']),
+      book: book,
     );
   }
 

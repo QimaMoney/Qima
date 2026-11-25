@@ -1,13 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
-import '../blocs/app_cubit.dart';
-import '../blocs/app_state.dart';
+import '../blocs/holdings_cubit.dart';
+import '../blocs/market_cubit.dart';
+import '../blocs/settings_cubit.dart';
 import '../l10n/app_localizations.dart';
 import '../models/asset.dart';
 import '../models/holding_return.dart';
 import '../models/holding_totals.dart';
 import '../models/instrument_facts.dart';
+import '../models/ledger.dart';
 import '../models/metal_breakdown.dart';
 import '../models/money.dart';
 import '../services/quote_provider.dart';
@@ -49,168 +51,165 @@ class HoldingsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cubit = context.read<AppCubit>();
+    final holdings = context.read<HoldingsCubit>();
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
     final unit = refUnit ?? instrument.quotation.defaultUnit;
 
-    return BlocBuilder<AppCubit, AppState>(
-      buildWhen: (previous, current) =>
-          previous.hideBalances != current.hideBalances || previous.ledger != current.ledger || previous.rates != current.rates,
-      builder: (context, state) {
-        // Recomputed on every rebuild (rather than hoisted above the
-        // BlocBuilder) so a saved or deleted transaction shows at once.
-        final lots = cubit.lotsFor(instrument);
-        final transactionCount = cubit.transactionsFor(instrument).length;
-        final position = state.ledger[instrument.id];
-        final valuation = cubit.valuationFor(instrument, displayCurrency);
-        final hidden = state.hideBalances;
-        final held = HoldingTotals.totalHeld(lots: lots, refUnit: unit, refKarat: refKarat);
-        final averageCost = HoldingTotals.averageCost(
-          lots: lots,
-          refUnit: unit,
-          refKarat: refKarat,
-          displayCurrency: displayCurrency,
-          rates: state.rates,
-        );
-        final now = DateTime.now();
-        double toDisplay(double amount, String currency) =>
-            usdFromPrice(amount, currency, state.rates) * (state.rates.rate(displayCurrency) ?? 1);
-        final facts = this.facts;
-        final result = position == null
-            ? null
-            : HoldingReturn.of(
-                transactions: cubit.transactionsFor(instrument),
-                position: position,
-                dividends: facts?.dividends ?? const [],
-                dividendCurrency: facts?.currency ?? displayCurrency,
-                value: valuation?.value.amount ?? 0,
-                now: now,
-                toDisplay: toDisplay,
-              );
-        final yearlyDividends = facts == null || position == null
-            ? 0.0
-            : toDisplay(position.fineOunces * facts.trailingDividends(now), facts.currency);
-        return DSCard(
-          child: InkWell(
-            borderRadius: BorderRadius.circular(DS.radiusCard),
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => HoldingsScreen(
-                  instrument: instrument,
-                  displayCurrency: displayCurrency,
-                  refUnit: refUnit,
-                  refKarat: refKarat,
-                ),
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  children: [
-                    Text(l10n.detailHoldings,
-                        style: TextStyle(color: colors.textPrimary, fontSize: 16, fontWeight: FontWeight.w700)),
-                    const SizedBox(width: DS.spaceMD),
-                    Text(
-                      l10n.portfolioTransactionCount(transactionCount),
-                      style: TextStyle(color: colors.textTertiary, fontSize: 13),
-                    ),
-                    const Spacer(),
-                    Icon(Icons.chevron_right, color: colors.textTertiary),
-                  ],
-                ),
-                if (valuation == null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: DS.spaceSM),
-                    child: Text(
-                      transactionCount == 0 || position == null
-                          ? l10n.holdingsEmpty
-                          : l10n.ledgerClosedLine(Masking.signedAmount(
-                              position.realised.inCurrency(displayCurrency, state.rates),
-                              hidden: hidden,
-                              isUp: position.realised.inCurrency(displayCurrency, state.rates).amount >= 0,
-                            )),
-                      style: TextStyle(color: colors.textTertiary),
-                    ),
-                  )
-                else ...[
-                  if (averageCost != null) ...[
-                    const SizedBox(height: 2),
-                    Text(
-                      l10n.holdingsHeldLine(
-                        hidden ? Masking.mask : quantityWithUnitKaratLabel(context, held, unit, refKarat),
-                        Masking.amount(averageCost, hidden: hidden),
-                      ),
-                      style: TextStyle(color: colors.textTertiary, fontSize: 12),
-                    ),
-                  ],
-                  const SizedBox(height: DS.spaceSM),
-                  Row(
-                    children: [
-                      Expanded(child: StatPill(title: l10n.holdingsValue, value: Masking.amount(valuation.value, hidden: hidden))),
-                      const SizedBox(width: DS.spaceMD),
-                      Expanded(
-                        child: StatPill(
-                          title: l10n.holdingsGain,
-                          value: Masking.signedAmount(valuation.gain, hidden: hidden, isUp: valuation.isUp),
-                          tint: QimaColors.trendColor(valuation.isUp, colors),
-                        ),
-                      ),
-                      const SizedBox(width: DS.spaceMD),
-                      Expanded(
-                        child: StatPill(
-                          title: l10n.holdingsGainPercent,
-                          value: signedFigure('${(valuation.gainFraction * 100).toStringAsFixed(2)}%', isUp: valuation.isUp),
-                          tint: QimaColors.trendColor(valuation.isUp, colors),
-                        ),
-                      ),
-                    ],
-                  ),
-                  if (result != null) ...[
-                    const SizedBox(height: DS.spaceSM),
-                    Row(
-                      key: const ValueKey('holdingReturn'),
-                      children: [
-                        Expanded(
-                          flex: 2,
-                          child: StatPill(
-                            title: l10n.holdingsTotalReturn,
-                            value: '${Masking.signedAmount(Money(result.total, displayCurrency), hidden: hidden, isUp: result.total >= 0)}'
-                                ' · ${signedFigure('${(result.fraction * 100).toStringAsFixed(1)}%', isUp: result.total >= 0)}',
-                            tint: QimaColors.trendColor(result.total >= 0, colors),
-                          ),
-                        ),
-                        const SizedBox(width: DS.spaceMD),
-                        Expanded(
-                          child: StatPill(
-                            title: l10n.holdingsPerYear,
-                            value: result.yearly == null
-                                ? '—'
-                                : signedFigure('${(result.yearly! * 100).toStringAsFixed(1)}%', isUp: result.yearly! >= 0),
-                            tint: result.yearly == null ? null : QimaColors.trendColor(result.yearly! >= 0, colors),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                  if (result != null && (result.dividends > 0 || yearlyDividends > 0)) ...[
-                    const SizedBox(height: DS.spaceXS),
-                    Text(
-                      l10n.holdingsDividendsLine(
-                        Masking.amount(Money(result.dividends, displayCurrency), hidden: hidden),
-                        Masking.amount(Money(yearlyDividends, displayCurrency), hidden: hidden),
-                      ),
-                      key: const ValueKey('holdingDividends'),
-                      style: TextStyle(color: colors.textTertiary, fontSize: 12),
-                    ),
-                  ],
-                ],
-              ],
+    // Rebuilt when the hide setting, the ledger or the rates change; not on
+    // every price tick.
+    final hidden = context.select<SettingsCubit, bool>((c) => c.state.hideBalances);
+    final ledger = context.select<HoldingsCubit, Ledger>((c) => c.state.ledger);
+    final rates = context.select<MarketCubit, FXRates>((c) => c.state.rates);
+    // Recomputed on every rebuild so a saved or deleted transaction shows at
+    // once.
+    final lots = holdings.lotsFor(instrument);
+    final transactionCount = holdings.transactionsFor(instrument).length;
+    final position = ledger[instrument.id];
+    final valuation = holdings.valuationFor(instrument, displayCurrency);
+    final held = HoldingTotals.totalHeld(lots: lots, refUnit: unit, refKarat: refKarat);
+    final averageCost = HoldingTotals.averageCost(
+      lots: lots,
+      refUnit: unit,
+      refKarat: refKarat,
+      displayCurrency: displayCurrency,
+      rates: rates,
+    );
+    final now = DateTime.now();
+    double toDisplay(double amount, String currency) => usdFromPrice(amount, currency, rates) * (rates.rate(displayCurrency) ?? 1);
+    final facts = this.facts;
+    final result = position == null
+        ? null
+        : HoldingReturn.of(
+            transactions: holdings.transactionsFor(instrument),
+            position: position,
+            dividends: facts?.dividends ?? const [],
+            dividendCurrency: facts?.currency ?? displayCurrency,
+            value: valuation?.value.amount ?? 0,
+            now: now,
+            toDisplay: toDisplay,
+          );
+    final yearlyDividends = facts == null || position == null
+        ? 0.0
+        : toDisplay(position.fineOunces * facts.trailingDividends(now), facts.currency);
+    return DSCard(
+      child: InkWell(
+        borderRadius: BorderRadius.circular(DS.radiusCard),
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => HoldingsScreen(
+              instrument: instrument,
+              displayCurrency: displayCurrency,
+              refUnit: refUnit,
+              refKarat: refKarat,
             ),
           ),
-        );
-      },
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Text(l10n.detailHoldings,
+                    style: TextStyle(color: colors.textPrimary, fontSize: 16, fontWeight: FontWeight.w700)),
+                const SizedBox(width: DS.spaceMD),
+                Text(
+                  l10n.portfolioTransactionCount(transactionCount),
+                  style: TextStyle(color: colors.textTertiary, fontSize: 13),
+                ),
+                const Spacer(),
+                Icon(Icons.chevron_right, color: colors.textTertiary),
+              ],
+            ),
+            if (valuation == null)
+              Padding(
+                padding: const EdgeInsets.only(top: DS.spaceSM),
+                child: Text(
+                  transactionCount == 0 || position == null
+                      ? l10n.holdingsEmpty
+                      : l10n.ledgerClosedLine(Masking.signedAmount(
+                          position.realised.inCurrency(displayCurrency, rates),
+                          hidden: hidden,
+                          isUp: position.realised.inCurrency(displayCurrency, rates).amount >= 0,
+                        )),
+                  style: TextStyle(color: colors.textTertiary),
+                ),
+              )
+            else ...[
+              if (averageCost != null) ...[
+                const SizedBox(height: 2),
+                Text(
+                  l10n.holdingsHeldLine(
+                    hidden ? Masking.mask : quantityWithUnitKaratLabel(context, held, unit, refKarat),
+                    Masking.amount(averageCost, hidden: hidden),
+                  ),
+                  style: TextStyle(color: colors.textTertiary, fontSize: 12),
+                ),
+              ],
+              const SizedBox(height: DS.spaceSM),
+              Row(
+                children: [
+                  Expanded(child: StatPill(title: l10n.holdingsValue, value: Masking.amount(valuation.value, hidden: hidden))),
+                  const SizedBox(width: DS.spaceMD),
+                  Expanded(
+                    child: StatPill(
+                      title: l10n.holdingsGain,
+                      value: Masking.signedAmount(valuation.gain, hidden: hidden, isUp: valuation.isUp),
+                      tint: QimaColors.trendColor(valuation.isUp, colors),
+                    ),
+                  ),
+                  const SizedBox(width: DS.spaceMD),
+                  Expanded(
+                    child: StatPill(
+                      title: l10n.holdingsGainPercent,
+                      value: signedFigure('${(valuation.gainFraction * 100).toStringAsFixed(2)}%', isUp: valuation.isUp),
+                      tint: QimaColors.trendColor(valuation.isUp, colors),
+                    ),
+                  ),
+                ],
+              ),
+              if (result != null) ...[
+                const SizedBox(height: DS.spaceSM),
+                Row(
+                  key: const ValueKey('holdingReturn'),
+                  children: [
+                    Expanded(
+                      flex: 2,
+                      child: StatPill(
+                        title: l10n.holdingsTotalReturn,
+                        value: '${Masking.signedAmount(Money(result.total, displayCurrency), hidden: hidden, isUp: result.total >= 0)}'
+                            ' · ${signedFigure('${(result.fraction * 100).toStringAsFixed(1)}%', isUp: result.total >= 0)}',
+                        tint: QimaColors.trendColor(result.total >= 0, colors),
+                      ),
+                    ),
+                    const SizedBox(width: DS.spaceMD),
+                    Expanded(
+                      child: StatPill(
+                        title: l10n.holdingsPerYear,
+                        value: result.yearly == null
+                            ? '—'
+                            : signedFigure('${(result.yearly! * 100).toStringAsFixed(1)}%', isUp: result.yearly! >= 0),
+                        tint: result.yearly == null ? null : QimaColors.trendColor(result.yearly! >= 0, colors),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+              if (result != null && (result.dividends > 0 || yearlyDividends > 0)) ...[
+                const SizedBox(height: DS.spaceXS),
+                Text(
+                  l10n.holdingsDividendsLine(
+                    Masking.amount(Money(result.dividends, displayCurrency), hidden: hidden),
+                    Masking.amount(Money(yearlyDividends, displayCurrency), hidden: hidden),
+                  ),
+                  key: const ValueKey('holdingDividends'),
+                  style: TextStyle(color: colors.textTertiary, fontSize: 12),
+                ),
+              ],
+            ],
+          ],
+        ),
+      ),
     );
   }
 }

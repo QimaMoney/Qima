@@ -1,10 +1,46 @@
-import '../blocs/app_state.dart';
 import '../models/asset.dart';
 import '../models/chart_range.dart';
 import '../models/currency_style.dart';
+import '../models/fx_history.dart';
 import '../models/holding.dart';
+import '../models/holding_transaction.dart';
 import '../models/instrument_catalog.dart';
+import '../models/ledger.dart';
+import '../models/money.dart';
 import '../models/quote.dart';
+import '../models/watch_card.dart';
+
+/// What a widget snapshot is built from: the watchlist, the holdings ledger
+/// and the prices, as the foreground app and a background refresh each hold
+/// them.
+class WidgetData {
+  final List<WatchCard> cards;
+  final Ledger ledger;
+  final Map<String, QuoteSeries> seriesByID;
+  final FXRates rates;
+  final FXHistory fxHistory;
+  final DateTime? lastRefresh;
+  final bool hideBalances;
+  final String baseCurrency;
+
+  WidgetData({
+    this.cards = const [],
+    // Shorthand for a ledger of plain buys, one per lot.
+    List<HoldingLot>? lots,
+    Ledger? ledger,
+    Map<String, QuoteSeries>? seriesByID,
+    FXRates? rates,
+    this.fxHistory = FXHistory.empty,
+    this.lastRefresh,
+    this.hideBalances = false,
+    this.baseCurrency = 'USD',
+  })  : ledger = ledger ?? Ledger.derive([for (final lot in lots ?? const <HoldingLot>[]) HoldingTransaction.fromLot(lot)]),
+        seriesByID = seriesByID ?? const {},
+        rates = rates ?? FXRates.usdIdentity;
+
+  /// What's held now, as lots.
+  List<HoldingLot> get lots => ledger.openLots;
+}
 
 /// The data contract the iOS WidgetKit extension reads (key [storageKey] in
 /// the shared App Group defaults).
@@ -43,7 +79,7 @@ class WidgetSnapshot {
     'ALL': ChartRange.all,
   };
 
-  static Map<String, dynamic> build(AppState state, {required DateTime now}) {
+  static Map<String, dynamic> build(WidgetData state, {required DateTime now}) {
     final instrumentIDs = <String>{
       ...state.cards.map((c) => c.instrumentID),
       ...state.lots.map((l) => l.instrumentID),
@@ -134,7 +170,7 @@ class WidgetSnapshot {
     return [for (var i = 0; i < maxPoints; i++) items[(i * step).round()]];
   }
 
-  static Map<String, dynamic> _portfolio(AppState state, DateTime now) {
+  static Map<String, dynamic> _portfolio(WidgetData state, DateTime now) {
     final lots = state.lots;
     if (lots.isEmpty) return {'available': false};
 
@@ -173,7 +209,7 @@ class WidgetSnapshot {
   /// the range start (the first transaction for "All", so the first point
   /// already holds it) to [now]. Each instrument counts what the ledger held
   /// at that instant; one with no price yet adds cost but no value.
-  static List<List<num>> _portfolioSeries(AppState state, ChartRange range, DateTime firstTransaction, DateTime now) {
+  static List<List<num>> _portfolioSeries(WidgetData state, ChartRange range, DateTime firstTransaction, DateTime now) {
     final start = range.startDate(now) ?? firstTransaction;
     if (!start.isBefore(now)) return const [];
 

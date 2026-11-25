@@ -18,6 +18,13 @@ Future<Directory> _directory() async {
   return dir;
 }
 
+/// Like [_fileFor], recreates the directory if something removed it.
+Future<String> directoryPath() async {
+  final dir = await _directory();
+  if (!await dir.exists()) await dir.create(recursive: true);
+  return dir.absolute.path;
+}
+
 Future<File> _fileFor(String relativePath) async {
   final dir = await _directory();
   final file = File('${dir.path}/$relativePath');
@@ -34,6 +41,14 @@ Future<Map<String, dynamic>?> readJson(String relativePath) async {
   final contents = await file.readAsString();
   if (contents.isEmpty) return null;
   return jsonDecode(contents) as Map<String, dynamic>;
+}
+
+/// Like [readJson], but a file that cannot be read or parsed throws instead
+/// of looking like a missing one.
+Future<Map<String, dynamic>?> readJsonStrict(String relativePath) async {
+  final file = await _fileFor(relativePath);
+  if (!await file.exists()) return null;
+  return jsonDecode(await file.readAsString()) as Map<String, dynamic>;
 }
 
 /// Writes [data] atomically: the encoded JSON lands in a sibling `path.tmp`

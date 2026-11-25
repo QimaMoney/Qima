@@ -1,5 +1,4 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:qima/blocs/app_state.dart';
 import 'package:qima/models/asset.dart';
 import 'package:qima/models/currency_style.dart';
 import 'package:qima/models/fx_history.dart';
@@ -22,8 +21,7 @@ void main() {
         ],
       );
 
-  AppState state({List<HoldingLot> lots = const [], bool hide = false}) => AppState(
-        initialized: true,
+  WidgetData state({List<HoldingLot> lots = const [], bool hide = false}) => WidgetData(
         cards: const [
           WatchCard(id: 'c1', instrumentID: gold, currency: 'EGP', unit: PriceUnit.gram, karat: GoldKarat.k21),
           WatchCard(id: 'c2', instrumentID: 'unknown.ZZZ', currency: 'USD', unit: PriceUnit.each),

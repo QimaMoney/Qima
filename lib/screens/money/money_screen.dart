@@ -2,12 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:intl/intl.dart' hide TextDirection;
 
-import '../../blocs/app_cubit.dart';
-import '../../blocs/app_state.dart';
+import '../../blocs/market_cubit.dart';
 import '../../blocs/money_cubit.dart';
+import '../../blocs/settings_cubit.dart';
+import '../../blocs/settings_state.dart';
 import '../../l10n/app_localizations.dart';
 import '../../models/book_account.dart';
 import '../../models/book_figures.dart';
+import '../../models/minor_units.dart';
+import '../../models/money.dart';
 import '../../models/money_analysis.dart';
 import '../../models/money_settings.dart';
 import '../../models/net_worth.dart';
@@ -46,16 +49,17 @@ class _MoneyScreenState extends State<MoneyScreen> {
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
     final locale = Localizations.localeOf(context).toLanguageTag();
-    return BlocBuilder<AppCubit, AppState>(
-      buildWhen: (a, b) => a.hideBalances != b.hideBalances || a.baseCurrency != b.baseCurrency || a.rates != b.rates,
+    return BlocBuilder<SettingsCubit, SettingsState>(
+      buildWhen: (a, b) => a.hideBalances != b.hideBalances || a.baseCurrency != b.baseCurrency,
       builder: (context, app) {
+        final rates = context.select<MarketCubit, FXRates>((c) => c.state.rates);
         final state = context.watch<MoneyCubit>().state;
         final hidden = app.hideBalances;
         final ccy = app.baseCurrency;
         final book = state.book;
         final settings = state.settings;
         final now = DateTime.now();
-        final a = context.read<MoneyCubit>().monthAnalysis(_month, currency: ccy, rates: app.rates);
+        final a = context.read<MoneyCubit>().monthAnalysis(_month, currency: ccy, rates: rates);
         final isThisMonth = _month.year == now.year && _month.month == now.month;
         final recent = [for (final e in state.entriesNewestFirst) if (!e.date.isBefore(_month) && e.date.isBefore(a.end)) e];
         String name(String id) {
@@ -75,19 +79,19 @@ class _MoneyScreenState extends State<MoneyScreen> {
               Text(a.hasBudget ? l10n.cardLeftToSpend : l10n.moneySpent, style: TextStyle(color: colors.textTertiary, fontSize: 12)),
               Directionality(
                 textDirection: TextDirection.ltr,
-                child: Text(moneyText(a.hasBudget ? a.leftToSpend : a.spent, ccy, hidden: hidden),
+                child: Text(minorText(a.hasBudget ? a.leftToSpend : a.spent, ccy, hidden: hidden),
                     style: TextStyle(color: a.hasBudget && a.leftToSpend < 0 ? colors.down : colors.textPrimary, fontSize: DS.figureHero, fontWeight: FontWeight.w800)),
               ),
               if (a.hasBudget) ...[
                 const SizedBox(height: DS.spaceXS),
                 LinearProgressIndicator(value: a.budget == 0 ? 0 : (a.spent / a.budget).clamp(0.0, 1.0), minHeight: 6, borderRadius: BorderRadius.circular(3)),
                 const SizedBox(height: DS.space2XS),
-                Text(l10n.moneySpentOf(moneyText(a.spent, ccy, hidden: hidden), moneyText(a.budget, ccy, hidden: hidden)), style: TextStyle(color: colors.textSecondary, fontSize: 13)),
+                Text(l10n.moneySpentOf(minorText(a.spent, ccy, hidden: hidden), minorText(a.budget, ccy, hidden: hidden)), style: TextStyle(color: colors.textSecondary, fontSize: 13)),
               ],
               if (a.planned > 0)
-                Text(l10n.plannedThisMonth(moneyText(a.planned, ccy, hidden: hidden)), style: TextStyle(color: colors.textSecondary, fontSize: 13)),
+                Text(l10n.plannedThisMonth(minorText(a.planned, ccy, hidden: hidden)), style: TextStyle(color: colors.textSecondary, fontSize: 13)),
               if (isThisMonth && projected != null && a.spent > 0)
-                Text(l10n.moneyPace(moneyText(projected, ccy, hidden: hidden)), style: TextStyle(color: colors.textSecondary, fontSize: 13)),
+                Text(l10n.moneyPace(minorText(projected, ccy, hidden: hidden)), style: TextStyle(color: colors.textSecondary, fontSize: 13)),
               if (!a.complete) MissingRatesNote(a.missingRates, padding: const EdgeInsets.only(top: DS.spaceXS)),
             ],
           ),
@@ -120,8 +124,8 @@ class _MoneyScreenState extends State<MoneyScreen> {
                     icon: Icons.speed,
                     title: l10n.aheadOfPace(name(id)),
                     subtitle: [
-                      l10n.moneySpentOf(moneyText(spent, ccy, hidden: hidden), moneyText(budget, ccy, hidden: hidden)),
-                      if (spare.isNotEmpty && spare.first.$1 != id) l10n.spareIn(name(spare.first.$1), moneyText(spare.first.$2, ccy, hidden: hidden)),
+                      l10n.moneySpentOf(minorText(spent, ccy, hidden: hidden), minorText(budget, ccy, hidden: hidden)),
+                      if (spare.isNotEmpty && spare.first.$1 != id) l10n.spareIn(name(spare.first.$1), minorText(spare.first.$2, ccy, hidden: hidden)),
                     ].join(' · '),
                     onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const BudgetScreen())),
                   ),
@@ -131,7 +135,7 @@ class _MoneyScreenState extends State<MoneyScreen> {
         }
 
         // Where it went, each against its usual month when it has no budget.
-        final usual = BookFigures.usualByCategory(book, _month, currency: ccy, rates: app.rates);
+        final usual = BookFigures.usualByCategory(book, _month, currency: ccy, rates: rates);
         sections.add(MoneySection(
           title: l10n.whereItWent,
           children: a.byCategory.isEmpty
@@ -141,9 +145,9 @@ class _MoneyScreenState extends State<MoneyScreen> {
                     _CategoryBar(
                       icon: MoneyIcons.category(id),
                       name: name(id),
-                      amount: moneyText(v, ccy, hidden: hidden),
+                      amount: minorText(v, ccy, hidden: hidden),
                       share: a.spent == 0 ? 0 : v / a.spent,
-                      budget: a.budgets[id] == null ? null : moneyText(a.budgets[id]!, ccy, hidden: hidden),
+                      budget: a.budgets[id] == null ? null : minorText(a.budgets[id]!, ccy, hidden: hidden),
                       usual: a.budgets[id] != null || usual[id] == null ? null : moneyText(usual[id]!, ccy, hidden: hidden),
                       over: a.budgets[id] != null && v > a.budgets[id]!,
                       onTap: () => Navigator.of(context).push(MaterialPageRoute(
@@ -154,25 +158,25 @@ class _MoneyScreenState extends State<MoneyScreen> {
         ));
 
         // Cash flow. The guided tour's Money stop points here.
-        final flows = BookFigures.flows(book, _month, currency: ccy, rates: app.rates);
+        final flows = BookFigures.flows(book, _month, currency: ccy, rates: rates);
         final savingRates = [for (final f in flows) ?f.savingsRate];
-        final usualSpending = isThisMonth ? BookFigures.usualSpending(book, _month, currency: ccy, rates: app.rates) : null;
-        final cash = NetWorthSummary.of(book: book, holdingsValue: 0, currency: ccy, rates: app.rates).group(SheetGroup.cash).amount;
+        final usualSpending = isThisMonth ? BookFigures.usualSpending(book, _month, currency: ccy, rates: rates) : null;
+        final cash = NetWorthSummary.of(book: book, holdingsValue: 0, currency: ccy, rates: rates).group(SheetGroup.cash).amount;
         final runway = BookFigures.runwayMonths(cash, usualSpending);
         String percent(double v) => '\u2066${(v * 100).toStringAsFixed(0)}%\u2069';
         sections.add(MoneySection(
           key: TourTargets.money,
           title: l10n.cashFlow,
           children: [
-            MoneyRow(icon: Icons.south_west, title: l10n.moneyIn, trailing: moneyText(a.income, ccy, hidden: hidden), trailingColor: colors.up),
-            MoneyRow(icon: Icons.north_east, title: l10n.moneyOut, trailing: moneyText(a.spent, ccy, hidden: hidden)),
+            MoneyRow(icon: Icons.south_west, title: l10n.moneyIn, trailing: minorText(a.income, ccy, hidden: hidden), trailingColor: colors.up),
+            MoneyRow(icon: Icons.north_east, title: l10n.moneyOut, trailing: minorText(a.spent, ccy, hidden: hidden)),
             MoneyRow(
               title: a.net >= 0 ? l10n.moneyLeftOver : l10n.moneyShort,
               bold: true,
-              trailing: moneyText(a.net.abs(), ccy, hidden: hidden),
+              trailing: minorText(a.net.abs(), ccy, hidden: hidden),
               trailingColor: a.net >= 0 ? colors.up : colors.down,
             ),
-            if (MonthFlow(_month, a.income, a.spent).savingsRate case final rate?)
+            if (MonthFlow(_month, MinorUnits.toMajor(a.income, ccy), MinorUnits.toMajor(a.spent, ccy)).savingsRate case final rate?)
               MoneyRow(
                 key: const ValueKey('savingsRate'),
                 icon: Icons.savings_outlined,
@@ -193,7 +197,7 @@ class _MoneyScreenState extends State<MoneyScreen> {
         ));
 
         // The trend across months.
-        final trend = MonthAnalysis.trend(book, _month, currency: ccy, rates: app.rates);
+        final trend = MonthAnalysis.trend(book, _month, currency: ccy, rates: rates);
         if (trend.any((t) => t.$2 > 0)) {
           final top = trend.map((t) => t.$2).reduce((x, y) => x > y ? x : y);
           sections.add(MoneySection(
@@ -211,7 +215,7 @@ class _MoneyScreenState extends State<MoneyScreen> {
                         for (final (m, v) in trend)
                           Expanded(
                             child: Semantics(
-                              label: '${DateFormat.yMMM(locale).format(m)} ${moneyText(v, ccy, hidden: hidden)}',
+                              label: '${DateFormat.yMMM(locale).format(m)} ${minorText(v, ccy, hidden: hidden)}',
                               // The bar takes what the label leaves, so a
                               // long month name never pushes it out.
                               child: Column(
@@ -251,8 +255,8 @@ class _MoneyScreenState extends State<MoneyScreen> {
 
         // Ask: suggested questions, answered from the ledger.
         final questions = <(String, String)>[
-          (l10n.askSpentMonth, l10n.askSpentMonthAnswer(moneyText(a.spent, ccy, hidden: hidden))),
-          if (a.byCategory.isNotEmpty) (l10n.askTopCategory, l10n.askTopCategoryAnswer(name(a.byCategory.first.$1), moneyText(a.byCategory.first.$2, ccy, hidden: hidden))),
+          (l10n.askSpentMonth, l10n.askSpentMonthAnswer(minorText(a.spent, ccy, hidden: hidden))),
+          if (a.byCategory.isNotEmpty) (l10n.askTopCategory, l10n.askTopCategoryAnswer(name(a.byCategory.first.$1), minorText(a.byCategory.first.$2, ccy, hidden: hidden))),
           if (trend.length > 1) (l10n.askVsLastMonth, _vsLast(l10n, trend, ccy, hidden)),
           (l10n.askOwed, _owed(l10n, state, hidden)),
         ];
@@ -340,11 +344,11 @@ class _MoneyScreenState extends State<MoneyScreen> {
 
   static void _push(BuildContext context, Widget screen) => Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));
 
-  static String _vsLast(AppLocalizations l10n, List<(DateTime, double)> trend, String ccy, bool hidden) {
+  static String _vsLast(AppLocalizations l10n, List<(DateTime, int)> trend, String ccy, bool hidden) {
     final now = trend.last.$2, before = trend[trend.length - 2].$2;
     final d = now - before;
-    if (d.abs() < 0.005) return l10n.askSame;
-    return d > 0 ? l10n.askMore(moneyText(d, ccy, hidden: hidden)) : l10n.askLess(moneyText(-d, ccy, hidden: hidden));
+    if (d == 0) return l10n.askSame;
+    return d > 0 ? l10n.askMore(minorText(d, ccy, hidden: hidden)) : l10n.askLess(minorText(-d, ccy, hidden: hidden));
   }
 
   static String _owed(AppLocalizations l10n, MoneyState state, bool hidden) {

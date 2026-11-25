@@ -5,10 +5,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import 'blocs/app_blocs.dart';
 import 'blocs/app_cubit.dart';
 import 'blocs/app_state.dart';
 import 'blocs/import_cubit.dart';
 import 'blocs/money_cubit.dart';
+import 'blocs/settings_cubit.dart';
+import 'blocs/settings_state.dart';
 import 'l10n/app_localizations.dart';
 import 'models/watch_card.dart';
 import 'screens/backup_screen.dart';
@@ -68,7 +71,7 @@ class QimaApp extends StatefulWidget {
   State<QimaApp> createState() => _QimaAppState();
 }
 
-class _QimaAppState extends State<QimaApp> {
+class _QimaAppState extends State<QimaApp> with WidgetsBindingObserver {
   /// Lets notification-tap navigation reach the `Navigator` without a
   /// `BuildContext` from inside the tap-payload stream listener (spec Phase
   /// 5 "notification-tap navigation"). Pushing through this key still lands
@@ -77,7 +80,7 @@ class _QimaAppState extends State<QimaApp> {
   /// pushed screen behind the lock screen/privacy cover until unlocked; nothing
   /// here bypasses it.
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
-  late final AppCubit _cubit;
+  late final AppBlocs _blocs;
   late final MoneyCubit _money;
   late final ImportCubit _import;
   late final AiApps _aiApps;
@@ -86,40 +89,77 @@ class _QimaAppState extends State<QimaApp> {
   @override
   void initState() {
     super.initState();
-    _cubit = AppCubit();
+    WidgetsBinding.instance.addObserver(this);
+    _blocs = AppBlocs();
     _money = MoneyCubit(
-      store: _cubit.bookStore,
-      baseCurrency: () => _cubit.state.baseCurrency,
-      rates: () => _cubit.state.rates,
+      store: _blocs.sync.bookStore,
+      baseCurrency: () => _blocs.settings.state.baseCurrency,
+      rates: () => _blocs.market.state.rates,
     );
-    _aiApps = AiApps(app: _cubit, money: _money);
+    _aiApps = AiApps(app: _blocs.app, settings: _blocs.settings, market: _blocs.market, holdings: _blocs.holdings, money: _money);
     _import = ImportCubit(
       inbox: createImportInbox(extra: _aiApps.inboxPath),
-      recognition: _cubit.textRecognition,
+      recognition: _blocs.settings.textRecognition,
       wasImported: _money.wasImported,
-      assist: () => _cubit.assist,
+      assist: () => _blocs.settings.assist,
       shapes: () => _money.state.settings.messageShapes,
       languages: () => StatementFiles.languagesFor(
-          _cubit.state.appLanguage.localeIdentifier ?? WidgetsBinding.instance.platformDispatcher.locale.languageCode),
+          _blocs.settings.state.appLanguage.localeIdentifier ?? WidgetsBinding.instance.platformDispatcher.locale.languageCode),
     );
     _aiApps.onAdded = () => unawaited(_import.checkInbox());
-    _cubit.onBookChanged = (key) => key == null ? _money.load() : _money.adoptCloudChanges(key);
+    _blocs.onBookChanged = (key) => key == null ? _money.load() : _money.adoptCloudChanges(key);
     _tapSubscription = notificationTapPayloads.stream.listen(_handleNotificationTap);
     // The money ledger loads after init, once the cloud backend is settled
     // (see AppCubit.init), so a fresh device never seeds over synced data.
-    _cubit.init().then((_) async {
+    unawaited(_start());
+  }
+
+  /// Set when [AppCubit.init] threw, so nothing waits for it for ever.
+  bool _initFailed = false;
+
+  /// Start-up. A failure never leaves the app waiting: init's own failure is
+  /// logged and stops what waits for it, and a money ledger that cannot be
+  /// read is recorded for Settings while the rest carries on.
+  Future<void> _start() async {
+    try {
+      await _blocs.init();
+    } catch (error, stack) {
+      _initFailed = true;
+      debugPrint('Start-up failed: $error\n$stack');
+      return;
+    }
+    try {
       await _money.load();
-      _aiApps.start();
-      // Files shared to Qima while it was closed.
-      unawaited(_import.checkInbox());
-      await _consumeColdLaunchPayload();
-    });
+      // The CloudKit change log sync, if it is on, starts with the book.
+      _blocs.cloudLog.bookLoaded();
+    } catch (error, stack) {
+      debugPrint('Reading the money ledger failed: $error\n$stack');
+      await _blocs.sync.noteLoadFailed();
+    }
+    _aiApps.start();
+    // Files shared to Qima while it was closed.
+    unawaited(_import.checkInbox());
+    await _consumeColdLaunchPayload();
+  }
+
+  /// The CloudKit change log sync runs while the app is in the foreground.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    switch (state) {
+      case AppLifecycleState.resumed:
+        unawaited(_blocs.cloudLog.resumed());
+      case AppLifecycleState.paused || AppLifecycleState.hidden || AppLifecycleState.detached:
+        _blocs.cloudLog.paused();
+      case AppLifecycleState.inactive:
+        break;
+    }
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _tapSubscription?.cancel();
-    unawaited(_cubit.disposeCloudSync());
+    unawaited(_blocs.close());
     unawaited(_money.close());
     unawaited(_import.close());
     unawaited(_aiApps.dispose());
@@ -127,7 +167,7 @@ class _QimaAppState extends State<QimaApp> {
   }
 
   Future<void> _consumeColdLaunchPayload() async {
-    final payload = await _cubit.notificationService.consumeLaunchPayload();
+    final payload = await _blocs.alerts.notificationService.consumeLaunchPayload();
     if (payload != null) _handleNotificationTap(payload);
   }
 
@@ -141,7 +181,8 @@ class _QimaAppState extends State<QimaApp> {
   /// was since removed.
   void _handleNotificationTap(String payload) {
     unawaited(() async {
-      while (!_cubit.state.initialized) {
+      while (!_blocs.app.state.initialized) {
+        if (_initFailed || _blocs.app.isClosed) return;
         await Future<void>.delayed(const Duration(milliseconds: 50));
       }
       final navigator = _navigatorKey.currentState;
@@ -161,7 +202,7 @@ class _QimaAppState extends State<QimaApp> {
       }
 
       WatchCard? card;
-      for (final c in _cubit.state.cards) {
+      for (final c in _blocs.watchlist.state.cards) {
         if (c.id == payload) {
           card = c;
           break;
@@ -177,11 +218,11 @@ class _QimaAppState extends State<QimaApp> {
     return MultiBlocProvider(
       providers: [
         RepositoryProvider<AiApps>.value(value: _aiApps),
-        BlocProvider<AppCubit>.value(value: _cubit),
+        ..._blocs.providers,
         BlocProvider<MoneyCubit>.value(value: _money),
         BlocProvider<ImportCubit>.value(value: _import),
       ],
-      child: BlocBuilder<AppCubit, AppState>(
+      child: BlocBuilder<SettingsCubit, SettingsState>(
         buildWhen: (previous, current) =>
             previous.appLanguage != current.appLanguage || previous.appearance != current.appearance,
         builder: (context, state) {
@@ -220,8 +261,8 @@ class _QimaAppState extends State<QimaApp> {
                 listenWhen: (previous, current) => previous.recurring != current.recurring,
                 listener: (context, money) {
                   final l10n = AppLocalizations.of(context);
-                  if (l10n == null || !_cubit.state.initialized) return;
-                  unawaited(PlannedReminders(notifications: _cubit.notificationService, preferences: _cubit.preferences).sync(money.recurring, l10n));
+                  if (l10n == null || !_blocs.app.state.initialized) return;
+                  unawaited(PlannedReminders(notifications: _blocs.alerts.notificationService, preferences: _blocs.settings.preferences).sync(money.recurring, l10n));
                 },
                 child: LockGate(child: content),
               );

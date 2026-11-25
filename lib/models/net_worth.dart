@@ -72,14 +72,9 @@ class NetWorthSummary {
     final missing = <String>{};
     double convert(BalanceSheetLine l) {
       if (!l.account.countsInNetWorth || l.amount == 0) return 0;
-      final major = MinorUnits.toMajor(l.amount, l.currency);
-      if (l.currency == currency) return major;
-      final from = rates.rate(l.currency), to = rates.rate(currency);
-      if (from == null || to == null) {
-        missing.add(l.currency);
-        return 0;
-      }
-      return major / from * to;
+      final v = MinorUnits.convertToMajor(l.amount, l.currency, currency, rates);
+      if (v == null) missing.add(l.currency);
+      return v ?? 0;
     }
 
     final groups = <SheetGroupTotal>[];
@@ -100,11 +95,6 @@ class NetWorthSummary {
   }
 
   /// One account's balance in [currency], or null without a rate.
-  static double? inCurrency(int minor, String from, String currency, FXRates rates) {
-    final major = MinorUnits.toMajor(minor, from);
-    if (from == currency) return major;
-    final f = rates.rate(from), t = rates.rate(currency);
-    if (f == null || t == null) return null;
-    return major / f * t;
-  }
+  static double? inCurrency(int minor, String from, String currency, FXRates rates) =>
+      MinorUnits.convertToMajor(minor, from, currency, rates);
 }

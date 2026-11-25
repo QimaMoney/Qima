@@ -526,7 +526,9 @@ class EntrySummary {
 
   /// The entry as a list row. With [forAccount], the amount is that
   /// account's own change.
-  static EntrySummary of(BookEntry e, Book book, AppLocalizations l10n, {String? forAccount}) {
+  static EntrySummary of(BookEntry entry, Book book, AppLocalizations l10n, {String? forAccount}) {
+    // A trade reads as the cash that moved, as everywhere in Money.
+    final e = MoneyState.view(entry) ?? entry;
     String name(String id) {
       final a = book.accounts[id];
       return a == null ? id : l10n.accountName(a);
@@ -535,7 +537,7 @@ class EntrySummary {
     final title = e.merchant.isNotEmpty ? e.merchant : l10n.template(e.template);
     final own = [
       for (final l in e.lines)
-        if (book.accounts[l.accountId]?.side.onBalanceSheet ?? false) l,
+        if (book.accounts[l.accountId]?.onMoneySheet ?? false) l,
     ];
     final flows = [
       for (final l in e.lines)

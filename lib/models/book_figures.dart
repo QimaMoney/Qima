@@ -1,5 +1,6 @@
 import 'book.dart';
 import 'display_point.dart';
+import 'minor_units.dart';
 import 'money.dart';
 import 'money_analysis.dart';
 
@@ -29,7 +30,7 @@ class NetWorthChange {
 }
 
 /// Figures read off the person's own book: arithmetic on what happened,
-/// never advice.
+/// never advice. Amounts are in major units, as net worth is.
 class BookFigures {
   BookFigures._();
 
@@ -43,7 +44,7 @@ class BookFigures {
         if (!DateTime(anyDay.year, anyDay.month - i).isBefore(first))
           () {
             final a = MonthAnalysis.of(book, DateTime(anyDay.year, anyDay.month - i), currency: currency, rates: rates);
-            return MonthFlow(a.month, a.income, a.spent);
+            return MonthFlow(a.month, MinorUnits.toMajor(a.income, currency), MinorUnits.toMajor(a.spent, currency));
           }(),
     ];
   }
@@ -60,7 +61,7 @@ class BookFigures {
   static double? usualSpending(Book book, DateTime anyDay, {required String currency, required FXRates rates, int months = 3}) {
     final before = _monthsBefore(book, anyDay, months);
     if (before.isEmpty) return null;
-    final total = before.fold(0.0, (sum, m) => sum + MonthAnalysis.of(book, m, currency: currency, rates: rates).spent);
+    final total = before.fold(0.0, (sum, m) => sum + MinorUnits.toMajor(MonthAnalysis.of(book, m, currency: currency, rates: rates).spent, currency));
     return total / before.length;
   }
 
@@ -73,7 +74,7 @@ class BookFigures {
     final sums = <String, double>{};
     for (final m in before) {
       for (final (id, v) in MonthAnalysis.of(book, m, currency: currency, rates: rates).byCategory) {
-        sums[id] = (sums[id] ?? 0) + v;
+        sums[id] = (sums[id] ?? 0) + MinorUnits.toMajor(v, currency);
       }
     }
     return {for (final e in sums.entries) e.key: e.value / before.length};

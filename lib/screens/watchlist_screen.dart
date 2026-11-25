@@ -4,7 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../blocs/app_cubit.dart';
-import '../blocs/app_state.dart';
+import '../blocs/holdings_cubit.dart';
+import '../blocs/market_cubit.dart';
+import '../blocs/market_state.dart';
+import '../blocs/settings_cubit.dart';
+import '../blocs/watchlist_cubit.dart';
+import '../blocs/watchlist_state.dart';
 import '../l10n/app_localizations.dart';
 import '../models/asset.dart';
 import '../models/watch_card.dart';
@@ -112,15 +117,18 @@ class _WatchlistScreenState extends State<WatchlistScreen> with WidgetsBindingOb
   }
 
   void _onForeground() {
-    final cubit = context.read<AppCubit>();
-    cubit.refreshIfStale();
+    final market = context.read<MarketCubit>();
+    market.refreshIfStale();
     _timer?.cancel();
-    _timer = Timer.periodic(const Duration(seconds: 60), (_) => cubit.refreshAll(silent: true));
+    _timer = Timer.periodic(const Duration(seconds: 60), (_) => market.refreshAll(silent: true));
   }
 
   @override
   Widget build(BuildContext context) {
-    final cubit = context.read<AppCubit>();
+    final watchlist = context.read<WatchlistCubit>();
+    final market = context.read<MarketCubit>();
+    final holdings = context.read<HoldingsCubit>();
+    final settings = context.read<SettingsCubit>();
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
 
@@ -152,7 +160,7 @@ class _WatchlistScreenState extends State<WatchlistScreen> with WidgetsBindingOb
                   title: Text(widget.asPrices ? l10n.navPrices : l10n.appTitle),
                   actions: [
                     const HelpButton(topic: HelpTopicId.watchlist),
-                    BlocBuilder<AppCubit, AppState>(
+                    BlocBuilder<WatchlistCubit, WatchlistState>(
                       buildWhen: (previous, current) => (previous.cards.length > 1) != (current.cards.length > 1),
                       builder: (context, state) {
                         if (state.cards.length < 2) return const SizedBox.shrink();
@@ -163,7 +171,7 @@ class _WatchlistScreenState extends State<WatchlistScreen> with WidgetsBindingOb
                         );
                       },
                     ),
-                    BlocBuilder<AppCubit, AppState>(
+                    BlocBuilder<MarketCubit, MarketState>(
                       builder: (context, state) {
                         return IconButton(
                           icon: state.phase == RefreshPhase.refreshing
@@ -173,7 +181,7 @@ class _WatchlistScreenState extends State<WatchlistScreen> with WidgetsBindingOb
                                   child: CircularProgressIndicator(strokeWidth: 2),
                                 )
                               : const Icon(Icons.refresh),
-                          onPressed: () => cubit.refreshAll(),
+                          onPressed: () => market.refreshAll(),
                         );
                       },
                     ),
@@ -185,12 +193,19 @@ class _WatchlistScreenState extends State<WatchlistScreen> with WidgetsBindingOb
                       ),
                   ],
                 ),
-          body: BlocBuilder<AppCubit, AppState>(
-            builder: (context, state) {
-              if (!state.initialized) {
+          // Reads the watchlist, the prices, the holdings and the settings
+          // together, so it listens to each of them.
+          body: Builder(
+            builder: (context) {
+              final initialized = context.select<AppCubit, bool>((c) => c.state.initialized);
+              final cards = context.watch<WatchlistCubit>().state.cards;
+              context.watch<MarketCubit>();
+              context.watch<HoldingsCubit>();
+              final prefs = context.watch<SettingsCubit>().state;
+              if (!initialized) {
                 return const Center(child: CircularProgressIndicator());
               }
-              if (state.cards.isEmpty) {
+              if (cards.isEmpty) {
                 if (_editingOrder) {
                   WidgetsBinding.instance.addPostFrameCallback((_) {
                     if (mounted) _setEditingOrder(false);
@@ -232,14 +247,14 @@ class _WatchlistScreenState extends State<WatchlistScreen> with WidgetsBindingOb
                 );
               }
   
-              if (_editingOrder) return _editOrderList(context, cubit, l10n, colors, state.cards);
+              if (_editingOrder) return _editOrderList(context, watchlist, market, l10n, colors, cards);
   
-              final valuation = widget.asPrices ? null : cubit.portfolioValuation;
+              final valuation = widget.asPrices ? null : holdings.portfolioValuation;
   
               // Only classes actually present in the watchlist get a filter
               // chip; a class with zero cards never shows an empty chip.
               final availableClasses = <AssetClass>{
-                for (final card in state.cards)
+                for (final card in cards)
                   if (card.instrument != null) card.instrument!.assetClass,
               };
               if (_filter != null && !availableClasses.contains(_filter)) {
@@ -253,8 +268,8 @@ class _WatchlistScreenState extends State<WatchlistScreen> with WidgetsBindingOb
               }
   
               final filteredCards = _filter == null
-                  ? state.cards
-                  : state.cards.where((c) => c.instrument?.assetClass == _filter).toList();
+                  ? cards
+                  : cards.where((c) => c.instrument?.assetClass == _filter).toList();
   
               // Reordering only makes sense (and only mutates the real
               // underlying order) when every card is visible, i.e. filter is
@@ -270,16 +285,16 @@ class _WatchlistScreenState extends State<WatchlistScreen> with WidgetsBindingOb
                   if (valuation != null) ...[
                     PortfolioHero(
                       valuation: valuation,
-                      history: cubit.portfolioHistory(state.preferredPortfolioRange),
-                      change: cubit.portfolioChange(state.preferredPortfolioRange),
-                      selectedRange: state.preferredPortfolioRange,
-                      onSelectRange: cubit.setPreferredPortfolioRange,
+                      history: holdings.portfolioHistory(prefs.preferredPortfolioRange),
+                      change: holdings.portfolioChange(prefs.preferredPortfolioRange),
+                      selectedRange: prefs.preferredPortfolioRange,
+                      onSelectRange: settings.setPreferredPortfolioRange,
                       onTap: widget.onOpenPortfolio ??
                           () => Navigator.of(context).push(
                                 MaterialPageRoute(builder: (_) => const PortfolioDetailScreen()),
                               ),
-                      hideBalances: state.hideBalances,
-                      onToggleHideBalances: cubit.toggleHideBalances,
+                      hideBalances: prefs.hideBalances,
+                      onToggleHideBalances: settings.toggleHideBalances,
                     ),
                     const SizedBox(height: DS.spaceMD),
                   ],
@@ -312,11 +327,11 @@ class _WatchlistScreenState extends State<WatchlistScreen> with WidgetsBindingOb
                               // favor of the long-press-anywhere gesture.
                               buildDefaultDragHandles: false,
                               itemCount: filteredCards.length,
-                              onReorder: cubit.move,
+                              onReorder: watchlist.move,
                               itemBuilder: (context, index) => ReorderableDelayedDragStartListener(
                                 key: ValueKey(filteredCards[index].id),
                                 index: index,
-                                child: _row(context, cubit, l10n, colors, filteredCards[index], first: index == 0),
+                                child: _row(context, watchlist, market, l10n, colors, filteredCards[index], first: index == 0),
                               ),
                             )
                           : Column(
@@ -324,7 +339,7 @@ class _WatchlistScreenState extends State<WatchlistScreen> with WidgetsBindingOb
                                 for (final (i, card) in filteredCards.indexed)
                                   KeyedSubtree(
                                     key: ValueKey(card.id),
-                                    child: _row(context, cubit, l10n, colors, card, first: i == 0),
+                                    child: _row(context, watchlist, market, l10n, colors, card, first: i == 0),
                                   ),
                               ],
                             ),
@@ -342,12 +357,13 @@ class _WatchlistScreenState extends State<WatchlistScreen> with WidgetsBindingOb
   /// drag handle that starts a drag straight away (no long press).
   Widget _editOrderList(
     BuildContext context,
-    AppCubit cubit,
+    WatchlistCubit watchlist,
+    MarketCubit market,
     AppLocalizations l10n,
     QimaColors colors,
     List<WatchCard> cards,
   ) {
-    String nameOf(WatchCard card) => displayLabel(context, cubit.presentation(card).instrument.nameKey);
+    String nameOf(WatchCard card) => displayLabel(context, market.presentation(card).instrument.nameKey);
     final sorts = {
       WatchlistSort.name: l10n.watchlistSortName,
       WatchlistSort.change: l10n.watchlistSortChange,
@@ -375,7 +391,7 @@ class _WatchlistScreenState extends State<WatchlistScreen> with WidgetsBindingOb
             for (final entry in sorts.entries)
               ActionChip(
                 label: Text(entry.value),
-                onPressed: () => cubit.sortWatchlist(entry.key, nameOf: nameOf),
+                onPressed: () => watchlist.sortWatchlist(entry.key, nameOf: nameOf, range: context.read<SettingsCubit>().state.preferredChartRange),
               ),
           ],
         ),
@@ -387,13 +403,13 @@ class _WatchlistScreenState extends State<WatchlistScreen> with WidgetsBindingOb
             physics: const NeverScrollableScrollPhysics(),
             buildDefaultDragHandles: false,
             itemCount: cards.length,
-            onReorder: cubit.move,
+            onReorder: watchlist.move,
             itemBuilder: (context, index) {
               final card = cards[index];
               return Row(
                 key: ValueKey(card.id),
                 children: [
-                  Expanded(child: InstrumentRow(presentation: cubit.presentation(card))),
+                  Expanded(child: InstrumentRow(presentation: market.presentation(card))),
                   ReorderableDragStartListener(
                     index: index,
                     child: Semantics(
@@ -415,8 +431,8 @@ class _WatchlistScreenState extends State<WatchlistScreen> with WidgetsBindingOb
 
   /// [first]: the top row of the Prices tab, which the guided tour's Prices
   /// stop points at.
-  Widget _row(BuildContext context, AppCubit cubit, AppLocalizations l10n, QimaColors colors, WatchCard card, {bool first = false}) {
-    final presentation = cubit.presentation(card);
+  Widget _row(BuildContext context, WatchlistCubit watchlist, MarketCubit market, AppLocalizations l10n, QimaColors colors, WatchCard card, {bool first = false}) {
+    final presentation = market.presentation(card);
     final row = Dismissible(
       key: ValueKey('dismissible-${card.id}'),
       direction: DismissDirection.endToStart,
@@ -426,7 +442,7 @@ class _WatchlistScreenState extends State<WatchlistScreen> with WidgetsBindingOb
         message: l10n.confirmRemoveCardMessage,
         confirmLabel: l10n.commonRemove,
       ),
-      onDismissed: (_) => cubit.removeCard(card.id),
+      onDismissed: (_) => watchlist.removeCard(card.id),
       background: Container(
         alignment: Alignment.centerRight,
         padding: const EdgeInsets.only(right: DS.spaceMD),

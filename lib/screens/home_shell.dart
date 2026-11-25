@@ -7,6 +7,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../blocs/app_cubit.dart';
 import '../blocs/app_state.dart';
 import '../blocs/import_cubit.dart';
+import '../blocs/market_cubit.dart';
 import '../blocs/money_cubit.dart';
 import '../l10n/app_localizations.dart';
 import '../models/import_plan.dart';
@@ -179,7 +180,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   }
 
   void _onForeground() {
-    final cubit = context.read<AppCubit>();
+    final cubit = context.read<MarketCubit>();
     cubit.refreshIfStale();
     // Anything shared to Qima while it was in the background, and on
     // Android any bank message the receiver missed.

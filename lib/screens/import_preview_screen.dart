@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:intl/intl.dart';
 
-import '../blocs/app_cubit.dart';
+import '../blocs/sync_cubit.dart';
 import '../l10n/app_localizations.dart';
 import '../models/backup.dart';
 import '../services/backup/backup_codec.dart';
@@ -21,7 +21,7 @@ import 'csv_import_screen.dart';
 ///
 /// The password the user types here is held only in this widget's local
 /// [TextEditingController] and passed directly to
-/// `BackupService.preview`/`AppCubit.restoreFromBackup` — never logged or
+/// `BackupService.preview`/`SyncCubit.restoreFromBackup` — never logged or
 /// persisted.
 class ImportPreviewScreen extends StatefulWidget {
   final PickedBackupFile picked;
@@ -61,7 +61,7 @@ class _ImportPreviewScreenState extends State<ImportPreviewScreen> {
       setState(() => _stage = _Stage.csvError);
       return;
     }
-    final cubit = context.read<AppCubit>();
+    final cubit = context.read<SyncCubit>();
     try {
       final envelope = cubit.backupService.parseEnvelope(widget.picked.raw);
       _envelope = envelope;
@@ -78,7 +78,7 @@ class _ImportPreviewScreenState extends State<ImportPreviewScreen> {
     }
   }
 
-  Future<void> _loadPreview(AppCubit cubit, {String? password}) async {
+  Future<void> _loadPreview(SyncCubit cubit, {String? password}) async {
     final envelope = _envelope;
     if (envelope == null) return;
     try {
@@ -106,7 +106,7 @@ class _ImportPreviewScreenState extends State<ImportPreviewScreen> {
   }
 
   Future<void> _restore(BuildContext context) async {
-    final cubit = context.read<AppCubit>();
+    final cubit = context.read<SyncCubit>();
     final l10n = AppLocalizations.of(context)!;
     final preview = _preview;
     if (preview == null) return;
@@ -203,7 +203,7 @@ class _ImportPreviewScreenState extends State<ImportPreviewScreen> {
             autocorrect: false,
             enableSuggestions: false,
             style: TextStyle(color: colors.textPrimary),
-            onSubmitted: (_) => _loadPreview(context.read<AppCubit>(), password: _passwordController.text),
+            onSubmitted: (_) => _loadPreview(context.read<SyncCubit>(), password: _passwordController.text),
             decoration: InputDecoration(
               labelText: l10n.backupImportPasswordLabel,
               labelStyle: TextStyle(color: colors.textTertiary),
@@ -215,7 +215,7 @@ class _ImportPreviewScreenState extends State<ImportPreviewScreen> {
           ),
           const SizedBox(height: DS.spaceMD),
           FilledButton(
-            onPressed: () => _loadPreview(context.read<AppCubit>(), password: _passwordController.text),
+            onPressed: () => _loadPreview(context.read<SyncCubit>(), password: _passwordController.text),
             child: Text(l10n.backupImportUnlock),
           ),
         ],
@@ -267,6 +267,14 @@ class _ImportPreviewScreenState extends State<ImportPreviewScreen> {
           l10n.backupImportDiff(diff.added, diff.updated, diff.removed),
           style: TextStyle(color: colors.textSecondary, fontSize: 12, fontWeight: FontWeight.w600),
         ),
+        if (_mode == BackupImportMode.replace && preview.cashSidesReplaced > 0) ...[
+          const SizedBox(height: DS.spaceXS),
+          Text(
+            l10n.backupImportReplaceDropsCash(preview.cashSidesReplaced),
+            key: const ValueKey('replaceDropsCash'),
+            style: TextStyle(color: colors.down, fontSize: 12),
+          ),
+        ],
         const SizedBox(height: DS.spaceLG),
         FilledButton(
           onPressed: _restoring ? null : () => _restore(context),

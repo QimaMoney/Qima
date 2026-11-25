@@ -128,7 +128,7 @@ class Categorizer {
     final from = categoryOf(e, book);
     if (from == null || from.id == to) return e;
     return e.copyWith(lines: [
-      for (final l in e.lines) l.accountId == from.id ? EntryLine(accountId: to, amount: l.amount, currency: l.currency, baseAmount: l.baseAmount) : l,
+      for (final l in e.lines) l.accountId == from.id ? l.withAccount(to) : l,
     ]);
   }
 

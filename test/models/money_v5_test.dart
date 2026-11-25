@@ -120,44 +120,65 @@ void main() {
     test('spending by category counts only spending lines: profit yes, principal and card payments no', () {
       final a = MonthAnalysis.of(b, DateTime(2026, 11, 20), currency: 'SAR', rates: rates);
       expect(a.month, DateTime(2026, 11));
-      expect(a.spent, closeTo(450 + 600 + 240, 1e-9));
-      expect(a.income, closeTo(12000, 1e-9));
-      expect(a.byCategory.first, ('groceries', 600.0));
-      expect(a.spentIn(SystemAccount.interestAndFees.id), closeTo(240, 1e-9));
-      expect(a.net, closeTo(12000 - 1290, 1e-9));
+      expect(a.spent, sar(450 + 600 + 240));
+      expect(a.income, sar(12000));
+      expect(a.byCategory.first, ('groceries', sar(600)));
+      expect(a.spentIn(SystemAccount.interestAndFees.id), sar(240));
+      expect(a.net, sar(12000 - 1290));
     });
 
     test('the pace projects spending to the month’s end; a past month projects its own total', () {
       final a = MonthAnalysis.of(b, DateTime(2026, 11, 1), currency: 'SAR', rates: rates);
       // 1,290 over 10 of November's 30 days.
-      expect(a.projected(DateTime(2026, 11, 10)), closeTo(1290 / 10 * 30, 1e-9));
+      expect(a.projected(DateTime(2026, 11, 10)), sar(1290 * 3));
       final october = MonthAnalysis.of(b, DateTime(2026, 10, 1), currency: 'SAR', rates: rates);
-      expect(october.projected(DateTime(2026, 11, 10)), closeTo(300, 1e-9));
+      expect(october.projected(DateTime(2026, 11, 10)), sar(300));
       expect(MonthAnalysis.of(b, DateTime(2027, 1, 1), currency: 'SAR', rates: rates).projected(DateTime(2026, 11, 10)), isNull);
     });
 
     test('budget: left to spend, lines ahead of pace, and spare money on others', () {
       final a = MonthAnalysis.of(b, DateTime(2026, 11, 1),
           currency: 'SAR', rates: rates, budgets: {'dining': sar(600), 'groceries': sar(3000)}, budgetCurrency: 'SAR');
-      expect(a.budget, closeTo(3600, 1e-9));
-      expect(a.leftToSpend, closeTo(3600 - 1290, 1e-9));
+      expect(a.budget, sar(3600));
+      expect(a.leftToSpend, sar(3600 - 1290));
       // Day 10 of 30: dining's 450 is past a third of 600; groceries' 600 isn't past a third of 3,000.
       final ahead = a.aheadOfPace(DateTime(2026, 11, 10));
       expect(ahead.map((e) => e.$1), ['dining']);
       final spare = a.spare(DateTime(2026, 11, 10));
       expect(spare.single.$1, 'groceries');
-      expect(spare.single.$2, closeTo(3000 - 600 * 3, 1e-9));
+      expect(spare.single.$2, sar(3000 - 600 * 3));
     });
 
     test('a budget set in another currency converts at today’s rate', () {
       final a = MonthAnalysis.of(b, DateTime(2026, 11, 1), currency: 'SAR', rates: rates, budgets: {'dining': MinorUnits.fromMajor(1300, 'EGP')}, budgetCurrency: 'EGP');
-      expect(a.budgets['dining'], closeTo(100, 1e-9));
+      expect(a.budgets['dining'], sar(100));
+    });
+
+    test('figures are whole minor units, converted once per currency', () {
+      // Three EGP lines of a third of a riyal each: converting each line
+      // would round three times; converting the currency's sum rounds once.
+      final egp = BookAccount(id: 'egp', name: 'EGP', side: AccountSide.own, type: AccountType.debit, currency: 'EGP');
+      final book = Book([...accounts, egp], [
+        for (var i = 1; i <= 3; i++) x.spend(egp, groceries, MinorUnits.fromMajor(4.33, 'EGP'), DateTime(2026, 11, i)),
+      ]);
+      final a = MonthAnalysis.of(book, DateTime(2026, 11, 1), currency: 'SAR', rates: rates);
+      expect(a.spent, MinorUnits.convert(MinorUnits.fromMajor(12.99, 'EGP'), 'EGP', 'SAR', rates));
+      expect(a.spent, a.byCategory.fold<int>(0, (n, c) => n + c.$2));
+      expect(a.net, a.income - a.spent);
+    });
+
+    test('a currency with no rate converts to nothing, never 1:1', () {
+      expect(MinorUnits.convert(500, 'XYZ', 'SAR', rates), isNull);
+      expect(MinorUnits.convert(500, 'SAR', 'SAR', rates), 500);
+      // Minor units differ by currency: 1.000 KWD is 1000 fils.
+      final kwd = FXRates(base: 'USD', rates: const {'SAR': 3.75, 'KWD': 0.3}, updatedAt: DateTime(2026));
+      expect(MinorUnits.convert(1000, 'KWD', 'SAR', kwd), 1250);
     });
 
     test('trend gives each month’s spending, oldest first', () {
       final t = MonthAnalysis.trend(b, DateTime(2026, 11, 15), currency: 'SAR', rates: rates, count: 3);
       expect(t.map((e) => e.$1), [DateTime(2026, 9), DateTime(2026, 10), DateTime(2026, 11)]);
-      expect(t.map((e) => e.$2), [0, 300, 1290]);
+      expect(t.map((e) => e.$2), [0, sar(300), sar(1290)]);
     });
   });
 

@@ -7,7 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:qima/blocs/app_cubit.dart';
+import 'package:qima/blocs/app_blocs.dart';
 import 'package:qima/blocs/import_cubit.dart';
 import 'package:qima/blocs/money_cubit.dart';
 import 'package:qima/l10n/app_localizations.dart';
@@ -19,6 +19,8 @@ import 'package:qima/models/instrument_catalog.dart';
 import 'package:qima/models/book_account.dart';
 import 'package:qima/models/book_entry.dart';
 import 'package:qima/models/fx_history.dart';
+import 'package:qima/models/holding_cash_id.dart';
+import 'package:qima/models/holding_transaction.dart';
 import 'package:qima/models/minor_units.dart';
 import 'package:qima/models/money.dart';
 import 'package:qima/models/money_settings.dart';
@@ -49,10 +51,14 @@ import 'package:qima/screens/money/more_money_screens.dart';
 import 'package:qima/theme/money_labels.dart';
 import 'package:qima/services/local_file_store.dart';
 import 'package:qima/services/price_repository.dart';
+import 'package:qima/services/quote_provider.dart';
 import 'package:qima/theme/app_theme.dart';
+import 'package:qima/widgets/money_widgets.dart';
 import 'package:qima/theme/help_topics.dart';
 import 'package:qima/widgets/help_button.dart';
 import 'package:qima/services/preferences.dart';
+import '../helpers/app_blocs.dart';
+import '../helpers/old_trade_entry.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// A recognizer the test speaks through.
@@ -77,7 +83,7 @@ class _SpokenWords implements DictationService {
 
 class _OfflineRepository extends PriceRepository {
   @override
-  Future<double> probePrice(Instrument instrument) async => 100;
+  Future<Listing> probeListing(Instrument instrument) async => const Listing(canonicalUSD: 100);
   @override
   Future<QuoteSeries> refresh(Instrument instrument, {DateTime? now}) async => QuoteSeries.empty(instrument.id);
   @override
@@ -130,7 +136,7 @@ class _AccountScreen implements TextRecognitionService {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   late Directory dir;
-  late AppCubit app;
+  late AppBlocs app;
   late MoneyCubit money;
   late ImportCubit importer;
   final rates = FXRates(base: 'SAR', rates: const {'SAR': 1, 'EGP': 13}, updatedAt: DateTime(2026, 11, 7));
@@ -138,9 +144,10 @@ void main() {
   setUp(() async {
     dir = await Directory.systemTemp.createTemp('qima_money_screens');
     LocalFileStore.overrideDirectoryForTesting(dir);
-    app = AppCubit(repository: _OfflineRepository());
-    app.emit(app.state.copyWith(initialized: true, rates: rates, fxHistory: FXHistory.empty, baseCurrency: 'SAR'));
-    money = MoneyCubit(store: app.bookStore, baseCurrency: () => 'SAR', rates: () => app.state.rates);
+    app = AppBlocs(repository: _OfflineRepository());
+    app.seed(initialized: true, rates: rates, fxHistory: FXHistory.empty, baseCurrency: 'SAR');
+    money = MoneyCubit(store: app.sync.bookStore, baseCurrency: () => 'SAR', rates: () => app.market.state.rates);
+    app.onBookChanged = (key) => key == null ? money.load() : money.adoptCloudChanges(key);
     final inboxDir = Directory('${dir.path}/inbox')..createSync();
     importer = ImportCubit(
       inbox: FolderInbox(folders: [inboxDir]),
@@ -202,7 +209,7 @@ void main() {
 
   Widget wrap(Widget screen, Locale locale) => MultiBlocProvider(
         providers: [
-          BlocProvider<AppCubit>.value(value: app),
+          ...app.providers,
           BlocProvider<MoneyCubit>.value(value: money),
           BlocProvider<ImportCubit>.value(value: importer),
         ],
@@ -341,11 +348,139 @@ void main() {
     });
     await tester.pump();
     expect(money.state.book.balanceOf('rajhi'), before - sar(3000));
-    final cash = money.state.entries.firstWhere((e) => e.template == EntryTemplate.holdingTrade);
-    await tester.pumpWidget(wrap(EntryDetailScreen(entryId: cash.id), const Locale('en')));
+    // One entry: the trade, with the cash it moved.
+    final trade = money.state.entries.singleWhere((e) => e.template.isHoldingEntry);
+    expect(money.state.entries.where((e) => e.template == EntryTemplate.holdingTrade), isEmpty);
+    expect(app.holdings.state.transactions.single.id, trade.id);
+    await tester.pumpWidget(wrap(EntryDetailScreen(entryId: holdingCashId(trade.id)), const Locale('en')));
     await tester.pump();
     expect(find.byKey(const ValueKey('entryFromHoldings')), findsOneWidget);
     expect(find.byTooltip(l10n.commonDelete), findsNothing);
+    expect(find.byTooltip(l10n.entryEditTitle), findsNothing);
+  });
+
+  /// Every text on screen, in order.
+  List<String> texts(WidgetTester tester) => [for (final t in tester.widgetList<Text>(find.byType(Text))) t.data ?? t.textSpan?.toPlainText() ?? ''];
+
+  HoldingTransaction gold(String id, TransactionKind kind, double qty, double price, {double fee = 0}) => HoldingTransaction(
+      id: id, instrumentID: 'metal.XAU', kind: kind, quantity: qty, unit: PriceUnit.gram, unitPrice: price, fee: fee, currency: 'SAR', date: DateTime.now());
+
+  Future<void> saveTrade(WidgetTester tester, HoldingTransaction t, String? accountId) async {
+    await tester.runAsync(() async {
+      expect(await app.holdings.saveTransaction(t, cash: money.cashLegFor(t, accountId), label: accountId == null ? '' : 'Gold'), isNull);
+    });
+  }
+
+  testWidgets('a trade reads in its detail as the cash entry of an earlier build did', (tester) async {
+    await tester.runAsync(seed);
+    size(tester, const Size(390, 1600));
+    final l10n = await AppLocalizations.delegate.load(const Locale('en'));
+    await saveTrade(tester, gold('b1', TransactionKind.buy, 10, 300), 'rajhi');
+    // The same cash, as an earlier build stored it.
+    final rajhi = money.state.book.accounts['rajhi']!;
+    final old = oldHoldingTrade(money.builder, rajhi, sar(3000), DateTime.now(), incoming: false, id: 'old-cash', merchant: 'Gold');
+    await tester.runAsync(() => app.sync.bookStore.entries.upsert(old).then((_) => money.load()));
+
+    await tester.pumpWidget(wrap(EntryDetailScreen(entryId: 'old-cash'), const Locale('en')));
+    await tester.pump();
+    final before = texts(tester);
+    await tester.pumpWidget(wrap(EntryDetailScreen(entryId: holdingCashId('b1')), const Locale('en')));
+    await tester.pump();
+    final after = texts(tester);
+    expect([for (final t in after) if (t != l10n.entryFromHoldings) t], before);
+    // In words: the bank down, Holdings up, one sentence on what it did to worth.
+    expect(after.where((t) => t.startsWith('Al Rajhi current account down by')), hasLength(1));
+    expect(after.where((t) => t.startsWith('Holdings up by') || t.startsWith('Holdings down by')), hasLength(1));
+    expect(after.where((t) => t.startsWith('Gold up') || t.startsWith('Gold down')), isEmpty);
+    expect(after, isNot(contains(l10n.hiuMove)));
+    expect(after, contains(l10n.hiuWorth));
+  });
+
+  testWidgets('trades are one filter chip in All transactions, and are found by the instrument name', (tester) async {
+    await tester.runAsync(seed);
+    // Wide, so every chip of the horizontal list is built.
+    size(tester, const Size(2400, 2400));
+    final l10n = await AppLocalizations.delegate.load(const Locale('en'));
+    await saveTrade(tester, gold('b1', TransactionKind.buy, 10, 300), 'rajhi');
+    await saveTrade(tester, gold('s1', TransactionKind.sell, 4, 320), 'rajhi');
+    // Held, not bought with money: for Holdings only.
+    await saveTrade(tester, gold('h1', TransactionKind.buy, 1, 300), null);
+    await tester.pumpWidget(wrap(const AllTransactionsScreen(), const Locale('en')));
+    await tester.pump();
+    expect(find.widgetWithText(ChoiceChip, l10n.tplHoldingTrade), findsOneWidget);
+    expect(find.byType(EntryRow).evaluate().where((e) => (e.widget as EntryRow).entry.template == EntryTemplate.holdingTrade), hasLength(2));
+    await tester.tap(find.widgetWithText(ChoiceChip, l10n.tplHoldingTrade));
+    await tester.pump();
+    expect(find.byType(EntryRow), findsNWidgets(2));
+    await tester.tap(find.widgetWithText(ChoiceChip, l10n.watchlistFilterAll));
+    await tester.pump();
+    await tester.enterText(find.byType(TextField), 'gold');
+    await tester.pump();
+    expect(find.byType(EntryRow), findsNWidgets(2));
+    await tester.enterText(find.byType(TextField), 'panda');
+    await tester.pump();
+    expect(find.byType(EntryRow), findsOneWidget);
+  });
+
+  group('a trade that cannot be saved', () {
+    Future<void> openFee(WidgetTester tester, {HoldingTransaction? existing}) async {
+      size(tester, const Size(390, 2400));
+      await tester.pumpWidget(wrap(TransactionEditorScreen(instrument: InstrumentCatalog.instrument('metal.XAU')!, defaultCurrency: 'SAR', existing: existing), const Locale('en')));
+      await tester.pump();
+    }
+
+    testWidgets('a fee that rounds to nothing is refused in words, and the screen stays open with nothing saved', (tester) async {
+      await tester.runAsync(seed);
+      final l10n = await AppLocalizations.delegate.load(const Locale('en'));
+      await openFee(tester);
+      await tester.tap(find.text(l10n.transactionKindFee));
+      await tester.pump();
+      await tester.enterText(find.byType(TextField).first, '0.001');
+      await tester.pump();
+      final entriesBefore = money.state.entries.length;
+      await tester.runAsync(() async {
+        await tester.tap(find.text(l10n.holdingsSave));
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+      });
+      await tester.pump();
+      expect(find.text(l10n.tradeRejectedNothing), findsOneWidget);
+      expect(find.textContaining('holding.metal'), findsNothing, reason: 'no developer text');
+      expect(find.byType(TransactionEditorScreen), findsOneWidget);
+      expect(app.holdings.state.transactions, isEmpty);
+      expect((await tester.runAsync(() => app.sync.bookStore.entries.load()))!.length, entriesBefore);
+    });
+
+    testWidgets('any other failure is one general sentence, and nothing is changed', (tester) async {
+      await tester.runAsync(seed);
+      final l10n = await AppLocalizations.delegate.load(const Locale('en'));
+      // The id of a trade that is the id of an entry of another kind.
+      final spend = money.state.entries.firstWhere((e) => e.merchant == 'Panda');
+      final taken = gold(spend.id, TransactionKind.buy, 1, 300);
+      await openFee(tester, existing: taken);
+      final before = (await tester.runAsync(() => app.sync.bookStore.entries.load()))!;
+      await tester.runAsync(() async {
+        await tester.tap(find.text(l10n.holdingsSave));
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+      });
+      await tester.pump();
+      expect(find.text(l10n.tradeSaveFailed), findsOneWidget);
+      expect(find.byType(TransactionEditorScreen), findsOneWidget);
+      expect(app.holdings.state.transactions, isEmpty);
+      expect((await tester.runAsync(() => app.sync.bookStore.entries.load()))!, before);
+    });
+  });
+
+  testWidgets('a cash entry an earlier build left without its trade can be deleted from Money', (tester) async {
+    await tester.runAsync(seed);
+    size(tester, const Size(390, 1200));
+    final l10n = await AppLocalizations.delegate.load(const Locale('en'));
+    final rajhi = money.state.book.accounts['rajhi']!;
+    final orphan = oldHoldingTrade(money.builder, rajhi, sar(500), DateTime.now(), incoming: false, id: 'old-cash', merchant: 'Gold');
+    await tester.runAsync(() => app.sync.bookStore.entries.upsert(orphan).then((_) => money.load()));
+    await tester.pumpWidget(wrap(const EntryDetailScreen(entryId: 'old-cash'), const Locale('en')));
+    await tester.pump();
+    expect(find.byKey(const ValueKey('entryFromHoldings')), findsNothing);
+    expect(find.byTooltip(l10n.commonDelete), findsOneWidget);
   });
 
   testWidgets('spend, income and transfer are tabs of one page that keep the amount', (tester) async {
@@ -515,6 +650,108 @@ void main() {
     expect(money.state.book.balanceOf('rajhi'), rajhi + sar(1700));
     expect(money.state.book.balanceOf('wallet'), wallet - sar(1700));
     expect(money.state.entries.last.template, EntryTemplate.transfer);
+  });
+
+  testWidgets('an imported row: a move between accounts can be taken back, and the row put on another card', (tester) async {
+    await tester.runAsync(seed);
+    size(tester, const Size(390, 2400));
+    final l10n = await AppLocalizations.delegate.load(const Locale('en'));
+    await tester.pumpWidget(wrap(const ImportReviewScreen(), const Locale('en')));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.text('SALARY NOVEMBER'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('importPick-wallet')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining(l10n.importTransferWith('Wallet')), findsOneWidget);
+
+    // Tapping the ticked account again unticks it and keeps the sheet open.
+    await tester.tap(find.text('SALARY NOVEMBER'));
+    await tester.pumpAndSettle();
+    final wallet = find.byKey(const ValueKey('importPick-wallet'));
+    expect(find.descendant(of: wallet, matching: find.byIcon(Icons.check)), findsOneWidget);
+    await tester.tap(wallet);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('importRowDone')), findsOneWidget);
+    expect(find.descendant(of: wallet, matching: find.byIcon(Icons.check)), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('importRowDone')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining(l10n.importTransferWith('Wallet')), findsNothing);
+
+    // The card or account it was on can be changed from the same sheet.
+    await tester.tap(find.text('SALARY NOVEMBER'));
+    await tester.pumpAndSettle();
+    final account = find.byKey(const ValueKey('importRowAccount'));
+    expect(find.descendant(of: account, matching: find.text('Al Rajhi current account')), findsOneWidget);
+    // The file holds more rows, and they go with it.
+    expect(find.text(l10n.importRowAccountWholeFile), findsOneWidget);
+    await tester.tap(account);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('importMoveTo-visa')));
+    await tester.pumpAndSettle();
+    expect(find.descendant(of: account, matching: find.text('Visa Signature')), findsOneWidget);
+    // The account it is now on is no longer offered as the other side.
+    expect(find.byKey(const ValueKey('importPick-visa')), findsNothing);
+    expect(find.byKey(const ValueKey('importPick-rajhi')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('importRowDone')));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    // The rows now sit under the card.
+    expect(find.byKey(const ValueKey('importPick-visa')), findsNothing);
+    await tester.tap(find.text('SALARY NOVEMBER'));
+    await tester.pumpAndSettle();
+    expect(find.descendant(of: find.byKey(const ValueKey('importRowAccount')), matching: find.text('Visa Signature')), findsOneWidget);
+  });
+
+  testWidgets('an imported row can be set as lent to someone new or as a repayment, and taken back', (tester) async {
+    await tester.runAsync(seed);
+    size(tester, const Size(390, 2800));
+    final l10n = await AppLocalizations.delegate.load(const Locale('en'));
+    await tester.pumpWidget(wrap(const ImportReviewScreen(), const Locale('en')));
+    await tester.pump(const Duration(milliseconds: 300));
+
+    // Money out: lent to someone who is not in the book yet.
+    await tester.tap(find.text('PANDA RIYADH'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('importPerson-lent')), findsOneWidget);
+    expect(find.byKey(const ValueKey('importPerson-borrowed')), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('importPerson-lent')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.descendant(of: find.byKey(const ValueKey('importPersonName')), matching: find.byType(TextField)), 'Omar');
+    await tester.tap(find.byKey(const ValueKey('importPersonSave')));
+    await tester.pump();
+    // Saving the new person is real work on the book.
+    for (var i = 0; i < 40 && !money.state.accounts.any((a) => a.name == 'Omar'); i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.pump();
+    }
+    await tester.pumpAndSettle();
+    expect(money.state.accounts.where((a) => a.name == 'Omar').single.type, AccountType.receivable);
+    expect(find.textContaining('${l10n.tplLent} · Omar'), findsOneWidget);
+
+    // It is ticked with the name under it, and tapping it again takes it back.
+    await tester.tap(find.text('PANDA RIYADH'));
+    await tester.pumpAndSettle();
+    final lent = find.byKey(const ValueKey('importPerson-lent'));
+    expect(find.descendant(of: lent, matching: find.text('Omar')), findsOneWidget);
+    expect(find.descendant(of: lent, matching: find.byIcon(Icons.check)), findsOneWidget);
+    await tester.tap(lent);
+    await tester.pumpAndSettle();
+    expect(find.descendant(of: lent, matching: find.byIcon(Icons.check)), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('importRowDone')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('${l10n.tplLent} · Omar'), findsNothing);
+
+    // Money in: a repayment from someone who owes.
+    await tester.tap(find.text('SALARY NOVEMBER'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('importPerson-lent')), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('importPerson-repaymentIn')));
+    await tester.pumpAndSettle();
+    final faisal = money.state.accounts.firstWhere((a) => a.name == 'Faisal' && a.type == AccountType.receivable);
+    await tester.tap(find.byKey(ValueKey('importPersonPick-${faisal.id}')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('${l10n.tplRepaymentIn} · Faisal'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('the import review in Arabic on a narrow phone: the balance offer fits', (tester) async {
@@ -927,9 +1164,15 @@ void main() {
     Future<void> withVoice() async {
       voice = _SpokenWords();
       final old = app;
-      app = AppCubit(repository: _OfflineRepository(), bookStore: old.bookStore, dictation: voice);
-      app.emit(old.state);
-      await old.close();
+      app = AppBlocs(repository: _OfflineRepository(), bookStore: old.sync.bookStore, dictation: voice);
+      app.seed(
+        initialized: old.app.state.initialized,
+        rates: old.market.state.rates,
+        fxHistory: old.market.state.fxHistory,
+        baseCurrency: old.settings.state.baseCurrency,
+      );
+      // Only the cubit: the new blocs share the book store, which a full close would pull the cloud store from under.
+      await old.app.close();
     }
 
     Future<void> say(WidgetTester tester, String words, AppLocalizations l10n) async {
@@ -949,7 +1192,7 @@ void main() {
       await tester.runAsync(seed);
       await withVoice();
       SharedPreferences.setMockInitialValues({});
-      app.preferences = await Preferences.create();
+      app.settings.preferences = await Preferences.create();
       size(tester, const Size(390, 1400));
       final l10n = await AppLocalizations.delegate.load(const Locale('en'));
       await tester.pumpWidget(wrap(const EntryEditorScreen(kind: EntryKind.spend), const Locale('en')));
@@ -960,8 +1203,8 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('speechLanguage-ar')));
       await tester.pumpAndSettle();
-      expect(app.state.speechLanguage, 'ar');
-      expect(app.preferences.speechLanguage, 'ar');
+      expect(app.settings.state.speechLanguage, 'ar');
+      expect(app.settings.preferences.speechLanguage, 'ar');
       expect(find.descendant(of: find.byKey(const ValueKey('speechLanguage')), matching: find.text('AR')), findsOneWidget);
 
       await say(tester, 'صرفت ٤٥ في بنده', l10n);
@@ -1089,11 +1332,11 @@ void main() {
   testWidgets('Home draws net worth over time with the ranges, and holdings with their split', (tester) async {
     await tester.runAsync(seed);
     SharedPreferences.setMockInitialValues({});
-    app.preferences = (await tester.runAsync(Preferences.create))!;
+    app.settings.preferences = (await tester.runAsync(Preferences.create))!;
     final gold = InstrumentCatalog.instrument('metal.XAU')!;
     final silver = InstrumentCatalog.instrument('metal.XAG')!;
     final now = DateTime.now();
-    app.emit(app.state.copyWith(
+    app.seed(
       rates: FXRates(base: 'SAR', rates: const {'SAR': 1, 'EGP': 13, 'USD': 0.2667}, updatedAt: now),
       lots: [
         HoldingLot(id: 'l1', instrumentID: gold.id, quantity: 2, unit: PriceUnit.troyOunce, unitCost: 1900, costCurrency: 'USD', date: DateTime(now.year, now.month - 1)),
@@ -1104,7 +1347,7 @@ void main() {
         silver.id: QuoteSeries(instrumentID: silver.id, quotes: [Quote(instrumentID: silver.id, timestamp: now, canonicalUSD: 25)]),
       },
       lastRefresh: DateTime(now.year, now.month, now.day, 9, 38),
-    ));
+    );
     size(tester, const Size(390, 3000));
     final l10n = await AppLocalizations.delegate.load(const Locale('en'));
     await tester.pumpWidget(wrap(const HomeScreen(), const Locale('en')));
@@ -1114,7 +1357,7 @@ void main() {
     expect(find.descendant(of: find.byKey(const ValueKey('netWorthChart')), matching: find.byType(PriceChartView)), findsOneWidget);
     await tester.tap(find.text(displayLabelFor(l10n, ChartRange.year1.labelKey)).first);
     await tester.pump(const Duration(milliseconds: 300));
-    expect(app.state.preferredPortfolioRange, ChartRange.year1);
+    expect(app.settings.state.preferredPortfolioRange, ChartRange.year1);
     expect(find.byType(BalanceSheetScreen), findsNothing);
 
     // Holdings: count and price time, then each holding's share.
@@ -1379,6 +1622,37 @@ void main() {
       await tester.tap(find.text(l10n.holdingsSave).last);
       await settle(tester, () => money.state.categories(AccountSide.spending).any((c) => c.name == 'Pets'));
       expect(find.text('Pets'), findsOneWidget, reason: 'the new category is the one picked');
+    });
+
+    testWidgets('Budget has a New budget row first: it makes the category, then asks for its amount', (tester) async {
+      await tester.runAsync(seed);
+      final l10n = await AppLocalizations.delegate.load(const Locale('en'));
+      await tester.pumpWidget(wrap(const BudgetScreen(), const Locale('en')));
+      await tester.pumpAndSettle();
+      // Seen without scrolling.
+      expect(tester.getTopLeft(find.byKey(const ValueKey('budgetAdd'))).dy, lessThan(tester.getTopLeft(find.text('Groceries')).dy));
+      await tester.tap(find.byKey(const ValueKey('budgetAdd')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const ValueKey('categoryName')), 'Pets');
+      await tester.tap(find.text(l10n.holdingsSave).last);
+      for (var i = 0; i < 40 && !money.state.accounts.any((a) => a.name == 'Pets'); i++) {
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+        await tester.pump();
+      }
+      await tester.pumpAndSettle();
+      final pets = money.state.accounts.firstWhere((a) => a.name == 'Pets');
+      expect(pets.side, AccountSide.spending);
+      // The amount is asked for straight away.
+      expect(find.text(l10n.budgetFor('Pets')), findsOneWidget);
+      await tester.enterText(find.widgetWithText(TextField, l10n.budgetMonthly), '300');
+      await tester.tap(find.text(l10n.holdingsSave).last);
+      for (var i = 0; i < 40 && money.state.settings.budgets[pets.id] == null; i++) {
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+        await tester.pump();
+      }
+      await tester.pumpAndSettle();
+      expect(money.state.settings.budgets[pets.id], sar(300));
+      expect(tester.takeException(), isNull);
     });
 
     testWidgets('Categories has a clear add row for each side', (tester) async {

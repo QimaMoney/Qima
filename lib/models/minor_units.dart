@@ -1,5 +1,7 @@
 import 'dart:math' as math;
 
+import 'money.dart';
+
 /// How many decimal places a currency's smallest unit has (ISO 4217), and
 /// conversion between major amounts and whole minor units.
 ///
@@ -29,4 +31,26 @@ abstract final class MinorUnits {
 
   /// [minor] units of [currency] as a major amount, for display and FX maths.
   static double toMajor(int minor, String currency) => minor / _scale(currency);
+
+  /// [minor] units of [from] as whole minor units of [to] at [rates],
+  /// rounded half away from zero, or null when either rate is missing.
+  ///
+  /// The one place a ledger amount changes currency: every total converts
+  /// each currency's exact sum once, so no screen can round differently
+  /// from another.
+  static int? convert(int minor, String from, String to, FXRates rates) {
+    if (from == to) return minor;
+    final major = convertToMajor(minor, from, to, rates);
+    return major == null ? null : fromMajor(major, to);
+  }
+
+  /// As [convert], left as a major amount for figures that join market
+  /// values (holdings at live prices), which are not whole minor units.
+  static double? convertToMajor(int minor, String from, String to, FXRates rates) {
+    final major = toMajor(minor, from);
+    if (from == to) return major;
+    final f = rates.rate(from), t = rates.rate(to);
+    if (f == null || t == null) return null;
+    return major / f * t;
+  }
 }

@@ -12,7 +12,8 @@ enum BackupErrorKind {
   /// The file isn't JSON, or doesn't have the `qima-backup` format marker.
   notQimaFile,
 
-  /// `version` is newer than this app understands ([BackupEnvelope.currentVersion]).
+  /// `version` is newer than this app understands ([BackupEnvelope.currentVersion]):
+  /// the file was made by a later build, which this one must not guess at.
   newerVersion,
 
   /// Encrypted backup, wrong password (or a tampered/corrupted ciphertext —
@@ -22,6 +23,11 @@ enum BackupErrorKind {
   /// Valid envelope/JSON shape but the payload itself doesn't parse (a
   /// truncated file, a hand-edited field with the wrong type, etc.).
   corrupted,
+
+  /// Writing, not reading: the holdings from before the update are not in the
+  /// book yet (the migration that folds them in did not finish), so a file
+  /// made now would leave them out.
+  holdingsUnreadable,
 }
 
 class BackupError implements Exception {
@@ -41,6 +47,8 @@ class BackupError implements Exception {
         return l10n.backupErrorWrongPassword;
       case BackupErrorKind.corrupted:
         return l10n.backupErrorCorrupted;
+      case BackupErrorKind.holdingsUnreadable:
+        return l10n.backupErrorHoldingsUnreadable;
     }
   }
 
@@ -61,6 +69,7 @@ class BackupCodec {
     required BackupAppInfo app,
     DateTime? createdAt,
   }) {
+    assert(payload.isLedger, 'a backup is written in the ledger shape');
     final envelope = BackupEnvelope(
       format: BackupEnvelope.formatMagic,
       version: BackupEnvelope.currentVersion,
@@ -85,6 +94,7 @@ class BackupCodec {
     DateTime? createdAt,
     int kdfIterations = EncryptedPayload.kdfIterations,
   }) async {
+    assert(payload.isLedger, 'a backup is written in the ledger shape');
     final encryptedPayload = await BackupCrypto.encrypt(
       plainPayloadJson: payload.toJson(),
       password: password,
@@ -161,7 +171,7 @@ class BackupCodec {
     }
 
     try {
-      return BackupPayload.fromJson(plainJson);
+      return BackupPayload.fromJson(plainJson, version: envelope.version);
     } on FormatException {
       throw const BackupError(BackupErrorKind.corrupted);
     } on TypeError {

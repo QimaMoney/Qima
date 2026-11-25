@@ -8,7 +8,8 @@ import '../../models/display_point.dart';
 import '../../models/chart_range.dart';
 import '../../models/book.dart';
 import '../../models/account_history.dart';
-import '../../blocs/app_cubit.dart';
+import '../../blocs/market_cubit.dart';
+import '../../blocs/settings_cubit.dart';
 import '../../blocs/money_cubit.dart';
 import '../../l10n/app_localizations.dart';
 import '../../models/book_account.dart';
@@ -52,7 +53,7 @@ class AccountsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    final hidden = context.select<AppCubit, bool>((c) => c.state.hideBalances);
+    final hidden = context.select<SettingsCubit, bool>((c) => c.state.hideBalances);
     final state = context.watch<MoneyCubit>().state;
     final book = state.book;
     final shownGroups = [
@@ -151,7 +152,7 @@ class _AccountEditorScreenState extends State<AccountEditorScreen> {
     super.initState();
     final e = widget.existing;
     _type = e?.type ?? widget.types.first;
-    _currency = e?.currency ?? context.read<AppCubit>().state.baseCurrency;
+    _currency = e?.currency ?? context.read<SettingsCubit>().state.baseCurrency;
     if (e != null) {
       _name.text = e.name;
       _counts = e.countsInNetWorth;
@@ -259,7 +260,8 @@ class _AccountEditorScreenState extends State<AccountEditorScreen> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    final app = context.read<AppCubit>().state;
+    final settings = context.read<SettingsCubit>().state;
+    final rates = context.read<MarketCubit>().state.rates;
     final fields = <Widget>[
       if (!_editing && widget.types.length > 1)
         Wrap(
@@ -287,8 +289,8 @@ class _AccountEditorScreenState extends State<AccountEditorScreen> {
         CurrencyField(
           label: l10n.accountCurrency,
           selected: _currency,
-          baseCurrency: app.baseCurrency,
-          currencies: {...app.rates.availableCurrencies, app.baseCurrency}.toList()..sort(),
+          baseCurrency: settings.baseCurrency,
+          currencies: {...rates.availableCurrencies, settings.baseCurrency}.toList()..sort(),
           onChanged: (c) => setState(() => _currency = c),
         ),
       if (!_editing) AmountField(controller: _balance, label: _balanceLabel(l10n), currency: _currency, helper: l10n.accountBalanceHelp),
@@ -352,7 +354,7 @@ class AccountDetailScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
-    final hidden = context.select<AppCubit, bool>((c) => c.state.hideBalances);
+    final hidden = context.select<SettingsCubit, bool>((c) => c.state.hideBalances);
     final money = context.read<MoneyCubit>();
     final state = context.watch<MoneyCubit>().state;
     final a = state.book.accounts[accountId];

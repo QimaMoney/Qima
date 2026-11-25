@@ -9,7 +9,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart';
 
-import '../blocs/app_cubit.dart';
+import '../blocs/market_cubit.dart';
 import '../l10n/app_localizations.dart';
 import '../models/chart_range.dart';
 import '../models/share_format.dart';
@@ -76,8 +76,7 @@ class _ShareAssetSheetState extends State<ShareAssetSheet> {
   }
 
   AssetShareData _data(BuildContext context) {
-    final cubit = context.read<AppCubit>();
-    final presentation = cubit.presentation(widget.card);
+    final presentation = context.read<MarketCubit>().presentation(widget.card);
     final now = DateTime.now();
     final change = presentation.change(widget.range, now);
     final unit = presentation.unitSuffix;

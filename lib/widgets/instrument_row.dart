@@ -1,4 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+
+import '../blocs/settings_cubit.dart';
+import '../models/chart_range.dart';
 
 import '../l10n/app_localizations.dart';
 import '../models/instrument_presentation.dart';
@@ -22,7 +26,12 @@ class InstrumentRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final now = DateTime.now();
-    final change = presentation.sparklineChange(now);
+    // The period is the default chart range from Settings, the same one the
+    // charts open on, and it is named beside the change: a percentage with
+    // no period says nothing.
+    final range = context.select<SettingsCubit, ChartRange>((c) => c.state.preferredChartRange);
+    final change = presentation.sparklineChange(now, range: range);
+    final sparkline = presentation.sparklinePoints(now, range: range);
     final unitSuffix = presentation.unitSuffix != null ? ' ${displayLabel(context, presentation.unitSuffix!)}' : '';
     final karat = presentation.karatLabel != null ? ' · ${displayLabel(context, presentation.karatLabel!)}' : '';
 
@@ -57,9 +66,9 @@ class InstrumentRow extends StatelessWidget {
             SizedBox(
               width: 64,
               height: 34,
-              child: presentation.sparklinePoints(now).length >= 2
+              child: sparkline.length >= 2
                   ? PriceChartView(
-                      points: presentation.sparklinePoints(now),
+                      points: sparkline,
                       isTrendingUp: change?.isUp ?? presentation.isTrendingUp,
                       accent: QimaColors.trendColor(change?.isUp ?? presentation.isTrendingUp, colors),
                       showsAxes: false,
@@ -91,6 +100,8 @@ class InstrumentRow extends StatelessWidget {
                         style: TextStyle(
                             color: QimaColors.trendColor(change.isUp, colors), fontSize: 12, fontWeight: FontWeight.w600),
                       ),
+                      const SizedBox(width: 4),
+                      Text(displayLabel(context, range.labelKey), style: TextStyle(color: colors.textTertiary, fontSize: 11)),
                     ],
                   )
                 else

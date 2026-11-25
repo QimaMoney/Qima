@@ -1,6 +1,8 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:qima/blocs/app_blocs.dart';
+import 'package:qima/l10n/app_localizations_en.dart';
 import 'package:qima/blocs/money_cubit.dart';
 import 'package:qima/models/backup.dart';
 import 'package:qima/models/book_account.dart';
@@ -8,6 +10,10 @@ import 'package:qima/models/book_entry.dart';
 import 'package:qima/models/default_categories.dart';
 import 'package:qima/models/entry_builder.dart';
 import 'package:qima/models/holding_transaction.dart';
+import 'package:qima/models/legacy_collapse.dart';
+import 'package:qima/models/syncable.dart';
+import 'package:qima/models/watch_card.dart';
+import 'package:qima/models/quote.dart';
 import 'package:qima/models/asset.dart';
 import 'package:qima/models/net_worth.dart';
 import 'package:qima/models/minor_units.dart';
@@ -18,11 +24,23 @@ import 'package:qima/services/backup/backup_service.dart';
 import 'package:qima/services/book_store.dart';
 import 'package:qima/services/cloud_kv_store.dart';
 import 'package:qima/services/custom_instrument_store.dart';
-import 'package:qima/services/holdings_store.dart';
 import 'package:qima/services/local_file_store.dart';
 import 'package:qima/services/preferences.dart';
+import 'package:qima/services/price_repository.dart';
+import 'package:qima/services/synced_store.dart';
 import 'package:qima/services/watchlist_store.dart';
+import 'package:qima/widgets/money_widgets.dart';
+import '../helpers/app_blocs.dart';
+import '../helpers/old_trade_entry.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+class _OfflineRepository extends PriceRepository {
+  @override
+  Future<QuoteSeries> refresh(Instrument instrument, {DateTime? now}) async => QuoteSeries.empty(instrument.id);
+
+  @override
+  Future<QuoteSeries> cachedSeries(Instrument instrument) async => QuoteSeries.empty(instrument.id);
+}
 
 final rates = FXRates(base: 'SAR', rates: const {'SAR': 1, 'EGP': 13}, updatedAt: DateTime.utc(2026, 11, 7));
 int sar(num major) => MinorUnits.fromMajor(major, 'SAR');
@@ -265,8 +283,8 @@ void main() {
       // Not in a budgeted category: not promised from the budget.
       await m.saveRecurring(RecurringPayment(id: 'gym', name: 'Gym', amount: sar(200), fromAccountId: 'rajhi', categoryId: 'category.health', start: DateTime(2026, 11, 20)));
       final now = m.monthAnalysis(DateTime(2026, 11, 10), currency: 'SAR', rates: rates);
-      expect(now.planned, 3000);
-      expect(now.leftToSpend, 500);
+      expect(now.planned, sar(3000));
+      expect(now.leftToSpend, sar(500));
       // A past month has nothing still to come.
       expect(m.monthAnalysis(DateTime(2026, 10, 1), currency: 'SAR', rates: rates).planned, 0);
     });
@@ -293,12 +311,29 @@ void main() {
     HoldingTransaction trade(TransactionKind kind, {double qty = 10, double price = 300, double fee = 0, String id = 't1'}) =>
         HoldingTransaction(id: id, instrumentID: 'gold', kind: kind, quantity: qty, unit: PriceUnit.gram, unitPrice: price, fee: fee, currency: 'SAR', date: DateTime(2026, 11, 5));
 
-    test('a buy paid from the bank lowers it and leaves net worth where it was', () async {
+    /// The two cubits the way `main.dart` wires them: one book, and Money
+    /// reloaded whenever Holdings writes.
+    Future<(AppBlocs, MoneyCubit)> pair() async {
       final m = cubit();
+      final a = AppBlocs(repository: _OfflineRepository(), bookStore: store);
+      a.onBookChanged = (key) => key == null ? m.load() : m.adoptCloudChanges(key);
+      a.settings.preferences = await Preferences.create();
+      a.seed(initialized: true, baseCurrency: 'SAR', rates: rates);
       await m.load();
+      a.seed(transactions: await a.holdings.ledgerStore.load());
+      addTearDown(a.close);
+      return (a, m);
+    }
+
+    Future<void> save(AppBlocs a, MoneyCubit m, HoldingTransaction t, String? accountId) async {
+      expect(await a.holdings.saveTransaction(t, cash: m.cashLegFor(t, accountId), label: 'Gold'), isNull);
+    }
+
+    test('a buy paid from the bank lowers it and leaves net worth where it was', () async {
+      final (a, m) = await pair();
       await m.addAccount(account('rajhi', AccountType.debit), opening: sar(10000), openedOn: DateTime(2026, 10, 1));
       final before = NetWorthSummary.of(book: m.state.book, holdingsValue: 0, currency: 'SAR', rates: rates).netWorth;
-      await m.syncHoldingCash(trade(TransactionKind.buy, fee: 20), accountId: 'rajhi', label: 'Gold');
+      await save(a, m, trade(TransactionKind.buy, fee: 20), 'rajhi');
       expect(m.state.book.balanceOf('rajhi'), sar(6980));
       expect(m.holdingCashAccount('t1')?.id, 'rajhi');
       final after = NetWorthSummary.of(book: m.state.book, holdingsValue: 3020, currency: 'SAR', rates: rates).netWorth;
@@ -307,22 +342,221 @@ void main() {
       expect(m.state.book.spending(from: DateTime(2026, 11), to: DateTime(2026, 12)), isEmpty);
     });
 
-    test('editing the trade replaces its cash entry; no account or a delete removes it', () async {
-      final m = cubit();
-      await m.load();
+    test('a trade and its cash are one entry, and every edit replaces it', () async {
+      final (a, m) = await pair();
       await m.addAccount(account('rajhi', AccountType.debit), opening: sar(10000), openedOn: DateTime(2026, 10, 1));
-      await m.syncHoldingCash(trade(TransactionKind.buy), accountId: 'rajhi');
-      await m.syncHoldingCash(trade(TransactionKind.buy, qty: 5), accountId: 'rajhi');
-      expect(m.state.entries.where((e) => e.template == EntryTemplate.holdingTrade), hasLength(1));
+      await save(a, m, trade(TransactionKind.buy), 'rajhi');
+      await save(a, m, trade(TransactionKind.buy, qty: 5), 'rajhi');
+      expect(m.state.entries.where((e) => e.template.isHoldingEntry), hasLength(1));
+      expect(m.state.entries.where((e) => e.template == EntryTemplate.holdingTrade), isEmpty);
       expect(m.state.book.balanceOf('rajhi'), sar(8500));
-      await m.syncHoldingCash(trade(TransactionKind.sell, qty: 2, price: 320, fee: 5), accountId: 'rajhi');
+      final sale = trade(TransactionKind.sell, id: 't2', qty: 2, price: 320, fee: 5);
+      await save(a, m, sale, 'rajhi');
+      expect(m.state.book.balanceOf('rajhi'), sar(9135));
+      // No account takes the cash leg away, and the trade stays.
+      await save(a, m, trade(TransactionKind.buy, qty: 5), null);
       expect(m.state.book.balanceOf('rajhi'), sar(10635));
-      await m.syncHoldingCash(trade(TransactionKind.buy));
-      expect(m.state.book.balanceOf('rajhi'), sar(10000));
-      await m.syncHoldingCash(trade(TransactionKind.buy), accountId: 'rajhi');
-      await m.removeHoldingCash('t1');
-      expect(m.state.book.balanceOf('rajhi'), sar(10000));
       expect(m.holdingCashAccount('t1'), isNull);
+      expect(a.holdings.state.transactions.map((t) => t.id), unorderedEquals(['t1', 't2']));
+      await save(a, m, trade(TransactionKind.buy, qty: 5), 'rajhi');
+      // The sale is deleted first: the buy it sells from cannot go while it stands.
+      expect(await a.holdings.deleteTransaction(trade(TransactionKind.buy, qty: 5)), isNotNull);
+      expect(m.state.book.balanceOf('rajhi'), sar(9135));
+      expect(await a.holdings.deleteTransaction(sale), isNull);
+      expect(m.state.book.balanceOf('rajhi'), sar(8500));
+      expect(await a.holdings.deleteTransaction(trade(TransactionKind.buy, qty: 5)), isNull);
+      expect(m.state.book.balanceOf('rajhi'), sar(10000));
+      expect(m.state.entries.where((e) => e.template.isHoldingEntry), isEmpty);
+      expect(m.holdingCashAccount('t1'), isNull);
+    });
+
+    test('changing the cash account moves the money, and a transfer or a cost of nothing has no cash leg', () async {
+      final (a, m) = await pair();
+      await m.addAccount(account('rajhi', AccountType.debit), opening: sar(10000), openedOn: DateTime(2026, 10, 1));
+      await m.addAccount(account('cash', AccountType.cash), opening: sar(2000), openedOn: DateTime(2026, 10, 1));
+      await save(a, m, trade(TransactionKind.buy), 'rajhi');
+      expect(m.state.book.balanceOf('rajhi'), sar(7000));
+      await save(a, m, trade(TransactionKind.buy), 'cash');
+      expect(m.state.book.balanceOf('rajhi'), sar(10000));
+      expect(m.state.book.balanceOf('cash'), sar(-1000));
+      expect(m.holdingCashAccount('t1')?.id, 'cash');
+      expect(m.cashLegFor(trade(TransactionKind.transferIn), 'cash'), isNull);
+      expect(m.cashLegFor(trade(TransactionKind.buy, price: 0), 'cash'), isNull);
+      expect(m.cashLegFor(trade(TransactionKind.buy), 'nobody'), isNull);
+      expect(m.cashLegFor(trade(TransactionKind.buy), null), isNull);
+    });
+
+    test('the cash leg is converted at today\'s rate when the account keeps another currency', () async {
+      final (a, m) = await pair();
+      await m.addAccount(account('egp', AccountType.debit, ccy: 'EGP'), opening: 100000, openedOn: DateTime(2026, 10, 1));
+      final leg = m.cashLegFor(trade(TransactionKind.buy, qty: 1, price: 100), 'egp')!;
+      expect(leg.currency, 'EGP');
+      expect(leg.amount, MinorUnits.fromMajor(1300, 'EGP'));
+      expect(leg.baseAmount, sar(100));
+      await save(a, m, trade(TransactionKind.buy, qty: 1, price: 100), 'egp');
+      expect(m.state.book.balanceOf('egp'), 100000 - leg.amount);
+      expect(m.state.entries.firstWhere((e) => e.id == 't1').issues, isEmpty);
+    });
+
+    test('a trade is listed in Money only when it moved cash, as the cash that moved', () async {
+      final (a, m) = await pair();
+      await m.addAccount(account('rajhi', AccountType.debit), opening: sar(10000), openedOn: DateTime(2026, 10, 1));
+      await save(a, m, trade(TransactionKind.buy, id: 'paid'), 'rajhi');
+      await save(a, m, trade(TransactionKind.buy, id: 'held'), null);
+      await save(a, m, trade(TransactionKind.transferIn, id: 'moved'), null);
+      expect(m.state.entries.where((e) => e.template.isHoldingEntry), hasLength(3));
+      // One entry for the cash, with the id the cash entry of an earlier build had.
+      final cashId = LegacyCollapse.holdingCashId('paid');
+      expect([for (final e in m.state.entriesNewestFirst) if (e.template == EntryTemplate.holdingTrade) e.id], [cashId]);
+      expect(m.state.entriesFor('rajhi').where((e) => e.template == EntryTemplate.holdingTrade).map((e) => e.id), [cashId]);
+      expect(m.state.listed.where((e) => e.template.isHoldingEntry), isEmpty, reason: 'no trade is listed as itself');
+      final listed = m.state.listed.singleWhere((e) => e.template == EntryTemplate.holdingTrade);
+      expect(listed.merchant, 'Gold');
+      expect(listed.lines.map((l) => l.accountId), ['rajhi', 'system.holdings']);
+      expect(m.state.isTradeView(listed), isTrue);
+      // Presented as the cash entry was: the instrument as the title, the cash that left the bank.
+      final shown = EntrySummary.of(m.state.entries.firstWhere((e) => e.id == 'paid'), m.state.book, AppLocalizationsEn());
+      expect(shown.title, 'Gold');
+      expect(shown.amount, sar(3000));
+      expect(shown.currency, 'SAR');
+      expect(shown.sign, 0);
+      expect(shown.subtitle, startsWith(AppLocalizationsEn().tplHoldingTrade));
+      // The same summary whether it is given the trade or what Money lists.
+      final fromListed = EntrySummary.of(listed, m.state.book, AppLocalizationsEn());
+      expect((fromListed.title, fromListed.amount, fromListed.currency, fromListed.sign, fromListed.subtitle), (shown.title, shown.amount, shown.currency, shown.sign, shown.subtitle));
+    });
+
+    test('the cash view of a trade is the entry an earlier build kept for it', () async {
+      final (a, m) = await pair();
+      await m.addAccount(account('rajhi', AccountType.debit), opening: sar(10000), openedOn: DateTime(2026, 10, 1));
+      await save(a, m, trade(TransactionKind.buy, id: 'paid', fee: 20), 'rajhi');
+      final bank = m.state.accounts.firstWhere((x) => x.id == 'rajhi');
+      final old = oldHoldingTrade(m.builder, bank, sar(3020), DateTime(2026, 11, 5), incoming: false, id: LegacyCollapse.holdingCashId('paid'), merchant: 'Gold');
+      final view = m.state.listed.singleWhere((e) => e.template == EntryTemplate.holdingTrade);
+      expect(view.id, old.id);
+      expect(view.merchant, old.merchant);
+      expect(view.note, isEmpty);
+      expect([for (final l in view.lines) (l.accountId, l.amount, l.currency, l.baseAmount)], [for (final l in old.lines) (l.accountId, l.amount, l.currency, l.baseAmount)]);
+      // A stored cash entry of an earlier build is listed as it is, and is not a view.
+      await a.sync.bookStore.entries.upsert(oldHoldingTrade(m.builder, bank, sar(500), DateTime(2026, 11, 6), incoming: false, id: 'old-cash', merchant: 'Gold'));
+      await m.load();
+      final stored = m.state.listed.singleWhere((e) => e.id == 'old-cash');
+      expect(m.state.isTradeView(stored), isFalse);
+      expect(m.state.isTradeView(view), isTrue);
+    });
+
+    test('importing trades and taking the import back touches only those trades', () async {
+      final (a, m) = await pair();
+      // Already tracked, so the import starts no price refresh.
+      a.seed(cards: [WatchCard(id: 'c1', instrumentID: 'metal.XAU', currency: 'SAR', unit: PriceUnit.gram)]);
+      HoldingTransaction gold(String id, double qty) =>
+          HoldingTransaction(id: id, instrumentID: 'metal.XAU', kind: TransactionKind.buy, quantity: qty, unit: PriceUnit.gram, unitPrice: 300, currency: 'SAR', date: DateTime(2026, 11, 5));
+      await m.addAccount(account('rajhi', AccountType.debit), opening: sar(10000), openedOn: DateTime(2026, 10, 1));
+      await save(a, m, gold('mine', 10), 'rajhi');
+      await save(a, m, gold('held', 1), null);
+      final coffee = m.builder.spend(m.state.accounts.firstWhere((x) => x.id == 'rajhi'), m.state.book.accounts['category.dining']!, sar(40), DateTime(2026, 11, 3));
+      await m.saveEntry(coffee);
+      final before = [for (final r in await store.entries.exportRecords()) (r.item.id, r.order, r.updatedAt, r.deleted)];
+
+      final ids = await a.holdings.importTransactions([gold('csv1', 1), gold('csv2', 2)]);
+      expect(ids, ['csv1', 'csv2']);
+      expect(a.holdings.state.transactions.map((t) => t.id).toSet(), {'mine', 'held', 'csv1', 'csv2'});
+      expect(m.state.entries.where((e) => e.template.isHoldingEntry).map((e) => e.id).toSet(), {'mine', 'held', 'csv1', 'csv2'});
+      expect(m.state.book.balanceOf('rajhi'), sar(10000 - 3000 - 40), reason: 'imported rows moved no cash');
+
+      await a.holdings.undoImport(ids);
+      expect(a.holdings.state.transactions.map((t) => t.id).toSet(), {'mine', 'held'});
+      expect(m.state.entries.map((e) => e.id).toSet(), {for (final r in before) if (!r.$4) r.$1});
+      final after = [for (final r in await store.entries.exportRecords()) (r.item.id, r.order, r.updatedAt, r.deleted)];
+      for (final r in before) {
+        expect(after.where((x) => x.$1 == r.$1).single, r, reason: '${r.$1} is as it was');
+      }
+      expect(m.state.book.balanceOf('rajhi'), sar(10000 - 3000 - 40));
+    });
+
+    test('a month\'s spending and income are the same with or without trades', () async {
+      final (a, m) = await pair();
+      await m.addAccount(account('rajhi', AccountType.debit), opening: sar(10000), openedOn: DateTime(2026, 10, 1));
+      await m.saveEntry(m.builder.spend(m.state.accounts.firstWhere((x) => x.id == 'rajhi'), m.state.book.accounts['category.dining']!, sar(40), DateTime(2026, 11, 3)));
+      final before = m.monthAnalysis(DateTime(2026, 11, 10), currency: 'SAR', rates: rates);
+      await save(a, m, trade(TransactionKind.buy, fee: 20), 'rajhi');
+      await save(a, m, trade(TransactionKind.sell, id: 't2', qty: 2, price: 320), 'rajhi');
+      await save(a, m, trade(TransactionKind.buy, id: 't3'), null);
+      final after = m.monthAnalysis(DateTime(2026, 11, 10), currency: 'SAR', rates: rates);
+      expect(after.spent, before.spent);
+      expect(after.income, before.income);
+      expect(after.byCategory, before.byCategory);
+      expect(m.state.uncategorized, isEmpty);
+    });
+
+    test('Money does not edit or delete a trade; Holdings does', () async {
+      final (a, m) = await pair();
+      await m.addAccount(account('rajhi', AccountType.debit), opening: sar(10000), openedOn: DateTime(2026, 10, 1));
+      await save(a, m, trade(TransactionKind.buy), 'rajhi');
+      await expectLater(m.deleteEntry('t1'), throwsStateError);
+      await expectLater(m.saveEntry(m.state.entries.firstWhere((e) => e.id == 't1')), throwsStateError);
+      expect(m.state.book.balanceOf('rajhi'), sar(7000));
+    });
+
+    test('a cloud change to the entries reloads Money from the store, with or without a cloud copy', () async {
+      final (a, m) = await pair();
+      await m.addAccount(account('rajhi', AccountType.debit), opening: sar(10000), openedOn: DateTime(2026, 10, 1));
+      // Written behind Money's back, as another cubit or device would.
+      await a.holdings.ledgerStore.upsert(trade(TransactionKind.buy, id: 'other'), cash: m.cashLegFor(trade(TransactionKind.buy), 'rajhi'), baseCurrency: 'SAR');
+      expect(m.state.entries.any((e) => e.id == 'other'), isFalse);
+      await m.adoptCloudChanges(BookStore.entriesKey);
+      expect(m.state.entries.any((e) => e.id == 'other'), isTrue);
+      expect(m.state.book.balanceOf('rajhi'), sar(7000));
+    });
+
+    group('a trade made before trades were entries', () {
+      /// The book as the last build wrote it: the cash half a second entry
+      /// beside the trade in the holdings ledger. The first read of the book
+      /// folds the two.
+      Future<void> writeOldBook() async {
+        final t0 = DateTime.utc(2026, 10, 1);
+        final bank = account('rajhi', AccountType.debit);
+        final b = EntryBuilder(baseCurrency: 'SAR', rates: rates, newId: () => 'opening');
+        final opening = b.opening(bank, sar(10000), DateTime(2026, 10, 1));
+        final cash = oldHoldingTrade(b, bank, sar(3000), DateTime(2026, 11, 5), incoming: false, id: LegacyCollapse.holdingCashId('t1'), merchant: 'Gold');
+        Map<String, dynamic> record(Syncable item, double order, DateTime at) => Record(item: item, order: order, updatedAt: at).toJson();
+        await LocalFileStore.writeJson('book.accounts.json', {'records': [record(bank, 0, t0)]});
+        await LocalFileStore.writeJson('book.entries.json', {'records': [record(opening, 0, t0), record(cash, 1, t0.add(const Duration(days: 40)))]});
+        await LocalFileStore.writeJson('book.recurring.json', {'records': <Object>[]});
+        await LocalFileStore.writeJson('money.settings.json', {'records': <Object>[]});
+        await LocalFileStore.writeJson('transactions.records.json', {'records': [record(trade(TransactionKind.buy), 0, t0.add(const Duration(days: 40)))]});
+      }
+
+      test('editing it changes the cash once, and deleting it gives the cash back', () async {
+        await writeOldBook();
+        final (a, m) = await pair();
+        expect(m.state.book.balanceOf('rajhi'), sar(7000));
+        expect(a.holdings.state.transactions.map((t) => t.id), ['t1']);
+        expect(m.state.entries.where((e) => e.template.isHoldingEntry || e.template == EntryTemplate.holdingTrade).map((e) => e.id), ['t1'], reason: 'one entry, not the trade and its cash');
+        expect(m.holdingCashAccount('t1')?.id, 'rajhi');
+
+        final edited = trade(TransactionKind.buy, qty: 5);
+        await save(a, m, edited, m.holdingCashAccount('t1')?.id);
+        expect(m.state.book.balanceOf('rajhi'), sar(8500));
+        expect(m.state.entries.where((e) => e.template.isHoldingEntry || e.template == EntryTemplate.holdingTrade), hasLength(1));
+
+        expect(await a.holdings.deleteTransaction(edited), isNull);
+        expect(m.state.book.balanceOf('rajhi'), sar(10000));
+        expect(m.state.entries.where((e) => e.template.isHoldingEntry || e.template == EntryTemplate.holdingTrade), isEmpty);
+      });
+
+      test('removing or changing its cash account works the same', () async {
+        await writeOldBook();
+        final (a, m) = await pair();
+        await m.addAccount(account('cash', AccountType.cash), opening: sar(500), openedOn: DateTime(2026, 10, 1));
+        await save(a, m, trade(TransactionKind.buy), 'cash');
+        expect(m.state.book.balanceOf('rajhi'), sar(10000));
+        expect(m.state.book.balanceOf('cash'), sar(-2500));
+        await save(a, m, trade(TransactionKind.buy), null);
+        expect(m.state.book.balanceOf('cash'), sar(500));
+        expect(m.holdingCashAccount('t1'), isNull);
+        expect(a.holdings.state.transactions.single.id, 't1');
+      });
     });
   });
 
@@ -443,7 +677,6 @@ void main() {
       final kv = LocalOnlyCloudKVStore();
       return BackupService(
         watchlistStore: WatchlistStore(cloud: kv),
-        holdingsStore: HoldingsStore(cloud: kv),
         customInstrumentStore: CustomInstrumentStore(cloud: kv),
         alertsStore: AlertsStore(cloud: kv),
         bookStore: book,

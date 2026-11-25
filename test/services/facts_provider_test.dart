@@ -4,19 +4,21 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:qima/blocs/app_cubit.dart';
+import 'package:qima/blocs/holdings_cubit.dart';
+import 'package:qima/blocs/market_cubit.dart';
 import 'package:qima/models/asset.dart';
+import 'package:qima/models/holding_entry_codec.dart';
 import 'package:qima/models/holding_transaction.dart';
 import 'package:qima/models/instrument_catalog.dart';
 import 'package:qima/models/instrument_facts.dart';
 import 'package:qima/models/instrument_fundamentals.dart';
+import 'package:qima/services/book_store.dart';
 import 'package:qima/services/cloud_kv_store.dart';
 import 'package:qima/services/facts_provider.dart';
-import 'package:qima/services/holdings_store.dart';
+import 'package:qima/services/holdings_ledger.dart';
 import 'package:qima/services/local_file_store.dart';
 import 'package:qima/services/preferences.dart';
 import 'package:qima/services/price_repository.dart';
-import 'package:qima/services/transactions_store.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 int _s(DateTime t) => t.millisecondsSinceEpoch ~/ 1000;
@@ -278,28 +280,43 @@ void main() {
           date: date,
         );
 
-    Future<AppCubit> cubitWith(List<HoldingTransaction> transactions) async {
-      final store = TransactionsStore(legacyLots: HoldingsStore());
-      await store.addAll(transactions);
-      final cubit = AppCubit(transactionsStore: store);
-      cubit.preferences = Preferences(cloud: LocalOnlyCloudKVStore(), local: await SharedPreferences.getInstance());
-      cubit.emit(cubit.state.copyWith(
-        initialized: true,
-        transactions: await store.load(),
-        factsByID: {apple.id: InstrumentFacts(currency: 'USD', fetchedAt: now, splits: [split])},
-      ));
-      return cubit;
+    Future<(HoldingsCubit, HoldingsLedger, Preferences)> cubitWith(List<HoldingTransaction> transactions, {CashLeg? cash}) async {
+      final ledger = HoldingsLedger(BookStore());
+      for (final t in transactions) {
+        await ledger.upsert(t, cash: t.kind == TransactionKind.buy ? cash : null, baseCurrency: 'USD');
+      }
+      final market = MarketCubit(
+        repository: PriceRepository(),
+        tracked: () => [apple],
+        cardCurrencies: () => const [],
+        baseCurrency: () => 'USD',
+        evaluateAlerts: (_, _) async {},
+        notifyZakatIfDue: () async {},
+      );
+      market.emit(market.state.copyWith(factsByID: {apple.id: InstrumentFacts(currency: 'USD', fetchedAt: now, splits: [split])}));
+      final cubit = HoldingsCubit(
+        ledgerStore: ledger,
+        market: market,
+        baseCurrency: () => 'USD',
+        tracked: () => [apple],
+        markDataChanged: () async {},
+        loadResult: ({required bool failed}) {},
+      );
+      await cubit.load();
+      final preferences = Preferences(cloud: LocalOnlyCloudKVStore(), local: await SharedPreferences.getInstance());
+      await cubit.loadSplits(preferences);
+      return (cubit, ledger, preferences);
     }
 
     test('only a split with trades before it is pending', () async {
-      final after = await cubitWith([tx('a', TransactionKind.buy, DateTime.utc(2025, 1, 1))]);
+      final (after, _, _) = await cubitWith([tx('a', TransactionKind.buy, DateTime.utc(2025, 1, 1))]);
       expect(after.pendingSplitsFor(apple), isEmpty);
-      final before = await cubitWith([tx('c', TransactionKind.buy, DateTime.utc(2024, 1, 1))]);
+      final (before, _, _) = await cubitWith([tx('c', TransactionKind.buy, DateTime.utc(2024, 1, 1))]);
       expect(before.pendingSplitsFor(apple), [split]);
     });
 
     test('adjusting restates earlier share trades and keeps each total; fees and later trades stay', () async {
-      final cubit = await cubitWith([
+      final (cubit, ledger, preferences) = await cubitWith([
         tx('a', TransactionKind.buy, DateTime.utc(2024, 1, 1)),
         tx('f', TransactionKind.fee, DateTime.utc(2024, 2, 1)),
         tx('b', TransactionKind.buy, DateTime.utc(2025, 1, 1)),
@@ -311,12 +328,23 @@ void main() {
       expect(byID['f']!.quantity, 100);
       expect(byID['b']!.quantity, 100);
       expect(cubit.pendingSplitsFor(apple), isEmpty);
-      expect(await cubit.preferences.handledSplits, {split.keyFor(apple.id)});
-      expect((await TransactionsStore(legacyLots: HoldingsStore()).load()).firstWhere((t) => t.id == 'a').quantity, closeTo(110, 1e-9));
+      expect(await preferences.handledSplits, {split.keyFor(apple.id)});
+      expect((await ledger.load()).firstWhere((t) => t.id == 'a').quantity, closeTo(110, 1e-9));
+    });
+
+    test('adjusting keeps the cash each trade moved', () async {
+      const cash = CashLeg(accountId: 'asset.bank', currency: 'USD', amount: 330200, baseAmount: 330200);
+      final (cubit, ledger, _) = await cubitWith([tx('a', TransactionKind.buy, DateTime.utc(2024, 1, 1))], cash: cash);
+      final before = (await ledger.book.entries.load()).single;
+      await cubit.applySplit(apple, split);
+      final after = (await ledger.book.entries.load()).single;
+      expect(HoldingEntryCodec.cashLegOf(after)?.accountId, 'asset.bank');
+      expect(HoldingEntryCodec.cashLegOf(after)?.amount, HoldingEntryCodec.cashLegOf(before)?.amount);
+      expect(after.lines.first.amount, before.lines.first.amount, reason: 'the cost is unchanged');
     });
 
     test('keeping leaves the trades and clears the notice', () async {
-      final cubit = await cubitWith([tx('a', TransactionKind.buy, DateTime.utc(2024, 1, 1))]);
+      final (cubit, _, _) = await cubitWith([tx('a', TransactionKind.buy, DateTime.utc(2024, 1, 1))]);
       await cubit.keepSplit(apple, split);
       expect(cubit.state.transactions.single.quantity, 100);
       expect(cubit.pendingSplitsFor(apple), isEmpty);

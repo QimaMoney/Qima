@@ -246,6 +246,18 @@ abstract class AppLocalizations {
   /// **'Add ticker'**
   String get addCustomTickerSubmit;
 
+  /// No description provided for @addCustomTickerConfirmBody.
+  ///
+  /// In en, this message translates to:
+  /// **'This is what the price feed has under this symbol. Add it only if it is the one you mean.'**
+  String get addCustomTickerConfirmBody;
+
+  /// No description provided for @addCustomTickerConfirmNo.
+  ///
+  /// In en, this message translates to:
+  /// **'Not this one'**
+  String get addCustomTickerConfirmNo;
+
   /// No description provided for @cardConfigAddToWatchlist.
   ///
   /// In en, this message translates to:
@@ -525,7 +537,7 @@ abstract class AppLocalizations {
   /// No description provided for @settingsDefaultRangeFooter.
   ///
   /// In en, this message translates to:
-  /// **'Used when opening an asset for the first time.'**
+  /// **'Charts on Home and on an asset open on this range. Choosing a range on an asset\'s chart updates it.'**
   String get settingsDefaultRangeFooter;
 
   /// No description provided for @settingsWidgetRefresh.
@@ -1533,6 +1545,78 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'iCloud storage for Qima is full'**
   String get settingsICloudSyncStatusStorageFull;
+
+  /// No description provided for @settingsCloudLogSyncSwitch.
+  ///
+  /// In en, this message translates to:
+  /// **'Faster sync (early version)'**
+  String get settingsCloudLogSyncSwitch;
+
+  /// No description provided for @settingsCloudLogSyncFooter.
+  ///
+  /// In en, this message translates to:
+  /// **'A new way to sync your book through iCloud, still being tested. It runs beside the sync above and deletes nothing when you turn it off.'**
+  String get settingsCloudLogSyncFooter;
+
+  /// No description provided for @settingsCloudLogSyncStatusUpToDate.
+  ///
+  /// In en, this message translates to:
+  /// **'Up to date · {time}'**
+  String settingsCloudLogSyncStatusUpToDate(String time);
+
+  /// No description provided for @settingsCloudLogSyncStatusSyncing.
+  ///
+  /// In en, this message translates to:
+  /// **'Syncing…'**
+  String get settingsCloudLogSyncStatusSyncing;
+
+  /// No description provided for @settingsCloudLogSyncStatusWaiting.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting for another device to finish sending'**
+  String get settingsCloudLogSyncStatusWaiting;
+
+  /// No description provided for @settingsCloudLogSyncStatusOffline.
+  ///
+  /// In en, this message translates to:
+  /// **'Can\'t reach iCloud. Trying again soon.'**
+  String get settingsCloudLogSyncStatusOffline;
+
+  /// No description provided for @settingsCloudLogSyncStatusQuota.
+  ///
+  /// In en, this message translates to:
+  /// **'iCloud storage is full'**
+  String get settingsCloudLogSyncStatusQuota;
+
+  /// No description provided for @settingsCloudLogSyncStatusNotSignedIn.
+  ///
+  /// In en, this message translates to:
+  /// **'Not signed in to iCloud'**
+  String get settingsCloudLogSyncStatusNotSignedIn;
+
+  /// No description provided for @settingsCloudLogSyncStatusUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Not available in this build'**
+  String get settingsCloudLogSyncStatusUnavailable;
+
+  /// No description provided for @settingsCloudLogSyncStatusZoneMissing.
+  ///
+  /// In en, this message translates to:
+  /// **'The synced data is missing in iCloud and could not be made again'**
+  String get settingsCloudLogSyncStatusZoneMissing;
+
+  /// No description provided for @settingsCloudLogSyncStatusNewerVersion.
+  ///
+  /// In en, this message translates to:
+  /// **'Another device uses a newer version. Update Qima.'**
+  String get settingsCloudLogSyncStatusNewerVersion;
+
+  /// No description provided for @settingsCloudLogSyncStatusOther.
+  ///
+  /// In en, this message translates to:
+  /// **'Sync stopped. Trying again soon.'**
+  String get settingsCloudLogSyncStatusOther;
 
   /// No description provided for @backupTitle.
   ///
@@ -7259,6 +7343,12 @@ abstract class AppLocalizations {
   /// **'No budget'**
   String get budgetNone;
 
+  /// No description provided for @budgetAdd.
+  ///
+  /// In en, this message translates to:
+  /// **'New budget'**
+  String get budgetAdd;
+
   /// No description provided for @budgetOf.
   ///
   /// In en, this message translates to:
@@ -7816,6 +7906,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Move to another account'**
   String get importMoveMessage;
+
+  /// No description provided for @importRowAccount.
+  ///
+  /// In en, this message translates to:
+  /// **'Card or account'**
+  String get importRowAccount;
+
+  /// No description provided for @importRowAccountWholeFile.
+  ///
+  /// In en, this message translates to:
+  /// **'Moves every row from this file'**
+  String get importRowAccountWholeFile;
 
   /// No description provided for @bankMessagesNotifyTitle.
   ///
@@ -9568,6 +9670,72 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Free cash flow (12 mo)'**
   String get statFreeCashFlow;
+
+  /// No description provided for @settingsNeedsAttention.
+  ///
+  /// In en, this message translates to:
+  /// **'Needs attention'**
+  String get settingsNeedsAttention;
+
+  /// No description provided for @settingsICloudSyncStatusAttention.
+  ///
+  /// In en, this message translates to:
+  /// **'Sync needs attention. See below.'**
+  String get settingsICloudSyncStatusAttention;
+
+  /// No description provided for @bookHealthMigration.
+  ///
+  /// In en, this message translates to:
+  /// **'Some holdings from before the update could not be read. They are still stored on this device and will be tried again the next time Qima starts.'**
+  String get bookHealthMigration;
+
+  /// No description provided for @bookHealthNewerBuild.
+  ///
+  /// In en, this message translates to:
+  /// **'Another device saved data with a newer version of Qima, so sync for it is paused here. Update Qima on this device.'**
+  String get bookHealthNewerBuild;
+
+  /// No description provided for @bookHealthLegacy.
+  ///
+  /// In en, this message translates to:
+  /// **'Data that an older version of Qima left in iCloud could not be read. Qima will try again on the next sync.'**
+  String get bookHealthLegacy;
+
+  /// No description provided for @bookHealthLoadFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Some of your data could not be loaded, so parts of Qima may look empty. Nothing was deleted. Close and reopen Qima to try again.'**
+  String get bookHealthLoadFailed;
+
+  /// No description provided for @backupErrorHoldingsUnreadable.
+  ///
+  /// In en, this message translates to:
+  /// **'Your holdings from before the update could not be read yet, so a backup now would leave them out. Close and reopen Qima, then try again.'**
+  String get backupErrorHoldingsUnreadable;
+
+  /// No description provided for @tradeSaveFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t save this. Nothing was changed. Try again.'**
+  String get tradeSaveFailed;
+
+  /// No description provided for @tradeRejectedNothing.
+  ///
+  /// In en, this message translates to:
+  /// **'This trade has nothing in it: the quantity or the amount is zero.'**
+  String get tradeRejectedNothing;
+
+  /// No description provided for @tradeRejectedCash.
+  ///
+  /// In en, this message translates to:
+  /// **'The money paid or received doesn\'t match this trade. Check the amount and the account\'s currency.'**
+  String get tradeRejectedCash;
+
+  /// No description provided for @backupImportReplaceDropsCash.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{Replacing removes the account that 1 trade was paid from or into, because this older backup doesn\'t have it.} other{Replacing removes the accounts that {count} trades were paid from or into, because this older backup doesn\'t have them.}}'**
+  String backupImportReplaceDropsCash(int count);
 }
 
 class _AppLocalizationsDelegate

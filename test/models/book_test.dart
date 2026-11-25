@@ -1,4 +1,7 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
+import 'package:qima/models/asset.dart';
 import 'package:qima/models/book.dart';
 import 'package:qima/models/book_account.dart';
 import 'package:qima/models/book_entry.dart';
@@ -18,7 +21,7 @@ BookAccount incomeCat(String id) => BookAccount(id: id, name: id, side: AccountS
 final rajhi = own('rajhi', AccountType.debit);
 final wallet = own('wallet', AccountType.cash);
 final cib = own('cib', AccountType.debit, 'EGP');
-final holdings = own('holdings', AccountType.holding);
+final holdings = own('holdings', AccountType.asset);
 final faisal = own('faisal', AccountType.receivable);
 final faisalEgp = own('faisal.egp', AccountType.receivable, 'EGP');
 final omar = own('omar', AccountType.receivable);
@@ -49,6 +52,8 @@ EntryBuilder builder() {
 
 Book book(List<BookEntry> entries) => Book(allAccounts, entries);
 double worth(Book b) => b.netWorth('SAR', rates).amount;
+
+EntryLine sarLine(String account, int amount, {int? quantity}) => EntryLine(accountId: account, amount: amount, currency: 'SAR', baseAmount: amount, quantity: quantity);
 
 void main() {
   group('MinorUnits', () {
@@ -385,6 +390,165 @@ void main() {
     test('system accounts have the same ids on every device', () {
       expect(Book(const [], const []).accounts.keys, containsAll(SystemAccount.values.map((s) => s.id)));
       expect(SystemAccount.rounding.id, 'system.rounding');
+    });
+  });
+
+  group('holding lines and accounts', () {
+    const gold = 'metal.XAU';
+    const goldId = 'holding.metal.XAU';
+    final buy = BookEntry(
+      id: 'h1',
+      date: day,
+      template: EntryTemplate.holdingBuy,
+      baseCurrency: 'SAR',
+      lines: const [
+        EntryLine(accountId: goldId, amount: 1000, currency: 'SAR', baseAmount: 1000, quantity: 2500000000, commodity: gold, unit: PriceUnit.gram, karat: 21, unitPrice: 40.5, fee: 1.5),
+        EntryLine(accountId: 'system.holdings', amount: -1000, currency: 'SAR', baseAmount: -1000),
+      ],
+    );
+    final transferOut = BookEntry(
+      id: 'h2',
+      date: day,
+      template: EntryTemplate.holdingOut,
+      baseCurrency: 'SAR',
+      lines: const [EntryLine(accountId: goldId, amount: 0, currency: 'SAR', baseAmount: 0, quantity: -100000000, commodity: gold, unit: PriceUnit.gram)],
+    );
+
+    test('a money line and a money account write exactly the JSON they always did', () {
+      final line = EntryLine(accountId: 'rajhi', amount: 1250, currency: 'SAR', baseAmount: 1250);
+      expect(jsonEncode(line.toJson()), '{"account":"rajhi","amount":1250,"currency":"SAR","base":1250}');
+      expect(jsonEncode(rajhi.toJson()), '{"id":"rajhi","name":"rajhi","side":"own","type":"debit","currency":"SAR"}');
+      final e = builder().spend(wallet, dining, sar(12.5), day);
+      for (final l in e.toJson()['lines'] as List) {
+        expect((l as Map).keys, ['account', 'amount', 'currency', 'base']);
+      }
+    });
+
+    test('the new line keys are written only when set, and read back whole', () {
+      final json = buy.lines.first.toJson();
+      expect(json, {
+        'account': goldId,
+        'amount': 1000,
+        'currency': 'SAR',
+        'base': 1000,
+        'qty': 2500000000,
+        'commodity': gold,
+        'unit': 'gram',
+        'karat': 21,
+        'px': 40.5,
+        'fee': 1.5,
+      });
+      expect(BookEntry.fromJson(jsonDecode(jsonEncode(buy.toJson())) as Map<String, dynamic>), buy);
+      const raw = EntryLine(accountId: goldId, amount: 1, currency: 'SAR', baseAmount: 1, quantity: 1, quantityRaw: 1e-9);
+      expect(EntryLine.fromJson(jsonDecode(jsonEncode(raw.toJson())) as Map<String, dynamic>), raw);
+      expect(raw.toJson()['qtyRaw'], 1e-9);
+    });
+
+    test('a line moved to another account keeps its quantity facts', () {
+      final moved = buy.lines.first.withAccount('x');
+      expect(moved.accountId, 'x');
+      expect(moved.toJson()..remove('account'), buy.lines.first.toJson()..remove('account'));
+    });
+
+    test('an entry of one line is valid only when that line moves quantity and no money', () {
+      expect(transferOut.issues, isEmpty);
+      final money = BookEntry(id: 'm', date: day, template: EntryTemplate.adjustment, baseCurrency: 'SAR', lines: [sarLine('rajhi', 100)]);
+      expect(money.issues.map((i) => i.problem), [EntryProblem.tooFewLines, EntryProblem.unbalanced]);
+      final nothing = BookEntry(id: 'n', date: day, template: EntryTemplate.holdingOut, baseCurrency: 'SAR', lines: [sarLine(goldId, 0)]);
+      expect(nothing.issues.map((i) => i.problem), [EntryProblem.tooFewLines, EntryProblem.zeroLine]);
+    });
+
+    test('a zero amount is a zero line only when there is no quantity either', () {
+      final zeroTwo = BookEntry(
+        id: 'z',
+        date: day,
+        template: EntryTemplate.holdingIn,
+        baseCurrency: 'SAR',
+        lines: [
+          const EntryLine(accountId: goldId, amount: 0, currency: 'SAR', baseAmount: 0, quantity: 5, commodity: gold, unit: PriceUnit.gram),
+          sarLine('system.holdings', 0),
+        ],
+      );
+      expect(zeroTwo.issues.map((i) => i.problem), [EntryProblem.zeroLine]);
+    });
+
+    test('a quantity too small to count still moves its raw quantity, so the line is not zero', () {
+      final tiny = BookEntry(
+        id: 't',
+        date: day,
+        template: EntryTemplate.holdingOut,
+        baseCurrency: 'SAR',
+        lines: const [EntryLine(accountId: goldId, amount: 0, currency: 'SAR', baseAmount: 0, quantity: 0, quantityRaw: 4.9e-9, commodity: gold, unit: PriceUnit.gram)],
+      );
+      expect(tiny.issues, isEmpty);
+      final nothing = BookEntry(
+        id: 'n',
+        date: day,
+        template: EntryTemplate.holdingOut,
+        baseCurrency: 'SAR',
+        lines: const [EntryLine(accountId: goldId, amount: 0, currency: 'SAR', baseAmount: 0, quantity: 0, quantityRaw: 0, commodity: gold, unit: PriceUnit.gram)],
+      );
+      expect(nothing.issues.map((i) => i.problem), [EntryProblem.tooFewLines, EntryProblem.zeroLine]);
+    });
+
+    test('a quantity or commodity is allowed only on the holding account of its commodity', () {
+      List<EntryProblem> problems(List<EntryLine> lines) => BookEntry(id: 'x', date: day, template: EntryTemplate.adjustment, baseCurrency: 'SAR', lines: lines).issues.map((i) => i.problem).toList();
+      // One line with a quantity on a bank account is not a valid single line.
+      expect(problems([sarLine('rajhi', 0, quantity: 5)]), [EntryProblem.tooFewLines, EntryProblem.zeroLine, EntryProblem.badHoldingLine]);
+      // Two zero lines with a quantity on a category and a bank account are not valid either.
+      expect(problems([sarLine('dining', 0, quantity: 5), sarLine('rajhi', 0, quantity: 5)]),
+          [EntryProblem.zeroLine, EntryProblem.badHoldingLine, EntryProblem.zeroLine, EntryProblem.badHoldingLine]);
+      // A commodity posted to a bank account, or to another commodity's holding.
+      const onBank = EntryLine(accountId: 'rajhi', amount: 100, currency: 'SAR', baseAmount: 100, commodity: gold);
+      const offsetting = EntryLine(accountId: 'wallet', amount: -100, currency: 'SAR', baseAmount: -100);
+      expect(problems([onBank, offsetting]), [EntryProblem.badHoldingLine]);
+      const onSilver = EntryLine(accountId: goldId, amount: 100, currency: 'SAR', baseAmount: 100, commodity: 'metal.XAG', quantity: 1);
+      expect(problems([onSilver, offsetting]), [EntryProblem.badHoldingLine]);
+      // A quantity with no commodity says nothing of what it counts.
+      expect(problems([sarLine(goldId, 100, quantity: 1), offsetting]), [EntryProblem.badHoldingLine]);
+    });
+
+    test('a line from a later build still reads: an unknown unit or a fractional count is left out, a whole number written as a float is kept', () {
+      Map<String, dynamic> line(Map<String, dynamic> extra) => {'account': goldId, 'amount': 0, 'currency': 'SAR', 'base': 0, 'commodity': gold, ...extra};
+      expect(EntryLine.fromJson(line({'unit': 'ounceish'})).unit, isNull);
+      expect(EntryLine.fromJson(line({'unit': 'gram'})).unit, PriceUnit.gram);
+      expect(EntryLine.fromJson(line({'qty': 2.0})).quantity, 2);
+      expect(EntryLine.fromJson(line({'qty': 2.5})).quantity, isNull);
+      expect(EntryLine.fromJson(line({'qty': 'two', 'karat': 21.0, 'commodity': 7})).quantity, isNull);
+      expect(EntryLine.fromJson(line({'karat': 21.0})).karat, 21);
+      expect(EntryLine.fromJson(line({'commodity': 7})).commodity, isNull);
+    });
+
+    test('a holding account needs a commodity and takes no currency', () {
+      expect(BookAccount.holding(gold).problem, isNull);
+      expect(BookAccount.holding(gold).id, goldId);
+      expect(BookAccount(id: 'h', name: 'h', side: AccountSide.own, type: AccountType.holding).problem, isNotNull);
+      expect(BookAccount(id: 'h', name: 'h', side: AccountSide.own, type: AccountType.holding, currency: 'SAR').problem, isNotNull);
+      expect(BookAccount(id: 'h', name: 'h', side: AccountSide.own, type: AccountType.holding, currency: 'SAR', commodity: gold).problem, isNotNull);
+      expect(BookAccount(id: 'c', name: 'c', side: AccountSide.own, type: AccountType.cash, currency: 'SAR', commodity: gold).problem, isNotNull);
+      expect(BookAccount(id: 'c', name: 'c', side: AccountSide.own, type: AccountType.cash).problem, isNotNull, reason: 'the fixed currency rule still holds elsewhere');
+    });
+
+    test('the commodity is in the account JSON only when set, and survives a round trip and a copy', () {
+      expect(BookAccount.holding(gold).toJson()['commodity'], gold);
+      expect(BookAccount.fromJson(BookAccount.holding(gold).toJson()), BookAccount.holding(gold));
+      expect(BookAccount.holding(gold).copyWith(archived: true).commodity, gold);
+    });
+
+    test('a holding account is worked out from the lines and never needs storing', () {
+      final b = book([buy, transferOut]);
+      expect(b.accounts[goldId], BookAccount.holding(gold));
+      expect(b.issues, isEmpty);
+      expect(book([]).accounts.containsKey(goldId), isFalse);
+    });
+
+    test('the balance sheet and net worth leave holdings out', () {
+      final x = builder();
+      final plain = book([x.opening(rajhi, sar(1000), day)]);
+      final withGold = book([x.opening(rajhi, sar(1000), day), buy, transferOut]);
+      expect(withGold.balanceSheet().own.map((l) => l.account.id), plain.balanceSheet().own.map((l) => l.account.id));
+      expect(withGold.balanceSheet().owned, plain.balanceSheet().owned);
+      expect(withGold.netWorth('SAR', rates).amount, plain.netWorth('SAR', rates).amount);
     });
   });
 }

@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:intl/intl.dart' hide TextDirection;
 
-import '../../blocs/app_cubit.dart';
+import '../../blocs/market_cubit.dart';
+import '../../blocs/settings_cubit.dart';
 import '../../blocs/money_cubit.dart';
 import '../../l10n/app_localizations.dart';
 import '../../models/book_account.dart';
@@ -28,8 +29,8 @@ class AssetsScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
-    final app = context.select<AppCubit, (bool, String)>((c) => (c.state.hideBalances, c.state.baseCurrency));
-    final rates = context.read<AppCubit>().state.rates;
+    final app = context.select<SettingsCubit, (bool, String)>((c) => (c.state.hideBalances, c.state.baseCurrency));
+    final rates = context.read<MarketCubit>().state.rates;
     final (hidden, base) = app;
     final state = context.watch<MoneyCubit>().state;
     final book = state.book;
@@ -135,7 +136,7 @@ class _AssetEditorScreenState extends State<AssetEditorScreen> {
   void initState() {
     super.initState();
     final e = widget.existing;
-    _currency = e?.currency ?? context.read<AppCubit>().state.baseCurrency;
+    _currency = e?.currency ?? context.read<SettingsCubit>().state.baseCurrency;
     if (e != null) {
       _kind = e.assetKind ?? AssetKind.other;
       _name.text = e.name;
@@ -212,7 +213,8 @@ class _AssetEditorScreenState extends State<AssetEditorScreen> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
-    final app = context.read<AppCubit>().state;
+    final settings = context.read<SettingsCubit>().state;
+    final rates = context.read<MarketCubit>().state.rates;
     final loans = context.watch<MoneyCubit>().state.ofType(AccountType.loan);
 
     if (_kind == null) {
@@ -257,8 +259,8 @@ class _AssetEditorScreenState extends State<AssetEditorScreen> {
         CurrencyField(
           label: l10n.accountCurrency,
           selected: _currency,
-          baseCurrency: app.baseCurrency,
-          currencies: {...app.rates.availableCurrencies, app.baseCurrency}.toList()..sort(),
+          baseCurrency: settings.baseCurrency,
+          currencies: {...rates.availableCurrencies, settings.baseCurrency}.toList()..sort(),
           onChanged: (c) => setState(() => _currency = c),
         ),
       if (!_editing) AmountField(controller: _value, label: l10n.assetValueToday, currency: _currency),
@@ -362,7 +364,7 @@ class AssetDetailScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
-    final hidden = context.select<AppCubit, bool>((c) => c.state.hideBalances);
+    final hidden = context.select<SettingsCubit, bool>((c) => c.state.hideBalances);
     final money = context.read<MoneyCubit>();
     final state = context.watch<MoneyCubit>().state;
     final a = state.book.accounts[assetId];
@@ -631,7 +633,7 @@ class _SellAssetScreenState extends State<SellAssetScreen> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
-    final hidden = context.select<AppCubit, bool>((c) => c.state.hideBalances);
+    final hidden = context.select<SettingsCubit, bool>((c) => c.state.hideBalances);
     final state = context.watch<MoneyCubit>().state;
     final a = widget.asset;
     final carried = state.book.balanceOf(a.id, asOf: _date);

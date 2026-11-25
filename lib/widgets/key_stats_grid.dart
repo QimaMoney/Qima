@@ -62,8 +62,10 @@ class KeyStatsGrid extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
-    final high = windowed.isEmpty ? null : windowed.map((p) => p.value).reduce((a, b) => a > b ? a : b);
-    final low = windowed.isEmpty ? null : windowed.map((p) => p.value).reduce((a, b) => a < b ? a : b);
+    // A sample that stands for a span (a collapsed day, a bar) carries that
+    // span's own extremes, which can sit beyond every kept value.
+    final high = windowed.isEmpty ? null : windowed.map((p) => p.peak).reduce((a, b) => a > b ? a : b);
+    final low = windowed.isEmpty ? null : windowed.map((p) => p.trough).reduce((a, b) => a < b ? a : b);
     String price(double? v) => v == null ? '—' : Money(v, currencyCode).formatted();
     final locale = Localizations.localeOf(context).toString();
 

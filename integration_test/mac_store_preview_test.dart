@@ -139,12 +139,13 @@ void main() {
     addTearDown(tester.view.reset);
 
     await tester.pumpWidget(const QimaApp());
-    final cubit = tester.element(find.byType(MaterialApp)).read<AppCubit>();
+    final context = tester.element(find.byType(MaterialApp));
+    final cubit = context.read<AppCubit>();
     final ready = DateTime.now().add(const Duration(seconds: 30));
     while (!cubit.state.initialized && DateTime.now().isBefore(ready)) {
       await _wait(const Duration(milliseconds: 250));
     }
-    await seedStoreDemo(cubit);
+    await seedStoreDemo(context);
     await _waitFor(find.byType(HomeShell, skipOffstage: false));
     await _beat(3000);
 

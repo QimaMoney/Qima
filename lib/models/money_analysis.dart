@@ -11,18 +11,20 @@ class MonthAnalysis {
   final DateTime month;
   final String currency;
 
-  /// Spending per category id, in [currency], largest first.
-  final List<(String, double)> byCategory;
-  final double spent;
-  final double income;
+  /// Spending per category id, largest first. Like every figure here it
+  /// is in whole minor units of [currency]: ledger sums stay exact, and a
+  /// figure becomes a decimal only when it is shown.
+  final List<(String, int)> byCategory;
+  final int spent;
+  final int income;
 
   /// Monthly budget per category id, in [currency].
-  final Map<String, double> budgets;
+  final Map<String, int> budgets;
 
   /// Planned payments in budgeted categories still to come this month, in
   /// [currency]: money the budget has already promised. Zero for any other
   /// month.
-  final double planned;
+  final int planned;
 
   /// Currencies with no exchange rate to [currency]: their amounts are
   /// left out of every figure here, so the figures are incomplete.
@@ -44,17 +46,17 @@ class MonthAnalysis {
   // whole number of 24-hour days.
   int get daysInMonth => DateTime(month.year, month.month + 1, 0).day;
 
-  double get budget => budgets.values.fold(0.0, (a, b) => a + b);
+  int get budget => budgets.values.fold(0, (a, b) => a + b);
   bool get hasBudget => budgets.isNotEmpty;
   /// The budget minus what is spent and what planned payments will still
   /// spend: the one definition every screen shows.
-  double get leftToSpend => budget - spent - planned;
+  int get leftToSpend => budget - spent - planned;
 
   /// Every figure counts every amount.
   bool get complete => missingRates.isEmpty;
-  double get net => income - spent;
+  int get net => income - spent;
 
-  double spentIn(String categoryId) => byCategory.where((c) => c.$1 == categoryId).fold(0.0, (a, c) => a + c.$2);
+  int spentIn(String categoryId) => byCategory.where((c) => c.$1 == categoryId).fold(0, (a, c) => a + c.$2);
 
   /// Days of the month gone by on [today] (all of them for a past month).
   int elapsedDays(DateTime today) {
@@ -65,17 +67,17 @@ class MonthAnalysis {
 
   /// Spending by the month's end at the pace so far, or null before the
   /// month has started.
-  double? projected(DateTime today) {
+  int? projected(DateTime today) {
     final d = elapsedDays(today);
     if (d == 0) return null;
-    return spent / d * daysInMonth;
+    return (spent / d * daysInMonth).round();
   }
 
   /// Categories whose spending so far is ahead of their budget's pace,
   /// most over first: (category, spent, budget).
-  List<(String, double, double)> aheadOfPace(DateTime today) {
+  List<(String, int, int)> aheadOfPace(DateTime today) {
     final share = elapsedDays(today) / daysInMonth;
-    final out = <(String, double, double)>[];
+    final out = <(String, int, int)>[];
     budgets.forEach((id, b) {
       final s = spentIn(id);
       if (b > 0 && s > b * share && s > 0) out.add((id, s, b));
@@ -86,32 +88,27 @@ class MonthAnalysis {
 
   /// Budget lines with money to spare at the month's pace, most spare
   /// first: (category, spare).
-  List<(String, double)> spare(DateTime today) {
+  List<(String, int)> spare(DateTime today) {
     final share = elapsedDays(today) / daysInMonth;
-    final out = <(String, double)>[];
+    final out = <(String, int)>[];
     budgets.forEach((id, b) {
       final s = spentIn(id);
       final atPace = b * share;
-      if (b > 0 && s < atPace) out.add((id, b - (share == 0 ? 0 : s / share)));
+      if (b > 0 && s < atPace) out.add((id, (b - (share == 0 ? 0 : s / share)).round()));
     });
     out.removeWhere((e) => e.$2 <= 0);
     out.sort((a, b) => b.$2.compareTo(a.$2));
     return out;
   }
 
-  static double _convert(Amounts amounts, String currency, FXRates rates, [Set<String>? missing]) {
-    var total = 0.0;
+  static int _convert(Amounts amounts, String currency, FXRates rates, [Set<String>? missing]) {
+    var total = 0;
     amounts.forEach((c, v) {
-      final major = MinorUnits.toMajor(v, c);
-      if (c == currency) {
-        total += major;
-        return;
-      }
-      final from = rates.rate(c), to = rates.rate(currency);
+      final converted = MinorUnits.convert(v, c, currency, rates);
       // A currency with no rate is left out rather than counted at 1:1.
-      if (from != null && to != null) {
-        total += major / from * to;
-      } else if (major != 0) {
+      if (converted != null) {
+        total += converted;
+      } else if (v != 0) {
         missing?.add(c);
       }
     });
@@ -133,7 +130,7 @@ class MonthAnalysis {
     final month = DateTime(anyDay.year, anyDay.month);
     final missing = <String>{};
     final to = DateTime(month.year, month.month + 1).subtract(const Duration(microseconds: 1));
-    final byCategory = <(String, double)>[];
+    final byCategory = <(String, int)>[];
     for (final a in book.accounts.values) {
       if (a.side != AccountSide.spending) continue;
       final amounts = book.spending(from: month, to: to, categories: {a.id});
@@ -151,7 +148,7 @@ class MonthAnalysis {
       month: month,
       currency: currency,
       byCategory: byCategory,
-      spent: byCategory.fold(0.0, (a, c) => a + c.$2),
+      spent: byCategory.fold(0, (a, c) => a + c.$2),
       income: _convert(book.income(from: month, to: to), currency, rates, missing),
       budgets: {for (final e in budgets.entries) e.key: _convert({bc: e.value}, currency, rates, missing)},
       planned: _convert(promised, currency, rates, missing),
@@ -161,7 +158,7 @@ class MonthAnalysis {
 
   /// Spending for each of the [count] months ending with [anyDay]'s,
   /// oldest first.
-  static List<(DateTime, double)> trend(Book book, DateTime anyDay, {required String currency, required FXRates rates, int count = 6}) => [
+  static List<(DateTime, int)> trend(Book book, DateTime anyDay, {required String currency, required FXRates rates, int count = 6}) => [
         for (var i = count - 1; i >= 0; i--)
           () {
             final m = DateTime(anyDay.year, anyDay.month - i);

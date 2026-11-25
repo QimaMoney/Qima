@@ -16,3 +16,11 @@ Future<bool> writeJson(String relativePath, Map<String, dynamic> data) async {
 void overrideDirectoryForTesting(Object dir) {
   throw UnsupportedError('local_file_store_stub: use LocalFileStore, not this stub, directly.');
 }
+
+Future<String> directoryPath() async {
+  throw UnsupportedError('local_file_store_stub: use LocalFileStore, not this stub, directly.');
+}
+
+Future<Map<String, dynamic>?> readJsonStrict(String relativePath) async {
+  throw UnsupportedError('local_file_store_stub: use LocalFileStore, not this stub, directly.');
+}

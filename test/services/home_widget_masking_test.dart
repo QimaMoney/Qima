@@ -2,7 +2,6 @@ import 'dart:convert';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:qima/blocs/app_state.dart';
 import 'package:qima/models/asset.dart';
 import 'package:qima/models/fx_history.dart';
 import 'package:qima/models/holding.dart';
@@ -14,7 +13,7 @@ import 'package:qima/services/widget_snapshot.dart';
 
 /// Phase 4 "Hide balances": [HomeWidgetService] publishes the ONE widget
 /// snapshot (iOS, macOS and Android all read it — see the class doc), and
-/// it always carries [AppState.hideBalances] verbatim (`widget_snapshot_test.dart`
+/// it always carries [WidgetData.hideBalances] verbatim (`widget_snapshot_test.dart`
 /// covers that in detail). Each native widget masks the amount itself from
 /// that flag; there's no Dart-side masked payload left to test here, so
 /// this file only guards that publishing still writes the snapshot with the
@@ -53,7 +52,7 @@ void main() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, null);
   });
 
-  AppState stateWithLot({required bool hideBalances}) {
+  WidgetData stateWithLot({required bool hideBalances}) {
     final now = DateTime(2024, 6, 10);
     final lots = [
       HoldingLot(
@@ -71,8 +70,7 @@ void main() {
         Quote(instrumentID: gold.id, timestamp: now, canonicalUSD: 2000),
       ]),
     };
-    return AppState(
-      initialized: true,
+    return WidgetData(
       lots: lots,
       seriesByID: seriesByID,
       rates: FXRates(base: 'USD', rates: const {'USD': 1}, updatedAt: now),

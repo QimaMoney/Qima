@@ -18,12 +18,18 @@ class Book {
   final Map<String, BookAccount> accounts;
   final List<BookEntry> entries;
 
-  Book(Iterable<BookAccount> accounts, Iterable<BookEntry> entries)
+  Book(Iterable<BookAccount> accounts, Iterable<BookEntry> entries) : this._(accounts, List.unmodifiable(entries));
+
+  /// System accounts first, then a holding account for every commodity a
+  /// line carries (none is stored), then the given accounts, which win.
+  Book._(Iterable<BookAccount> accounts, this.entries)
       : accounts = {
           for (final s in SystemAccount.values) s.id: s.account,
+          for (final e in entries)
+            for (final l in e.lines)
+              if (l.commodity != null) BookAccount.holdingId(l.commodity!): BookAccount.holding(l.commodity!),
           for (final a in accounts) a.id: a,
-        },
-        entries = List.unmodifiable(entries);
+        };
 
   /// Everything that keeps the books from adding up: bad accounts, and
   /// entries that don't balance, post to an unknown account or put a
@@ -81,8 +87,12 @@ class Book {
   late final Map<String, Amounts> _undated = balances();
 
   /// One account's shown balance in its own currency (zero if untouched).
+  /// A holding has none to show: what its lines add up to is cost, in the
+  /// currency of each trade, and its worth is its quantity at live prices.
+  /// It reads zero here; its cost per currency is in [balances].
   int balanceOf(String accountId, {DateTime? asOf}) {
     final a = accounts[accountId];
+    if (a != null && a.isHolding) return 0;
     final b = (asOf == null ? _undated : balances(asOf: asOf))[accountId] ?? const {};
     if (a?.currency != null) return b[a!.currency] ?? 0;
     if (b.length > 1) throw StateError('${a?.name ?? accountId} holds several currencies; read balances() instead.');
@@ -94,7 +104,8 @@ class Book {
     final b = balances(asOf: asOf);
     final own = <BalanceSheetLine>[], owe = <BalanceSheetLine>[];
     for (final a in accounts.values) {
-      if (!a.side.onBalanceSheet) continue;
+      // A holding is a quantity; its value is counted outside the book.
+      if (!a.onMoneySheet) continue;
       final amount = b[a.id]?[a.currency] ?? 0;
       if (amount == 0 && a.archived) continue;
       (a.side == AccountSide.own ? own : owe).add(BalanceSheetLine(a, amount));

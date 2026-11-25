@@ -4,7 +4,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:qima/blocs/app_cubit.dart';
+import 'package:qima/blocs/app_blocs.dart';
+import '../helpers/app_blocs.dart';
 import 'package:qima/l10n/app_localizations.dart';
 import 'package:qima/models/asset.dart';
 import 'package:qima/models/fx_history.dart';
@@ -96,11 +97,11 @@ void main() {
 
   final card = WatchCard(id: 'card1', instrumentID: gold.id, currency: 'USD', unit: PriceUnit.troyOunce);
 
-  Future<AppCubit> populatedCubit({_FakeNotificationService? notifications}) async {
-    final cubit = AppCubit(notificationService: notifications);
-    cubit.preferences = await Preferences.create();
+  Future<AppBlocs> populatedCubit({_FakeNotificationService? notifications}) async {
+    final cubit = AppBlocs(notificationService: notifications);
+    cubit.settings.preferences = await Preferences.create();
     final now = DateTime(2024, 6, 10);
-    cubit.emit(cubit.state.copyWith(
+    cubit.seed(
       initialized: true,
       cards: [card],
       seriesByID: {
@@ -111,13 +112,13 @@ void main() {
       rates: FXRates(base: 'USD', rates: const {'USD': 1}, updatedAt: now),
       fxHistory: FXHistory.empty,
       baseCurrency: 'USD',
-    ));
+    );
     return cubit;
   }
 
-  Widget harness(AppCubit cubit, {PriceAlert? existing}) {
-    return BlocProvider<AppCubit>.value(
-      value: cubit,
+  Widget harness(AppBlocs cubit, {PriceAlert? existing}) {
+    return MultiBlocProvider(
+      providers: cubit.providers,
       child: MaterialApp(
         localizationsDelegates: AppLocalizations.localizationsDelegates,
         supportedLocales: AppLocalizations.supportedLocales,
@@ -157,13 +158,13 @@ void main() {
     await _tapAndAwaitRealWork(
       tester,
       createButton,
-      () => _pollUntil(() => cubit.state.alerts.isNotEmpty && notifications.requested),
+      () => _pollUntil(() => cubit.alerts.state.alerts.isNotEmpty && notifications.requested),
     );
     await tester.pumpAndSettle();
 
-    expect(cubit.state.alerts, hasLength(1));
-    expect(cubit.state.alerts.single.kind, AlertKind.above);
-    expect(cubit.state.alerts.single.target, 2100);
+    expect(cubit.alerts.state.alerts, hasLength(1));
+    expect(cubit.alerts.state.alerts.single.kind, AlertKind.above);
+    expect(cubit.alerts.state.alerts.single.target, 2100);
   });
 
   testWidgets('Price mode: an empty or zero target disables Create', (tester) async {
@@ -205,12 +206,12 @@ void main() {
     await _tapAndAwaitRealWork(
       tester,
       createButton,
-      () => _pollUntil(() => cubit.state.alerts.isNotEmpty && notifications.requested),
+      () => _pollUntil(() => cubit.alerts.state.alerts.isNotEmpty && notifications.requested),
     );
     await tester.pumpAndSettle();
 
-    expect(cubit.state.alerts, hasLength(1));
-    expect(cubit.state.alerts.single.kind, AlertKind.percentMove);
+    expect(cubit.alerts.state.alerts, hasLength(1));
+    expect(cubit.alerts.state.alerts.single.kind, AlertKind.percentMove);
   });
 
   testWidgets('editing an existing alert pre-fills its fields and Save updates it in place', (tester) async {
@@ -222,7 +223,7 @@ void main() {
       target: 1800,
       createdAt: DateTime(2024, 1, 1),
     );
-    await tester.runAsync(() => cubit.saveAlert(existing));
+    await tester.runAsync(() => cubit.alerts.saveAlert(existing));
 
     await tester.pumpWidget(harness(cubit, existing: existing));
     await tester.tap(find.text('open'));
@@ -240,13 +241,13 @@ void main() {
     await _tapAndAwaitRealWork(
       tester,
       find.widgetWithText(FilledButton, l10n.alertEditorSave),
-      () => _pollUntil(() => cubit.state.alerts.length == 1 && cubit.state.alerts.single.target == 1750),
+      () => _pollUntil(() => cubit.alerts.state.alerts.length == 1 && cubit.alerts.state.alerts.single.target == 1750),
     );
     await tester.pumpAndSettle();
 
-    expect(cubit.state.alerts, hasLength(1));
-    expect(cubit.state.alerts.single.target, 1750);
-    expect(cubit.state.alerts.single.id, 'existing1');
+    expect(cubit.alerts.state.alerts, hasLength(1));
+    expect(cubit.alerts.state.alerts.single.target, 1750);
+    expect(cubit.alerts.state.alerts.single.id, 'existing1');
   });
 
   testWidgets('deleting an existing alert asks for confirmation and removes it', (tester) async {
@@ -258,7 +259,7 @@ void main() {
       target: 2100,
       createdAt: DateTime(2024, 1, 1),
     );
-    await tester.runAsync(() => cubit.saveAlert(existing));
+    await tester.runAsync(() => cubit.alerts.saveAlert(existing));
 
     await tester.pumpWidget(harness(cubit, existing: existing));
     await tester.tap(find.text('open'));
@@ -283,7 +284,7 @@ void main() {
     // `pumpAndSettle`, which can report "settled" from real-time frame
     // idleness before a trailing microtask has actually completed) avoids
     // racing the assertion against that IO.
-    final deleted = cubit.stream.firstWhere((s) => s.alerts.isEmpty);
+    final deleted = cubit.alerts.stream.firstWhere((s) => s.alerts.isEmpty);
     await tester.runAsync(() async {
       await tester.tap(find.byIcon(Icons.delete_outline), warnIfMissed: false);
       await tester.pumpAndSettle();
@@ -292,6 +293,6 @@ void main() {
     });
     await tester.pumpAndSettle();
 
-    expect(cubit.state.alerts, isEmpty);
+    expect(cubit.alerts.state.alerts, isEmpty);
   });
 }

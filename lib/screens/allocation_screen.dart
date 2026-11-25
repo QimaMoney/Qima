@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
-import '../blocs/app_cubit.dart';
-import '../blocs/app_state.dart';
+import '../blocs/holdings_cubit.dart';
+import '../blocs/market_cubit.dart';
+import '../blocs/settings_cubit.dart';
 import '../l10n/app_localizations.dart';
 import '../models/allocation.dart';
 import '../models/instrument_catalog.dart';
@@ -25,7 +26,6 @@ class AllocationScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cubit = context.read<AppCubit>();
     final l10n = AppLocalizations.of(context)!;
 
     return ScreenBackground(
@@ -36,55 +36,62 @@ class AllocationScreen extends StatelessWidget {
           title: Text(l10n.allocationTitle),
           actions: const [HelpButton(topic: HelpTopicId.portfolio)],
         ),
-        body: BlocBuilder<AppCubit, AppState>(
-          builder: (context, state) {
-            final colors = context.colors;
-            final held = cubit.heldInstruments;
-            final groups = Allocation.byGroup(held, state.baseCurrency);
-            final metals = Allocation.metalsByForm(
-              lots: state.lots,
-              rates: state.rates,
-              baseCurrency: state.baseCurrency,
-              latestUSD: cubit.latestUSD,
-              resolve: InstrumentCatalog.instrument,
-            );
-            final drift = Allocation.drift(
-              ledger: state.ledger,
-              heldNow: held,
-              seriesByID: state.seriesByID,
-              fxHistory: state.fxHistory,
-              rates: state.rates,
-              baseCurrency: state.baseCurrency,
-              resolve: InstrumentCatalog.instrument,
-              now: DateTime.now(),
-            );
-
-            if (groups.isEmpty) {
-              return ListView(
-                padding: const EdgeInsets.all(DS.spaceMD),
-                children: [DSCard(child: Text(l10n.portfolioEmpty, style: TextStyle(color: colors.textTertiary)))],
-              );
-            }
-
-            return ListView(
-              padding: const EdgeInsets.all(DS.spaceMD),
-              children: [
-                SectionHeader(l10n.allocationByGroup),
-                DSCard(child: groupBars(context, groups, hidden: state.hideBalances)),
-                if (metals.isNotEmpty) ...[
-                  const SizedBox(height: DS.spaceLG),
-                  SectionHeader(l10n.allocationMetalsByForm),
-                  DSCard(child: _metalBars(context, metals, hidden: state.hideBalances)),
-                ],
-                if (drift != null) ...[
-                  const SizedBox(height: DS.spaceLG),
-                  _DriftCard(result: drift),
-                ],
-              ],
-            );
-          },
-        ),
+        body: _body(context),
       ),
+    );
+  }
+
+  Widget _body(BuildContext context) {
+    final holdings = context.read<HoldingsCubit>();
+    final market = context.read<MarketCubit>();
+    // The split, its drift and the masking read from three places.
+    final settings = context.watch<SettingsCubit>().state;
+    final holdingsState = context.watch<HoldingsCubit>().state;
+    final marketState = context.watch<MarketCubit>().state;
+    final l10n = AppLocalizations.of(context)!;
+    final colors = context.colors;
+    final held = holdings.heldInstruments;
+    final groups = Allocation.byGroup(held, settings.baseCurrency);
+    final metals = Allocation.metalsByForm(
+      lots: holdingsState.lots,
+      rates: marketState.rates,
+      baseCurrency: settings.baseCurrency,
+      latestUSD: market.latestUSD,
+      resolve: InstrumentCatalog.instrument,
+    );
+    final drift = Allocation.drift(
+      ledger: holdingsState.ledger,
+      heldNow: held,
+      seriesByID: marketState.seriesByID,
+      fxHistory: marketState.fxHistory,
+      rates: marketState.rates,
+      baseCurrency: settings.baseCurrency,
+      resolve: InstrumentCatalog.instrument,
+      now: DateTime.now(),
+    );
+
+    if (groups.isEmpty) {
+      return ListView(
+        padding: const EdgeInsets.all(DS.spaceMD),
+        children: [DSCard(child: Text(l10n.portfolioEmpty, style: TextStyle(color: colors.textTertiary)))],
+      );
+    }
+
+    return ListView(
+      padding: const EdgeInsets.all(DS.spaceMD),
+      children: [
+        SectionHeader(l10n.allocationByGroup),
+        DSCard(child: groupBars(context, groups, hidden: settings.hideBalances)),
+        if (metals.isNotEmpty) ...[
+          const SizedBox(height: DS.spaceLG),
+          SectionHeader(l10n.allocationMetalsByForm),
+          DSCard(child: _metalBars(context, metals, hidden: settings.hideBalances)),
+        ],
+        if (drift != null) ...[
+          const SizedBox(height: DS.spaceLG),
+          _DriftCard(result: drift),
+        ],
+      ],
     );
   }
 

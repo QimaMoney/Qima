@@ -3,7 +3,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:qima/blocs/app_cubit.dart';
+import 'package:qima/blocs/app_blocs.dart';
+import '../helpers/app_blocs.dart';
 import 'package:qima/l10n/app_localizations.dart';
 import 'package:qima/models/asset.dart';
 import 'package:qima/models/fx_history.dart';
@@ -56,15 +57,15 @@ void main() {
   final goldCard = WatchCard(id: 'card-gold', instrumentID: gold.id, currency: 'USD', unit: PriceUnit.troyOunce);
   final silverCard = WatchCard(id: 'card-silver', instrumentID: silver.id, currency: 'USD', unit: PriceUnit.troyOunce);
 
-  Future<AppCubit> makeCubit({
+  Future<AppBlocs> makeCubit({
     List<WatchCard> cards = const [],
     List<PriceAlert> alerts = const [],
     bool notificationsEnabled = true,
   }) async {
-    final cubit = AppCubit(notificationService: _FakeNotificationService(enabled: notificationsEnabled));
-    cubit.preferences = await Preferences.create();
+    final cubit = AppBlocs(notificationService: _FakeNotificationService(enabled: notificationsEnabled));
+    cubit.settings.preferences = await Preferences.create();
     final now = DateTime(2024, 6, 10);
-    cubit.emit(cubit.state.copyWith(
+    cubit.seed(
       initialized: true,
       cards: cards,
       alerts: alerts,
@@ -79,13 +80,13 @@ void main() {
       rates: FXRates(base: 'USD', rates: const {'USD': 1}, updatedAt: now),
       fxHistory: FXHistory.empty,
       baseCurrency: 'USD',
-    ));
+    );
     return cubit;
   }
 
-  Widget harness(AppCubit cubit) {
-    return BlocProvider<AppCubit>.value(
-      value: cubit,
+  Widget harness(AppBlocs cubit) {
+    return MultiBlocProvider(
+      providers: cubit.providers,
       child: MaterialApp(
         localizationsDelegates: AppLocalizations.localizationsDelegates,
         supportedLocales: AppLocalizations.supportedLocales,
@@ -146,9 +147,9 @@ void main() {
 
   testWidgets('"Notifications are off" banner shows when disabled, and hides once notifications are enabled', (tester) async {
     final fakeNotifications = _FakeNotificationService(enabled: false);
-    final cubit = AppCubit(notificationService: fakeNotifications);
-    cubit.preferences = await Preferences.create();
-    cubit.emit(cubit.state.copyWith(initialized: true, notificationsEnabled: false));
+    final cubit = AppBlocs(notificationService: fakeNotifications);
+    cubit.settings.preferences = await Preferences.create();
+    cubit.seed(initialized: true, notificationsEnabled: false);
 
     await tester.pumpWidget(harness(cubit));
     await tester.pump();
@@ -162,7 +163,7 @@ void main() {
     // enabled, and re-running the same refresh the screen calls on resume
     // updates the banner away.
     fakeNotifications.enabled = true;
-    await tester.runAsync(() => cubit.refreshNotificationStatus());
+    await tester.runAsync(() => cubit.alerts.refreshNotificationStatus());
     await tester.pump();
 
     expect(find.text(l10n.alertsScreenNotificationsOff), findsNothing);
@@ -178,7 +179,7 @@ void main() {
     await tester.pumpWidget(harness(cubit));
     await tester.pump();
 
-    expect(cubit.state.alerts.single.enabled, isTrue);
+    expect(cubit.alerts.state.alerts.single.enabled, isTrue);
 
     // `setAlertEnabled` fires from the Switch's `onChanged` without being
     // awaited by the tap itself, and does real on-disk file IO — await the
@@ -186,13 +187,13 @@ void main() {
     // is missed) rather than a fixed real-time delay, which can expire
     // before the write finishes under load and leave it dangling into a
     // later test.
-    final toggled = cubit.stream.firstWhere((s) => s.alerts.single.enabled == false).timeout(const Duration(seconds: 5));
+    final toggled = cubit.alerts.stream.firstWhere((s) => s.alerts.single.enabled == false).timeout(const Duration(seconds: 5));
     await tester.runAsync(() async {
       await tester.tap(find.byType(Switch), warnIfMissed: false);
       await toggled;
     });
     await tester.pumpAndSettle();
 
-    expect(cubit.state.alerts.single.enabled, isFalse);
+    expect(cubit.alerts.state.alerts.single.enabled, isFalse);
   });
 }

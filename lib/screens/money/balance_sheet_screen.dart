@@ -2,9 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../widgets/split_donut.dart';
-import '../../blocs/app_cubit.dart';
-import '../../blocs/app_state.dart';
+import '../../blocs/holdings_cubit.dart';
+import '../../blocs/market_state.dart';
+import '../../blocs/market_cubit.dart';
 import '../../blocs/money_cubit.dart';
+import '../../blocs/settings_cubit.dart';
+import '../../blocs/settings_state.dart';
 import '../../l10n/app_localizations.dart';
 import '../../models/book_figures.dart';
 import '../../models/net_worth.dart';
@@ -19,13 +22,12 @@ import 'accounts_screens.dart';
 import 'asset_screens.dart';
 
 /// Net worth from both ledgers: holdings at live prices plus the book.
-NetWorthSummary netWorthOf(AppCubit app, MoneyState money) {
-  final s = app.state;
+NetWorthSummary netWorthOf(HoldingsCubit holdings, MarketState market, String baseCurrency, MoneyState money) {
   return NetWorthSummary.of(
     book: money.book,
-    holdingsValue: app.portfolioValuation?.value.amount ?? 0,
-    currency: s.baseCurrency,
-    rates: s.rates,
+    holdingsValue: holdings.portfolioValuation?.value.amount ?? 0,
+    currency: baseCurrency,
+    rates: market.rates,
   );
 }
 
@@ -40,11 +42,12 @@ class BalanceSheetScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
-    final app = context.read<AppCubit>();
-    context.watch<AppCubit>();
+    final holdings = context.watch<HoldingsCubit>();
+    final market = context.watch<MarketCubit>().state;
+    final settings = context.watch<SettingsCubit>().state;
     final money = context.watch<MoneyCubit>().state;
-    final hidden = app.state.hideBalances;
-    final summary = netWorthOf(app, money);
+    final hidden = settings.hideBalances;
+    final summary = netWorthOf(holdings, market, settings.baseCurrency, money);
     final ccy = summary.currency;
 
     void openGroup(SheetGroup g) {
@@ -171,11 +174,12 @@ class HowTotalScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
-    return BlocBuilder<AppCubit, AppState>(
-      builder: (context, _) {
-        final app = context.read<AppCubit>();
-        final hidden = app.state.hideBalances;
-        final summary = netWorthOf(app, context.watch<MoneyCubit>().state);
+    return BlocBuilder<SettingsCubit, SettingsState>(
+      builder: (context, settings) {
+        final holdings = context.watch<HoldingsCubit>();
+        final market = context.watch<MarketCubit>().state;
+        final hidden = settings.hideBalances;
+        final summary = netWorthOf(holdings, market, settings.baseCurrency, context.watch<MoneyCubit>().state);
         final ccy = summary.currency;
         final rows = [
           for (final g in summary.groups)
