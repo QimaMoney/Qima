@@ -399,7 +399,16 @@ class ImportPlanner {
   /// The entry for a row: a spend from the account or money into it, or,
   /// when [category] is another of the person's accounts, a move between
   /// the two (a card payment when money goes from a bank account to a
-  /// card).
+  /// card). When [category] is what a person owes or is owed, the row is
+  /// money lent or borrowed, or its repayment, by which way it went.
+  /// What a row booked against the person account [a] is, by the way the
+  /// money went.
+  static EntryTemplate? personTemplate(BookAccount a, {required bool isIn}) => switch (a.type) {
+        AccountType.receivable => isIn ? EntryTemplate.repaymentIn : EntryTemplate.lent,
+        AccountType.payable => isIn ? EntryTemplate.borrowed : EntryTemplate.repaymentOut,
+        _ => null,
+      };
+
   static BookEntry entryFor({
     required EntryBuilder builder,
     required BookAccount account,
@@ -410,7 +419,13 @@ class ImportPlanner {
     final amount = MinorUnits.fromMajor(row.amount.abs(), account.currency ?? 'SAR');
     final name = row.description.isEmpty ? row.detail : row.description;
     final BookEntry made;
-    if (category.side.onBalanceSheet) {
+    if (category.type == AccountType.receivable) {
+      // Someone who owes the person: money out is lent, money in pays it back.
+      made = isIn ? builder.repaymentIn(account, category, amount, row.date) : builder.lent(account, category, amount, row.date);
+    } else if (category.type == AccountType.payable) {
+      // Someone the person owes: money in is borrowed, money out pays it back.
+      made = isIn ? builder.borrowed(account, category, amount, row.date) : builder.repaymentOut(account, category, amount, row.date);
+    } else if (category.side.onBalanceSheet) {
       final from = isIn ? category : account, to = isIn ? account : category;
       made = to.type == AccountType.credit && from.type != AccountType.credit
           ? builder.cardPayment(from, to, amount, row.date)

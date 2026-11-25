@@ -97,6 +97,13 @@ class AppLocalizationsAr extends AppLocalizations {
   String get addCustomTickerSubmit => 'إضافة الرمز';
 
   @override
+  String get addCustomTickerConfirmBody =>
+      'هذا ما لدى مصدر الأسعار تحت هذا الرمز. أضِفه فقط إذا كان هو المقصود.';
+
+  @override
+  String get addCustomTickerConfirmNo => 'ليس هذا';
+
+  @override
   String get cardConfigAddToWatchlist => 'إضافة إلى قائمة المتابعة';
 
   @override
@@ -248,7 +255,8 @@ class AppLocalizationsAr extends AppLocalizations {
   String get settingsDefaultRange => 'النطاق الزمني الافتراضي';
 
   @override
-  String get settingsDefaultRangeFooter => 'يُستخدم عند فتح أصل لأول مرة.';
+  String get settingsDefaultRangeFooter =>
+      'تُفتح الرسوم البيانية في الرئيسية وفي صفحة الأصل على هذا النطاق. اختيار نطاق على رسم الأصل يحدّثه.';
 
   @override
   String get settingsWidgetRefresh => 'فاصل تحديث الودجة';
@@ -823,6 +831,51 @@ class AppLocalizationsAr extends AppLocalizations {
   @override
   String get settingsICloudSyncStatusStorageFull =>
       'مساحة تخزين iCloud الخاصة بـQima ممتلئة';
+
+  @override
+  String get settingsCloudLogSyncSwitch => 'مزامنة أسرع (نسخة تجريبية)';
+
+  @override
+  String get settingsCloudLogSyncFooter =>
+      'طريقة جديدة لمزامنة دفترك عبر iCloud، ما زالت قيد التجربة. تعمل بجانب المزامنة أعلاه ولا تحذف شيئًا عند إيقافها.';
+
+  @override
+  String settingsCloudLogSyncStatusUpToDate(String time) {
+    return 'محدّثة · $time';
+  }
+
+  @override
+  String get settingsCloudLogSyncStatusSyncing => 'جارٍ المزامنة…';
+
+  @override
+  String get settingsCloudLogSyncStatusWaiting =>
+      'بانتظار أن يُكمل جهاز آخر الإرسال';
+
+  @override
+  String get settingsCloudLogSyncStatusOffline =>
+      'تعذّر الوصول إلى iCloud. ستتم المحاولة قريبًا.';
+
+  @override
+  String get settingsCloudLogSyncStatusQuota => 'مساحة تخزين iCloud ممتلئة';
+
+  @override
+  String get settingsCloudLogSyncStatusNotSignedIn =>
+      'لم يتم تسجيل الدخول إلى iCloud';
+
+  @override
+  String get settingsCloudLogSyncStatusUnavailable => 'غير متاحة في هذه النسخة';
+
+  @override
+  String get settingsCloudLogSyncStatusZoneMissing =>
+      'بيانات المزامنة مفقودة في iCloud وتعذّرت إعادة إنشائها';
+
+  @override
+  String get settingsCloudLogSyncStatusNewerVersion =>
+      'جهاز آخر يستخدم إصدارًا أحدث. حدّث Qima.';
+
+  @override
+  String get settingsCloudLogSyncStatusOther =>
+      'توقفت المزامنة. ستتم المحاولة قريبًا.';
 
   @override
   String get backupTitle => 'النسخ الاحتياطي والاستعادة';
@@ -4205,6 +4258,9 @@ class AppLocalizationsAr extends AppLocalizations {
   String get budgetNone => 'بلا ميزانية';
 
   @override
+  String get budgetAdd => 'ميزانية جديدة';
+
+  @override
   String budgetOf(String amount) {
     return 'الميزانية $amount';
   }
@@ -4548,6 +4604,12 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get importMoveMessage => 'نقل إلى حساب آخر';
+
+  @override
+  String get importRowAccount => 'البطاقة أو الحساب';
+
+  @override
+  String get importRowAccountWholeFile => 'ينقل كل معاملات هذا الملف';
 
   @override
   String get bankMessagesNotifyTitle => 'رسائل بنكية للمراجعة';

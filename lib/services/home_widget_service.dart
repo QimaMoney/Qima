@@ -4,10 +4,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:home_widget/home_widget.dart';
 
-import '../blocs/app_state.dart';
 import 'widget_snapshot.dart';
 
-/// Bridges [AppState] to the native home-screen widgets via the
+/// Bridges [WidgetData] to the native home-screen widgets via the
 /// `home_widget` plugin.
 ///
 /// ## Data contract
@@ -47,15 +46,15 @@ class HomeWidgetService {
   static const iOSPortfolioKind = 'PortfolioWidget';
   static const iOSWatchlistKind = 'WatchlistWidget';
 
-  /// Recomputes the widget snapshot from the latest [AppState], pushes it
+  /// Recomputes the widget snapshot from the latest [WidgetData], pushes it
   /// to native storage, then asks the OS to redraw any placed instances.
-  /// Called from [AppCubit] after every successful refresh.
+  /// Called by `WidgetPublisher` whenever something a widget shows changes, and by `RefreshPipeline` after a background refresh.
   ///
   /// Every step is best-effort: a widget write failing (e.g. the platform
   /// channel is unavailable in a unit test, or a platform simply doesn't
   /// support home_widget) must never surface as an app-visible error, since
   /// this is a background side effect of an otherwise-successful refresh.
-  static Future<void> publish(AppState state) async {
+  static Future<void> publish(WidgetData state) async {
     if (kIsWeb) return;
     switch (defaultTargetPlatform) {
       case TargetPlatform.macOS:

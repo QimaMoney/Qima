@@ -5,6 +5,8 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../blocs/app_cubit.dart';
 import '../blocs/app_state.dart';
+import '../blocs/settings_cubit.dart';
+import '../blocs/settings_state.dart';
 import '../l10n/app_localizations.dart';
 import '../screens/lock_screen.dart';
 import '../services/lock_state.dart';
@@ -36,7 +38,7 @@ class _LockGateState extends State<LockGate> with WidgetsBindingObserver {
   AppLifecycleState? _lifecycleState;
   bool _isAuthenticating = false;
   bool _primed = false;
-  AppCubit? _cubit;
+  SettingsCubit? _cubit;
 
   @override
   void initState() {
@@ -47,7 +49,7 @@ class _LockGateState extends State<LockGate> with WidgetsBindingObserver {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final cubit = context.read<AppCubit>();
+    final cubit = context.read<SettingsCubit>();
     if (!identical(_cubit, cubit)) {
       _cubit = cubit;
       _machine = LockStateMachine(
@@ -105,48 +107,56 @@ class _LockGateState extends State<LockGate> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     return BlocBuilder<AppCubit, AppState>(
-      buildWhen: (previous, current) =>
-          previous.initialized != current.initialized ||
-          previous.appLockEnabled != current.appLockEnabled ||
-          previous.lockGrace != current.lockGrace,
-      builder: (context, state) {
-        // Cold start: prime the machine to "locked" the first time
-        // initialization completes and app lock is on. Waiting for
-        // `initialized` avoids locking on the transient default
-        // (`appLockEnabled: false`) `AppState` that exists before
-        // `Preferences` has loaded.
-        if (!_primed && state.initialized) {
-          _primed = true;
-          _machine.primeColdStart();
-          if (_machine.isLocked) {
-            WidgetsBinding.instance.addPostFrameCallback((_) => _promptAuthentication());
+      buildWhen: (previous, current) => previous.initialized != current.initialized,
+      builder: (context, app) => BlocBuilder<SettingsCubit, SettingsState>(
+        // Every field the builder reads. A builder that skips a state also
+        // keeps showing the one it last accepted, which is why the settings
+        // are read fresh below: the first build after start-up must not use
+        // the default the builder was created with.
+        buildWhen: (previous, current) =>
+            previous.appLockEnabled != current.appLockEnabled ||
+            previous.lockGrace != current.lockGrace ||
+            previous.hideBalances != current.hideBalances,
+        builder: (context, _) {
+          final state = context.read<SettingsCubit>().state;
+          // Cold start: prime the machine to "locked" the first time
+          // initialization completes and app lock is on. Waiting for
+          // `initialized` avoids locking on the transient default
+          // (`appLockEnabled: false`) settings that exist before
+          // `Preferences` has loaded.
+          if (!_primed && app.initialized) {
+            _primed = true;
+            _machine.primeColdStart();
+            if (_machine.isLocked) {
+              WidgetsBinding.instance.addPostFrameCallback((_) => _promptAuthentication());
+            }
           }
-        }
 
-        final locked = state.initialized && _machine.isLocked;
-        final covering = state.initialized && (locked || (state.hideBalances && _shouldCoverForHide()));
+          final locked = app.initialized && _machine.isLocked;
+          final covering = app.initialized && (locked || (state.hideBalances && _shouldCoverForHide()));
 
-        // FLAG_SECURE (Android only, no-op elsewhere): on whenever app lock
-        // or hide-balances is enabled at all, not just while actually
-        // locked/covering — a screenshot taken a second after unlocking
-        // should still be blocked while hide-balances is on, and recents
-        // should never briefly flash real content on the way to the cover.
-        unawaited(SecureScreen.setSecure(state.appLockEnabled || state.hideBalances));
+          // FLAG_SECURE (Android only, no-op elsewhere): on whenever app lock
+          // or hide-balances is enabled at all, not just while actually
+          // locked/covering — a screenshot taken a second after unlocking
+          // should still be blocked while hide-balances is on, and recents
+          // should never briefly flash real content on the way to the cover.
+          unawaited(SecureScreen.setSecure(state.appLockEnabled || state.hideBalances));
 
-        return Stack(
-          children: [
-            widget.child,
-            if (locked)
-              LockScreen(
-                lockService: context.read<AppCubit>().appLockService,
-                isAuthenticating: _isAuthenticating,
-                onUnlockTapped: _promptAuthentication,
-              )
-            else if (covering)
-              const _PrivacyCover(),
-          ],
-        );
-      },
+          return Stack(
+            children: [
+              widget.child,
+              if (locked)
+                LockScreen(
+                  lockService: context.read<SettingsCubit>().appLockService,
+                  isAuthenticating: _isAuthenticating,
+                  onUnlockTapped: _promptAuthentication,
+                )
+              else if (covering)
+                const _PrivacyCover(),
+            ],
+          );
+        },
+      ),
     );
   }
 

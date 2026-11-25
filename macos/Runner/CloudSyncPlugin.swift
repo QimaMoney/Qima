@@ -24,7 +24,7 @@ import Foundation
 final class CloudSyncPlugin: NSObject, FlutterPlugin {
   static let containerIdentifier = "iCloud.com.devlabtechnologies.qima"
 
-  private static let methods: Set<String> = ["available", "store", "read", "list", "discard"]
+  private static let methods: Set<String> = ["available", "account", "store", "read", "list", "discard"]
 
   /// Made on the first call that needs it, and only in a build that may use
   /// the container.
@@ -72,6 +72,9 @@ final class CloudSyncPlugin: NSObject, FlutterPlugin {
     switch call.method {
     case "available":
       zone.accountAvailable { reply.send($0) }
+
+    case "account":
+      zone.accountName(done: reply.answer { $0 })
 
     case "store":
       guard let record = CloudSyncKind.record(arguments), let body = arguments["body"] as? String else {
@@ -222,6 +225,20 @@ private final class CloudSyncZone {
   func accountAvailable(_ done: @escaping (Bool) -> Void) {
     container.accountStatus { status, _ in
       DispatchQueue.main.async { done(status == .available) }
+    }
+  }
+
+  /// The record name of the signed-in user, the same on every device of the
+  /// account. Fails like any call when nobody is signed in.
+  func accountName(done: @escaping (Result<String, Error>) -> Void) {
+    container.fetchUserRecordID { recordID, error in
+      DispatchQueue.main.async {
+        if let recordID = recordID {
+          done(.success(recordID.recordName))
+        } else {
+          done(.failure(error ?? CKError(.notAuthenticated)))
+        }
+      }
     }
   }
 

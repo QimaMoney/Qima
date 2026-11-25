@@ -141,7 +141,6 @@ class Preferences {
   static const String _appLanguageKey = 'appLanguage';
   static const String _appearanceKey = 'appearance';
   static const String _preferredChartRangeKey = 'preferredChartRange';
-  static const String _preferredPortfolioRangeKey = 'preferredPortfolioRange';
   static const String _hideBalancesKey = 'hideBalances';
   static const String _plainSummariesKey = 'plainSummaries';
   static const String _speechLanguageKey = 'speechLanguage';
@@ -152,6 +151,8 @@ class Preferences {
   static const String _deliverAlertsOnThisDeviceKey = 'deliverAlertsOnThisDevice';
   static const String _lastAlertEvaluationAtKey = 'lastAlertEvaluationAt';
   static const String _iCloudSyncEnabledKey = 'iCloudSyncEnabled';
+  static const String _cloudLogSyncEnabledKey = 'cloudLogSyncEnabled';
+  static const String _cloudLogCompactedAtKey = 'cloudLogCompactedAt';
   static const String _onboardingCompletedKey = 'onboardingCompleted';
   static const String _setupAnswersKey = 'setupAnswers';
   static const String _getStartedDismissedKey = 'getStartedDismissed';
@@ -302,22 +303,6 @@ class Preferences {
     await local.setString(_preferredChartRangeKey, coerced.name);
   }
 
-  /// Local-only, like [preferredChartRange]. Restricted to
-  /// [ChartRange.portfolioSelectable] — anything else read back (a stale
-  /// value from a future app version, say) falls back to
-  /// [ChartRange.portfolioDefault] rather than being trusted blindly.
-  ChartRange get preferredPortfolioRange {
-    final raw = local.getString(_preferredPortfolioRangeKey);
-    if (raw == null) return ChartRange.portfolioDefault;
-    final range = ChartRange.values.firstWhere((r) => r.name == raw, orElse: () => ChartRange.portfolioDefault);
-    return ChartRange.portfolioSelectable.contains(range) ? range : ChartRange.portfolioDefault;
-  }
-
-  Future<void> setPreferredPortfolioRange(ChartRange value) async {
-    if (!ChartRange.portfolioSelectable.contains(value)) return;
-    await local.setString(_preferredPortfolioRangeKey, value.name);
-  }
-
   /// Local-only, NOT synced — hiding balances is a per-device, in-the-moment
   /// privacy choice (e.g. "don't show this over someone's shoulder right
   /// now"), not something that should silently reveal or hide amounts on a
@@ -428,7 +413,7 @@ class Preferences {
   /// Local-only, NOT synced through the cloud store itself — this is the
   /// on/off switch FOR cloud sync, so it can never be read from the thing it
   /// controls (spec Phase 7). Whether this device even offers the setting is
-  /// a separate concern (`AppCubit`/`SettingsScreen` gate on platform +
+  /// a separate concern (`SyncCubit`/`SettingsScreen` gate on platform +
   /// account availability); this getter just answers "did the user turn it
   /// on", defaulting to on so a first launch on a device with an iCloud
   /// account already signed in starts syncing without an extra step.
@@ -438,6 +423,26 @@ class Preferences {
 
   Future<void> setICloudSyncEnabled(bool value) async {
     await local.setBool(_iCloudSyncEnabledKey, value);
+  }
+
+  /// Local-only, NOT synced: whether this device also syncs the book through
+  /// CloudKit (the change log), beside the iCloud key-value sync above. Off
+  /// until the person turns it on, on each device on its own.
+  bool get cloudLogSyncEnabled => local.getBool(_cloudLogSyncEnabledKey) ?? false;
+
+  Future<void> setCloudLogSyncEnabled(bool value) async {
+    await local.setBool(_cloudLogSyncEnabledKey, value);
+  }
+
+  /// Local-only: when this device last compacted its CloudKit change log, so
+  /// that it does so at most once a day.
+  DateTime? get cloudLogCompactedAt {
+    final raw = local.getString(_cloudLogCompactedAtKey);
+    return raw == null ? null : DateTime.tryParse(raw);
+  }
+
+  Future<void> setCloudLogCompactedAt(DateTime value) async {
+    await local.setString(_cloudLogCompactedAtKey, value.toUtc().toIso8601String());
   }
 
   /// Local-only, NOT synced — whether the first-launch onboarding tour has

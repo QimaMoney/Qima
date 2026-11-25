@@ -11,7 +11,7 @@ import 'icloud_kv_store.dart';
 /// requires rebuilding any store, and in-flight reads mid-toggle still
 /// resolve against a consistent backend rather than a half-swapped one.
 ///
-/// [enabled] starts `false` (local-only) until [AppCubit] explicitly turns it
+/// [enabled] starts `false` (local-only) until [SyncCubit] explicitly turns it
 /// on after reading the user's `iCloudSyncEnabled` preference — this class
 /// itself has no opinion on defaults.
 class SwitchableCloudKVStore implements CloudKVStore {
@@ -212,7 +212,7 @@ class SwitchableCloudKVStore implements CloudKVStore {
 
   /// Releases the underlying event subscription and closes the forwarded
   /// stream — call once when the owner (normally a single app-lifetime
-  /// [AppCubit]) is done with this store, so no native event channel
+  /// [SyncCubit]) is done with this store, so no native event channel
   /// listener outlives it.
   Future<void> dispose() async {
     await _icloudSubscription?.cancel();

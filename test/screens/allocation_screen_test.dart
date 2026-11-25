@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
 import '../helpers/money_provider.dart';
-import 'package:qima/blocs/app_cubit.dart';
+import 'package:qima/blocs/app_blocs.dart';
+import '../helpers/app_blocs.dart';
 import 'package:qima/l10n/app_localizations.dart';
 import 'package:qima/l10n/app_localizations_ar.dart';
 import 'package:qima/l10n/app_localizations_en.dart';
@@ -48,21 +49,21 @@ void main() {
         quotes: [for (final (t, p) in points) Quote(instrumentID: id, timestamp: t, canonicalUSD: p)],
       );
 
-  Future<AppCubit> cubitWith(List<HoldingLot> lots, Map<String, QuoteSeries> seriesByID, {bool hidden = false}) async {
-    final cubit = AppCubit();
-    cubit.preferences = await Preferences.create();
-    cubit.emit(cubit.state.copyWith(
+  Future<AppBlocs> cubitWith(List<HoldingLot> lots, Map<String, QuoteSeries> seriesByID, {bool hidden = false}) async {
+    final cubit = AppBlocs();
+    cubit.settings.preferences = await Preferences.create();
+    cubit.seed(
       initialized: true,
       lots: lots,
       seriesByID: seriesByID,
       rates: FXRates(base: 'USD', rates: const {'USD': 1}, updatedAt: DateTime(2026)),
       fxHistory: FXHistory.empty,
       hideBalances: hidden,
-    ));
+    );
     return cubit;
   }
 
-  Widget harness(AppCubit cubit, Widget home, {Locale locale = const Locale('en')}) => MultiBlocProvider(providers: [BlocProvider<AppCubit>.value(value: cubit), testMoneyProvider(cubit)],
+  Widget harness(AppBlocs cubit, Widget home, {Locale locale = const Locale('en')}) => MultiBlocProvider(providers: [...cubit.providers, testMoneyProvider(cubit)],
         child: MaterialApp(
           locale: locale,
           localizationsDelegates: AppLocalizations.localizationsDelegates,

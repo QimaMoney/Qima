@@ -32,6 +32,9 @@ class FakeCloud {
   PlatformException? failure;
   bool signedIn = true;
 
+  /// What `account` answers: the record name of the signed-in user.
+  String? accountName = 'user-one';
+
   /// The calls that came in, as `method` or `method kind`.
   final List<String> calls = [];
 
@@ -44,6 +47,8 @@ class FakeCloud {
     if (call.method == 'available') return signedIn;
     if (failure != null) throw failure!;
     switch (call.method) {
+      case 'account':
+        return accountName;
       case 'store':
         return records[arguments['kind']]!.putIfAbsent(arguments['name']! as String, () => arguments['body']! as String) == arguments['body'];
       case 'read':
@@ -232,6 +237,7 @@ void main() {
         'read': () => remote.read(_a1),
         'readSnapshot': () => remote.readSnapshot(_snapshot),
         'list': () => remote.list(after: const {}),
+        'account': () => remote.account(),
         'discard by places': () => remote.discard(batchesThrough: const {'aa': 3}, snapshots: const []),
         'discard by name': () => remote.discard(batchesThrough: const {}, snapshots: const [_snapshot]),
       };
@@ -248,6 +254,17 @@ void main() {
       cloud.failure = null;
       expect(names('batch'), ['aa.w.0.3.1.1'], reason: 'a discard whose listing failed removed nothing');
       expect(await remote.read(_a1), 'one');
+    });
+
+    test('the account is the name the plugin gives, which differs between accounts, and no name is a failure', () async {
+      expect(await remote.account(), 'user-one');
+      cloud.accountName = 'user-two';
+      expect(await remote.account(), 'user-two');
+      expect(cloud.calls, ['account', 'account']);
+      for (final none in [null, '']) {
+        cloud.accountName = none;
+        await expectLater(() => remote.account(), throwsA(isA<CloudSyncException>().having((e) => e.failure, 'failure', CloudSyncFailure.other)));
+      }
     });
 
     test('how long iCloud asked to be left alone is passed on', () async {
@@ -272,6 +289,7 @@ void main() {
       await expectLater(() => remote.read(_a1), unsupported);
       await expectLater(() => remote.readSnapshot(_snapshot), unsupported);
       await expectLater(() => remote.list(after: const {}), unsupported);
+      await expectLater(() => remote.account(), unsupported);
       await expectLater(() => remote.discard(batchesThrough: const {'aa': 3}, snapshots: const [_snapshot]), unsupported);
 
       // It is not asked again: a plugin does not appear while the app runs.
