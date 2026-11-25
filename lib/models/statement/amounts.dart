@@ -101,7 +101,7 @@ mixin _Amounts on _ReaderCore {
       } else if (m[2] == '+' || m[4] == '+' || marker == '+' || marker == 'cr' || marker == 'دائن') {
         sign = 1;
       }
-      out.add(_Found(_Money(value, sign, ccy, bare: bare), _Span(m.start, m.end), 0));
+      out.add(_Found(_Money(value, sign, ccy, bare: bare, whole: !hasDecimals), _Span(m.start, m.end), 0));
     }
     return out;
   }
