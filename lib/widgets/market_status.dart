@@ -13,11 +13,15 @@ class MarketStatusLine extends StatelessWidget {
   final Instrument instrument;
   final DateTime now;
 
-  const MarketStatusLine({super.key, required this.instrument, required this.now});
+  /// The exchange's own word on today's (or the next) regular session,
+  /// which knows its holidays; the built-in hours stand in without it.
+  final (DateTime, DateTime)? session;
+
+  const MarketStatusLine({super.key, required this.instrument, required this.now, this.session});
 
   @override
   Widget build(BuildContext context) {
-    final status = MarketHours.statusOf(instrument, now);
+    final status = statusFor(instrument, now, session);
     if (status == null || (status.open && status.next == null)) return const SizedBox.shrink();
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
@@ -35,6 +39,16 @@ class MarketStatusLine extends StatelessWidget {
         Expanded(child: Text(text, overflow: TextOverflow.ellipsis, style: TextStyle(color: colors.textTertiary, fontSize: 12))),
       ],
     );
+  }
+
+  /// The market's status at [now]: from [session] while it is current
+  /// (before its end), otherwise from the built-in hours.
+  static MarketStatus? statusFor(Instrument instrument, DateTime now, (DateTime, DateTime)? session) {
+    final fallback = MarketHours.statusOf(instrument, now);
+    if (fallback == null || session == null) return fallback;
+    final (start, end) = session;
+    if (!now.isBefore(end) || !start.isBefore(end)) return fallback;
+    return now.isBefore(start) ? MarketStatus(open: false, next: start) : MarketStatus(open: true, next: end);
   }
 
   /// "16:30" today, "Mon 16:30" this week, "Nov 16, 16:30" beyond.

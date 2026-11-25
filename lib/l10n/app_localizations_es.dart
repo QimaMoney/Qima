@@ -5495,4 +5495,96 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get chartLoadingOlder => 'Cargando precios anteriores';
+
+  @override
+  String get statPreviousClose => 'Cierre anterior';
+
+  @override
+  String get statDividendYield => 'Rentabilidad por dividendo';
+
+  @override
+  String get statYearRange => 'Rango de 52 semanas';
+
+  @override
+  String get statDayRange => 'Rango del día';
+
+  @override
+  String factsStale(String date) {
+    return 'Última operación: $date. Este precio puede estar desactualizado.';
+  }
+
+  @override
+  String splitRatio(String numerator, String denominator) {
+    return '$numerator por $denominator';
+  }
+
+  @override
+  String splitTitle(String ratio, String date) {
+    return 'División $ratio el $date';
+  }
+
+  @override
+  String get splitBody =>
+      'Tus operaciones anteriores están en las acciones antiguas, así que la cantidad y su coste medio no cuadran. ¿Las reexpresas en las acciones de hoy? El total de cada operación no cambia.';
+
+  @override
+  String get splitAdjust => 'Ajustar mis operaciones';
+
+  @override
+  String get splitAlreadyAdjusted => 'Ya están en acciones de hoy';
+
+  @override
+  String chartDividendMark(String amount) {
+    return 'Dividendo $amount';
+  }
+
+  @override
+  String get holdingsTotalReturn => 'Rentabilidad total';
+
+  @override
+  String get holdingsPerYear => 'Al año';
+
+  @override
+  String holdingsDividendsLine(String received, String yearly) {
+    return 'Dividendos: $received hasta ahora · unos $yearly al año';
+  }
+
+  @override
+  String get realisedByYear => 'Realizado por año';
+
+  @override
+  String netWorthThisMonth(String change, String saved, String other) {
+    return 'Este mes $change: ahorrado $saved, precios y otros $other';
+  }
+
+  @override
+  String get savingsRate => 'Tasa de ahorro';
+
+  @override
+  String savingsRateAverage(String percent, int months) {
+    return 'Media del $percent en $months meses';
+  }
+
+  @override
+  String get cashRunway => 'Autonomía del efectivo';
+
+  @override
+  String cashRunwayValue(String months) {
+    return 'Unos $months meses';
+  }
+
+  @override
+  String cashRunwaySubtitle(String amount) {
+    return 'A tu gasto habitual de $amount al mes';
+  }
+
+  @override
+  String categoryUsual(String amount) {
+    return 'Lo habitual $amount';
+  }
+
+  @override
+  String debtRatio(String percent) {
+    return 'Debes el $percent de lo que tienes';
+  }
 }

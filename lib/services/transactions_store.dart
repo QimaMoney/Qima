@@ -50,6 +50,9 @@ class TransactionsStore {
 
   Future<List<HoldingTransaction>> upsert(HoldingTransaction transaction) => _store.upsert(transaction);
 
+  /// Saves several changed transactions as one write.
+  Future<List<HoldingTransaction>> upsertAll(List<HoldingTransaction> transactions) => _store.upsertAll(transactions);
+
   /// Deleting a migrated buy also deletes its source lot, so the migration
   /// can never bring it back (and a device still on 2.x stops showing it).
   Future<List<HoldingTransaction>> delete(String id) async {

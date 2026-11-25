@@ -31,7 +31,7 @@ const double maxChartZoom = 8;
 
 /// What a mark on the chart stands for: the person's own buy, sell, or any
 /// other change to the holding.
-enum ChartMarkKind { buy, sell, other }
+enum ChartMarkKind { buy, sell, dividend, other }
 
 /// Something the person did on a date, pinned to the price at that date.
 class ChartMark {
@@ -535,6 +535,7 @@ class _Scene {
       textSecondary: colors.textSecondary,
       up: colors.up,
       down: colors.down,
+      dividend: colors.accentGold,
       ring: colors.surfaceTop,
       lineWidth: widget.lineWidth,
       textDirection: Directionality.of(context),
@@ -706,6 +707,7 @@ class _PriceChartPainter extends CustomPainter {
   final Color textSecondary;
   final Color up;
   final Color down;
+  final Color dividend;
   final Color ring;
   final double lineWidth;
   final TextDirection textDirection;
@@ -726,6 +728,7 @@ class _PriceChartPainter extends CustomPainter {
     required this.textSecondary,
     required this.up,
     required this.down,
+    required this.dividend,
     required this.ring,
     required this.lineWidth,
     required this.textDirection,
@@ -790,6 +793,7 @@ class _PriceChartPainter extends CustomPainter {
       final fill = switch (kind) {
         ChartMarkKind.buy => up,
         ChartMarkKind.sell => down,
+        ChartMarkKind.dividend => dividend,
         ChartMarkKind.other => textSecondary,
       };
       canvas.drawCircle(center, 5, Paint()..color = ring);

@@ -12,6 +12,7 @@ import '../models/custom_instrument.dart';
 import '../models/fx_history.dart';
 import '../models/holding.dart';
 import '../models/holding_transaction.dart';
+import '../models/instrument_facts.dart';
 import '../models/ledger.dart';
 import '../models/holding_totals.dart';
 import '../models/instrument_catalog.dart';
@@ -228,6 +229,8 @@ class AppCubit extends Cubit<AppState> {
     final lockGrace = preferences.lockGrace;
     final deliverAlertsOnThisDevice = preferences.deliverAlertsOnThisDevice;
     final zakatSettings = await preferences.zakatSettings;
+    final handledSplits = await preferences.handledSplits;
+    final factsByID = await repository.cachedFacts();
 
     final seedCards = await preferences.seedWatchcards();
     final cards = await _loadCardsSeeding(watchlistStore, seedCards);
@@ -321,6 +324,8 @@ class AppCubit extends Cubit<AppState> {
       setup: preferences.setupAnswers,
       getStartedDismissed: preferences.getStartedDismissed,
       zakatSettings: zakatSettings,
+      factsByID: factsByID,
+      handledSplits: handledSplits,
     ));
 
     startSync();
@@ -501,6 +506,7 @@ class AppCubit extends Cubit<AppState> {
       'custominstruments.records': () => _reloadCustomInstruments(),
       'alerts.records': () => _reloadAlerts(),
       'zakatSettings': () => _reloadZakatSettings(),
+      'handledSplits': () => _reloadHandledSplits(),
       for (final key in BookStore.cloudKeys) key: () async => onBookChanged?.call(key),
     };
 
@@ -629,6 +635,11 @@ class AppCubit extends Cubit<AppState> {
   Future<void> _reloadZakatSettings() async {
     final settings = await preferences.zakatSettings;
     if (!isClosed && settings != state.zakatSettings) emit(state.copyWith(zakatSettings: settings));
+  }
+
+  Future<void> _reloadHandledSplits() async {
+    final handled = await preferences.handledSplits;
+    if (!isClosed && !setEquals(handled, state.handledSplits)) emit(state.copyWith(handledSplits: handled));
   }
 
   /// Runs a full first-enable/merge pass across every synced store — each
@@ -761,7 +772,25 @@ class AppCubit extends Cubit<AppState> {
     }
     // Fire-and-forget: history is larger and shouldn't block live prices.
     unawaited(backfillHistoryIfNeeded());
+    unawaited(refreshFacts());
     unawaited(_notifyZakatIfDue());
+  }
+
+  bool _refreshingFacts = false;
+
+  /// Refreshes the exchange's facts for tracked stocks and indices, on the
+  /// repository's own cadence. Never fails loudly: facts are extra.
+  Future<void> refreshFacts() async {
+    if (_refreshingFacts) return;
+    _refreshingFacts = true;
+    try {
+      final next = await repository.refreshFacts(trackedInstruments, state.factsByID);
+      if (!isClosed && !mapEquals(next, state.factsByID)) emit(state.copyWith(factsByID: next));
+    } catch (e, st) {
+      debugPrint('AppCubit: refreshFacts failed: $e\n$st');
+    } finally {
+      _refreshingFacts = false;
+    }
   }
 
   /// The foreground half of the hawl reminder; the background task runs the
@@ -863,6 +892,8 @@ class AppCubit extends Cubit<AppState> {
       debugPrint('AppCubit: refresh(${instrument.id}) failed: $e\n$st');
       emit(state.copyWith(phase: RefreshPhase.failed, errorMessage: _refreshFailedKey));
     }
+    // A newly added stock gets its facts now, not at the next full refresh.
+    unawaited(refreshFacts());
   }
 
   // ---------------------------------------------------------------------
@@ -1203,6 +1234,27 @@ class AppCubit extends Cubit<AppState> {
     return any ? total.inCurrency(state.baseCurrency, state.rates) : null;
   }
 
+  /// Realised gains and losses for each calendar year, newest first: each
+  /// sale's result in the year it was sold, and each standalone fee in the
+  /// year it was charged.
+  List<(int, Money)> get realisedByYear {
+    final byYear = <int, CurrencyAmounts>{};
+    for (final t in state.transactions) {
+      final CurrencyAmounts amount;
+      if (t.kind == TransactionKind.fee) {
+        amount = CurrencyAmounts({t.currency: -t.fee});
+      } else {
+        final effect = state.ledger[t.instrumentID]?.disposals[t.id];
+        if (effect == null || effect.realised.isZero) continue;
+        amount = effect.realised;
+      }
+      final year = t.date.toLocal().year;
+      byYear[year] = (byYear[year] ?? CurrencyAmounts.zero).add(amount);
+    }
+    final years = byYear.keys.toList()..sort((a, b) => b.compareTo(a));
+    return [for (final y in years) (y, byYear[y]!.inCurrency(state.baseCurrency, state.rates))];
+  }
+
   /// Instruments with transactions but nothing left held — sold or moved
   /// out entirely — with what they realised, largest result first.
   List<({Instrument instrument, Money realised})> get closedPositions {
@@ -1319,6 +1371,46 @@ class AppCubit extends Cubit<AppState> {
     emit(state.copyWith(transactions: transactions));
     unawaited(_markDataChanged());
     return null;
+  }
+
+  /// Splits of [instrument] the person hasn't answered yet that touch their
+  /// trades: some share-moving transaction is dated before the split day.
+  List<StockSplit> pendingSplitsFor(Instrument instrument) {
+    final splits = state.factsByID[instrument.id]?.splits ?? const <StockSplit>[];
+    if (splits.isEmpty) return const [];
+    final trades = state.transactions.where((t) => t.instrumentID == instrument.id && t.kind.movesQuantity);
+    return [
+      for (final split in splits)
+        if (!state.handledSplits.contains(split.keyFor(instrument.id)) && trades.any((t) => t.date.isBefore(split.date)))
+          split,
+    ];
+  }
+
+  /// Restates every share-moving trade of [instrument] before [split] in
+  /// today's shares: quantity times the ratio, price per share divided by
+  /// it, so each trade's total stays the same. One write, then the split
+  /// is marked answered.
+  Future<void> applySplit(Instrument instrument, StockSplit split) async {
+    final changed = [
+      for (final t in state.transactions)
+        if (t.instrumentID == instrument.id && t.kind.movesQuantity && t.date.isBefore(split.date))
+          t.copyWith(quantity: t.quantity * split.ratio, unitPrice: t.unitPrice / split.ratio),
+    ];
+    if (changed.isNotEmpty) {
+      final transactions = await transactionsStore.upsertAll(changed);
+      emit(state.copyWith(transactions: transactions));
+      unawaited(_markDataChanged());
+    }
+    await _markSplitHandled(instrument, split);
+  }
+
+  /// The person's trades were already in today's shares; leaves them.
+  Future<void> keepSplit(Instrument instrument, StockSplit split) => _markSplitHandled(instrument, split);
+
+  Future<void> _markSplitHandled(Instrument instrument, StockSplit split) async {
+    final handled = {...state.handledSplits, split.keyFor(instrument.id)};
+    emit(state.copyWith(handledSplits: handled));
+    await preferences.setHandledSplits(handled);
   }
 
   // ---------------------------------------------------------------------
@@ -1465,6 +1557,7 @@ class AppCubit extends Cubit<AppState> {
     final preferredChartRange = preferences.preferredChartRange;
     final widgetRefreshInterval = await preferences.widgetRefreshInterval;
     final zakatSettings = await preferences.zakatSettings;
+    final handledSplits = await preferences.handledSplits;
 
     final seriesByID = <String, QuoteSeries>{...state.seriesByID};
     for (final instrument in _trackedInstrumentsFor(cards, transactions)) {
@@ -1482,6 +1575,7 @@ class AppCubit extends Cubit<AppState> {
       preferredChartRange: preferredChartRange,
       widgetRefreshInterval: widgetRefreshInterval,
       zakatSettings: zakatSettings,
+      handledSplits: handledSplits,
       seriesByID: seriesByID,
     ));
 

@@ -7,8 +7,10 @@ import '../../blocs/app_state.dart';
 import '../../blocs/money_cubit.dart';
 import '../../l10n/app_localizations.dart';
 import '../../models/book_account.dart';
+import '../../models/book_figures.dart';
 import '../../models/money_analysis.dart';
 import '../../models/money_settings.dart';
+import '../../models/net_worth.dart';
 import '../../theme/design_system.dart';
 import '../../theme/money_labels.dart';
 import '../../theme/qima_colors.dart';
@@ -128,7 +130,8 @@ class _MoneyScreenState extends State<MoneyScreen> {
           }
         }
 
-        // Where it went.
+        // Where it went, each against its usual month when it has no budget.
+        final usual = BookFigures.usualByCategory(book, _month, currency: ccy, rates: app.rates);
         sections.add(MoneySection(
           title: l10n.whereItWent,
           children: a.byCategory.isEmpty
@@ -141,6 +144,7 @@ class _MoneyScreenState extends State<MoneyScreen> {
                       amount: moneyText(v, ccy, hidden: hidden),
                       share: a.spent == 0 ? 0 : v / a.spent,
                       budget: a.budgets[id] == null ? null : moneyText(a.budgets[id]!, ccy, hidden: hidden),
+                      usual: a.budgets[id] != null || usual[id] == null ? null : moneyText(usual[id]!, ccy, hidden: hidden),
                       over: a.budgets[id] != null && v > a.budgets[id]!,
                       onTap: () => Navigator.of(context).push(MaterialPageRoute(
                         builder: (_) => AllTransactionsScreen(accountId: id, title: name(id), from: _month, to: a.end),
@@ -150,6 +154,12 @@ class _MoneyScreenState extends State<MoneyScreen> {
         ));
 
         // Cash flow. The guided tour's Money stop points here.
+        final flows = BookFigures.flows(book, _month, currency: ccy, rates: app.rates);
+        final savingRates = [for (final f in flows) ?f.savingsRate];
+        final usualSpending = isThisMonth ? BookFigures.usualSpending(book, _month, currency: ccy, rates: app.rates) : null;
+        final cash = NetWorthSummary.of(book: book, holdingsValue: 0, currency: ccy, rates: app.rates).group(SheetGroup.cash).amount;
+        final runway = BookFigures.runwayMonths(cash, usualSpending);
+        String percent(double v) => '\u2066${(v * 100).toStringAsFixed(0)}%\u2069';
         sections.add(MoneySection(
           key: TourTargets.money,
           title: l10n.cashFlow,
@@ -162,6 +172,23 @@ class _MoneyScreenState extends State<MoneyScreen> {
               trailing: moneyText(a.net.abs(), ccy, hidden: hidden),
               trailingColor: a.net >= 0 ? colors.up : colors.down,
             ),
+            if (MonthFlow(_month, a.income, a.spent).savingsRate case final rate?)
+              MoneyRow(
+                key: const ValueKey('savingsRate'),
+                icon: Icons.savings_outlined,
+                title: l10n.savingsRate,
+                subtitle: savingRates.length > 1 ? l10n.savingsRateAverage(percent(savingRates.reduce((x, y) => x + y) / savingRates.length), savingRates.length) : null,
+                trailing: percent(rate),
+                trailingColor: rate >= 0 ? colors.up : colors.down,
+              ),
+            if (runway != null)
+              MoneyRow(
+                key: const ValueKey('cashRunway'),
+                icon: Icons.hourglass_bottom,
+                title: l10n.cashRunway,
+                subtitle: l10n.cashRunwaySubtitle(moneyText(usualSpending!, ccy, hidden: hidden)),
+                trailing: l10n.cashRunwayValue(runway.toStringAsFixed(1)),
+              ),
           ],
         ));
 
@@ -336,10 +363,13 @@ class _CategoryBar extends StatelessWidget {
   final String amount;
   final double share;
   final String? budget;
+
+  /// Its average month before this one, when it has no budget.
+  final String? usual;
   final bool over;
   final VoidCallback onTap;
 
-  const _CategoryBar({required this.icon, required this.name, required this.amount, required this.share, required this.budget, required this.over, required this.onTap});
+  const _CategoryBar({required this.icon, required this.name, required this.amount, required this.share, required this.budget, this.usual, required this.over, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -363,6 +393,7 @@ class _CategoryBar extends StatelessWidget {
             const SizedBox(height: 4),
             LinearProgressIndicator(value: share.clamp(0.0, 1.0), minHeight: 4, borderRadius: BorderRadius.circular(2), color: over ? colors.down : colors.brand),
             if (budget != null) Text(l10n.budgetOf(budget!), style: TextStyle(color: colors.textTertiary, fontSize: 11)),
+            if (usual != null) Text(l10n.categoryUsual(usual!), style: TextStyle(color: colors.textTertiary, fontSize: 11)),
           ],
         ),
       ),

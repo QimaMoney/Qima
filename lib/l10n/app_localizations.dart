@@ -9274,6 +9274,144 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Loading older prices'**
   String get chartLoadingOlder;
+
+  /// Key stat: yesterday's closing price.
+  ///
+  /// In en, this message translates to:
+  /// **'Previous close'**
+  String get statPreviousClose;
+
+  /// Key stat: dividends over the past year against today's price.
+  ///
+  /// In en, this message translates to:
+  /// **'Dividend yield'**
+  String get statDividendYield;
+
+  /// Bar showing the lowest and highest price over 52 weeks.
+  ///
+  /// In en, this message translates to:
+  /// **'52-week range'**
+  String get statYearRange;
+
+  /// Bar showing today's lowest and highest price.
+  ///
+  /// In en, this message translates to:
+  /// **'Day range'**
+  String get statDayRange;
+
+  /// Warning under the price when the exchange hasn't traded it for over a week.
+  ///
+  /// In en, this message translates to:
+  /// **'Last traded {date}. This price may be out of date.'**
+  String factsStale(String date);
+
+  /// How a split reads, like 11-for-10.
+  ///
+  /// In en, this message translates to:
+  /// **'{numerator}-for-{denominator}'**
+  String splitRatio(String numerator, String denominator);
+
+  /// Notice title when a stock the person holds was split.
+  ///
+  /// In en, this message translates to:
+  /// **'{ratio} split on {date}'**
+  String splitTitle(String ratio, String date);
+
+  /// Notice body under the split title.
+  ///
+  /// In en, this message translates to:
+  /// **'Your trades before then are in the old shares, so the quantity held and its average cost are off. Restate them in today\'s shares? Each trade\'s total stays the same.'**
+  String get splitBody;
+
+  /// Button that restates trades before a split in today's shares.
+  ///
+  /// In en, this message translates to:
+  /// **'Adjust my trades'**
+  String get splitAdjust;
+
+  /// Button saying the trades already use today's shares.
+  ///
+  /// In en, this message translates to:
+  /// **'Already in today\'s shares'**
+  String get splitAlreadyAdjusted;
+
+  /// Chart mark label for a dividend paid on that day.
+  ///
+  /// In en, this message translates to:
+  /// **'Dividend {amount}'**
+  String chartDividendMark(String amount);
+
+  /// Holding stat: everything gained, with sales, dividends and fees.
+  ///
+  /// In en, this message translates to:
+  /// **'Total return'**
+  String get holdingsTotalReturn;
+
+  /// Holding stat: the total return as a yearly rate.
+  ///
+  /// In en, this message translates to:
+  /// **'Per year'**
+  String get holdingsPerYear;
+
+  /// Line on a holding: dividends received and the yearly estimate.
+  ///
+  /// In en, this message translates to:
+  /// **'Dividends: {received} so far · about {yearly} a year'**
+  String holdingsDividendsLine(String received, String yearly);
+
+  /// Section title: realised gains and losses for each year.
+  ///
+  /// In en, this message translates to:
+  /// **'Realised by year'**
+  String get realisedByYear;
+
+  /// Line on the net worth card: what changed net worth this month.
+  ///
+  /// In en, this message translates to:
+  /// **'This month {change}: saved {saved}, prices and other {other}'**
+  String netWorthThisMonth(String change, String saved, String other);
+
+  /// Row title: the share of income kept this month.
+  ///
+  /// In en, this message translates to:
+  /// **'Savings rate'**
+  String get savingsRate;
+
+  /// Subtitle under the savings rate.
+  ///
+  /// In en, this message translates to:
+  /// **'Average {percent} over {months} months'**
+  String savingsRateAverage(String percent, int months);
+
+  /// Row title: how long cash lasts at usual spending.
+  ///
+  /// In en, this message translates to:
+  /// **'Cash runway'**
+  String get cashRunway;
+
+  /// Cash runway figure in months.
+  ///
+  /// In en, this message translates to:
+  /// **'About {months} months'**
+  String cashRunwayValue(String months);
+
+  /// Subtitle under cash runway.
+  ///
+  /// In en, this message translates to:
+  /// **'At your usual {amount} a month'**
+  String cashRunwaySubtitle(String amount);
+
+  /// Under a category: its average over the previous three months.
+  ///
+  /// In en, this message translates to:
+  /// **'Usual {amount}'**
+  String categoryUsual(String amount);
+
+  /// Line on the balance sheet: what is owed against what is owned.
+  ///
+  /// In en, this message translates to:
+  /// **'You owe {percent} of what you own'**
+  String debtRatio(String percent);
 }
 
 class _AppLocalizationsDelegate

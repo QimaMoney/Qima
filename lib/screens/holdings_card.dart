@@ -5,8 +5,12 @@ import '../blocs/app_cubit.dart';
 import '../blocs/app_state.dart';
 import '../l10n/app_localizations.dart';
 import '../models/asset.dart';
+import '../models/holding_return.dart';
 import '../models/holding_totals.dart';
+import '../models/instrument_facts.dart';
 import '../models/metal_breakdown.dart';
+import '../models/money.dart';
+import '../services/quote_provider.dart';
 import '../theme/design_system.dart';
 import '../theme/masking.dart';
 import '../theme/qima_colors.dart';
@@ -30,12 +34,17 @@ class HoldingsCard extends StatelessWidget {
   final PriceUnit? refUnit;
   final GoldKarat? refKarat;
 
+  /// The exchange's facts for a stock, for its dividends. Null while a split
+  /// is unanswered: the trades and the per-share dividends wouldn't agree.
+  final InstrumentFacts? facts;
+
   const HoldingsCard({
     super.key,
     required this.instrument,
     required this.displayCurrency,
     this.refUnit,
     this.refKarat,
+    this.facts,
   });
 
   @override
@@ -64,6 +73,24 @@ class HoldingsCard extends StatelessWidget {
           displayCurrency: displayCurrency,
           rates: state.rates,
         );
+        final now = DateTime.now();
+        double toDisplay(double amount, String currency) =>
+            usdFromPrice(amount, currency, state.rates) * (state.rates.rate(displayCurrency) ?? 1);
+        final facts = this.facts;
+        final result = position == null
+            ? null
+            : HoldingReturn.of(
+                transactions: cubit.transactionsFor(instrument),
+                position: position,
+                dividends: facts?.dividends ?? const [],
+                dividendCurrency: facts?.currency ?? displayCurrency,
+                value: valuation?.value.amount ?? 0,
+                now: now,
+                toDisplay: toDisplay,
+              );
+        final yearlyDividends = facts == null || position == null
+            ? 0.0
+            : toDisplay(position.fineOunces * facts.trailingDividends(now), facts.currency);
         return DSCard(
           child: InkWell(
             borderRadius: BorderRadius.circular(DS.radiusCard),
@@ -140,6 +167,44 @@ class HoldingsCard extends StatelessWidget {
                       ),
                     ],
                   ),
+                  if (result != null) ...[
+                    const SizedBox(height: DS.spaceSM),
+                    Row(
+                      key: const ValueKey('holdingReturn'),
+                      children: [
+                        Expanded(
+                          flex: 2,
+                          child: StatPill(
+                            title: l10n.holdingsTotalReturn,
+                            value: '${Masking.signedAmount(Money(result.total, displayCurrency), hidden: hidden, isUp: result.total >= 0)}'
+                                ' · ${signedFigure('${(result.fraction * 100).toStringAsFixed(1)}%', isUp: result.total >= 0)}',
+                            tint: QimaColors.trendColor(result.total >= 0, colors),
+                          ),
+                        ),
+                        const SizedBox(width: DS.spaceMD),
+                        Expanded(
+                          child: StatPill(
+                            title: l10n.holdingsPerYear,
+                            value: result.yearly == null
+                                ? '—'
+                                : signedFigure('${(result.yearly! * 100).toStringAsFixed(1)}%', isUp: result.yearly! >= 0),
+                            tint: result.yearly == null ? null : QimaColors.trendColor(result.yearly! >= 0, colors),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                  if (result != null && (result.dividends > 0 || yearlyDividends > 0)) ...[
+                    const SizedBox(height: DS.spaceXS),
+                    Text(
+                      l10n.holdingsDividendsLine(
+                        Masking.amount(Money(result.dividends, displayCurrency), hidden: hidden),
+                        Masking.amount(Money(yearlyDividends, displayCurrency), hidden: hidden),
+                      ),
+                      key: const ValueKey('holdingDividends'),
+                      style: TextStyle(color: colors.textTertiary, fontSize: 12),
+                    ),
+                  ],
                 ],
               ],
             ),

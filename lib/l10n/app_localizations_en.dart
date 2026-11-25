@@ -5453,4 +5453,96 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get chartLoadingOlder => 'Loading older prices';
+
+  @override
+  String get statPreviousClose => 'Previous close';
+
+  @override
+  String get statDividendYield => 'Dividend yield';
+
+  @override
+  String get statYearRange => '52-week range';
+
+  @override
+  String get statDayRange => 'Day range';
+
+  @override
+  String factsStale(String date) {
+    return 'Last traded $date. This price may be out of date.';
+  }
+
+  @override
+  String splitRatio(String numerator, String denominator) {
+    return '$numerator-for-$denominator';
+  }
+
+  @override
+  String splitTitle(String ratio, String date) {
+    return '$ratio split on $date';
+  }
+
+  @override
+  String get splitBody =>
+      'Your trades before then are in the old shares, so the quantity held and its average cost are off. Restate them in today\'s shares? Each trade\'s total stays the same.';
+
+  @override
+  String get splitAdjust => 'Adjust my trades';
+
+  @override
+  String get splitAlreadyAdjusted => 'Already in today\'s shares';
+
+  @override
+  String chartDividendMark(String amount) {
+    return 'Dividend $amount';
+  }
+
+  @override
+  String get holdingsTotalReturn => 'Total return';
+
+  @override
+  String get holdingsPerYear => 'Per year';
+
+  @override
+  String holdingsDividendsLine(String received, String yearly) {
+    return 'Dividends: $received so far · about $yearly a year';
+  }
+
+  @override
+  String get realisedByYear => 'Realised by year';
+
+  @override
+  String netWorthThisMonth(String change, String saved, String other) {
+    return 'This month $change: saved $saved, prices and other $other';
+  }
+
+  @override
+  String get savingsRate => 'Savings rate';
+
+  @override
+  String savingsRateAverage(String percent, int months) {
+    return 'Average $percent over $months months';
+  }
+
+  @override
+  String get cashRunway => 'Cash runway';
+
+  @override
+  String cashRunwayValue(String months) {
+    return 'About $months months';
+  }
+
+  @override
+  String cashRunwaySubtitle(String amount) {
+    return 'At your usual $amount a month';
+  }
+
+  @override
+  String categoryUsual(String amount) {
+    return 'Usual $amount';
+  }
+
+  @override
+  String debtRatio(String percent) {
+    return 'You owe $percent of what you own';
+  }
 }

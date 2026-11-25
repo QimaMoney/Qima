@@ -156,6 +156,7 @@ class Preferences {
   static const String _setupAnswersKey = 'setupAnswers';
   static const String _getStartedDismissedKey = 'getStartedDismissed';
   static const String _zakatSettingsKey = 'zakatSettings';
+  static const String _handledSplitsKey = 'handledSplits';
   static const String _zakatReminderNotifiedForKey = 'zakatReminderNotifiedFor';
   static const String _legacyWatchcardsKey = 'pref.watchcards';
   static const String _legacyWatchlistKey = 'pref.watchlist';
@@ -239,6 +240,30 @@ class Preferences {
       // Corrupt value: fall through to defaults rather than failing init.
     }
     return const ZakatSettings();
+  }
+
+  /// Synced: the splits the person has answered (adjusted their trades, or
+  /// said they were already in today's shares), by `StockSplit.keyFor`, so the
+  /// notice never comes back on another device.
+  Future<Set<String>> get handledSplits async {
+    final cloudValue = await cloud.getString(_handledSplitsKey);
+    if (cloudValue != null) await local.setString(_handledSplitsKey, cloudValue);
+    final raw = cloudValue ?? local.getString(_handledSplitsKey);
+    if (raw == null) return const {};
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is List) return {for (final k in decoded) if (k is String) k};
+    } on FormatException {
+      // Corrupt value: the notices come back, nothing is lost.
+    }
+    return const {};
+  }
+
+  Future<void> setHandledSplits(Set<String> value) async {
+    final encoded = jsonEncode(value.toList()..sort());
+    await local.setString(_handledSplitsKey, encoded);
+    await cloud.setString(_handledSplitsKey, encoded);
+    await cloud.synchronize();
   }
 
   /// Local-only: the hawl completion day this device last posted the zakat

@@ -5476,4 +5476,96 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get chartLoadingOlder => 'جارٍ تحميل الأسعار الأقدم';
+
+  @override
+  String get statPreviousClose => 'الإغلاق السابق';
+
+  @override
+  String get statDividendYield => 'عائد التوزيعات';
+
+  @override
+  String get statYearRange => 'نطاق 52 أسبوعًا';
+
+  @override
+  String get statDayRange => 'نطاق اليوم';
+
+  @override
+  String factsStale(String date) {
+    return 'آخر تداول $date. قد لا يكون هذا السعر حديثًا.';
+  }
+
+  @override
+  String splitRatio(String numerator, String denominator) {
+    return '$numerator مقابل $denominator';
+  }
+
+  @override
+  String splitTitle(String ratio, String date) {
+    return 'تجزئة $ratio في $date';
+  }
+
+  @override
+  String get splitBody =>
+      'صفقاتك قبل ذلك بالأسهم القديمة، لذا الكمية المملوكة ومتوسط تكلفتها غير دقيقين. هل تعيد كتابتها بأسهم اليوم؟ يبقى إجمالي كل صفقة كما هو.';
+
+  @override
+  String get splitAdjust => 'عدّل صفقاتي';
+
+  @override
+  String get splitAlreadyAdjusted => 'مسجلة بأسهم اليوم';
+
+  @override
+  String chartDividendMark(String amount) {
+    return 'توزيعات $amount';
+  }
+
+  @override
+  String get holdingsTotalReturn => 'العائد الكلي';
+
+  @override
+  String get holdingsPerYear => 'سنويًا';
+
+  @override
+  String holdingsDividendsLine(String received, String yearly) {
+    return 'التوزيعات: $received حتى الآن · نحو $yearly سنويًا';
+  }
+
+  @override
+  String get realisedByYear => 'المحقق حسب السنة';
+
+  @override
+  String netWorthThisMonth(String change, String saved, String other) {
+    return 'هذا الشهر $change: ادخار $saved، أسعار وغيرها $other';
+  }
+
+  @override
+  String get savingsRate => 'نسبة الادخار';
+
+  @override
+  String savingsRateAverage(String percent, int months) {
+    return 'المتوسط $percent خلال $months أشهر';
+  }
+
+  @override
+  String get cashRunway => 'مدة كفاية النقد';
+
+  @override
+  String cashRunwayValue(String months) {
+    return 'نحو $months أشهر';
+  }
+
+  @override
+  String cashRunwaySubtitle(String amount) {
+    return 'بإنفاقك المعتاد $amount شهريًا';
+  }
+
+  @override
+  String categoryUsual(String amount) {
+    return 'المعتاد $amount';
+  }
+
+  @override
+  String debtRatio(String percent) {
+    return 'عليك $percent مما تملك';
+  }
 }

@@ -81,6 +81,7 @@ class PortfolioDetailScreen extends StatelessWidget {
             final sliceByID = {for (final s in slices) s.holding.id: s};
             final realised = cubit.portfolioRealised;
             final closed = cubit.closedPositions;
+            final byYear = cubit.realisedByYear;
 
             void openHolding(Instrument instrument) {
               final card = cubit.firstCard(instrument);
@@ -221,6 +222,31 @@ class PortfolioDetailScreen extends StatelessWidget {
                               ),
                             ),
                             onTap: () => openHolding(c.instrument),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+                if (byYear.isNotEmpty) ...[
+                  const SizedBox(height: DS.spaceSM),
+                  SectionHeader(l10n.realisedByYear),
+                  DSCard(
+                    key: const ValueKey('realisedByYear'),
+                    padding: const EdgeInsets.symmetric(horizontal: DS.spaceMD, vertical: DS.spaceSM),
+                    child: Column(
+                      children: [
+                        for (final (year, amount) in byYear)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: DS.spaceXS),
+                            child: Row(
+                              children: [
+                                Expanded(child: Text('$year', style: TextStyle(color: colors.textPrimary))),
+                                Text(
+                                  Masking.signedAmount(amount, hidden: hidden, isUp: amount.amount >= 0),
+                                  style: TextStyle(color: QimaColors.trendColor(amount.amount >= 0, colors), fontWeight: FontWeight.w700),
+                                ),
+                              ],
+                            ),
                           ),
                       ],
                     ),

@@ -10,6 +10,7 @@ import '../models/chart_range.dart';
 import '../models/display_point.dart';
 import '../models/holding_transaction.dart';
 import '../models/instrument_catalog.dart';
+import '../models/instrument_facts.dart';
 import '../models/instrument_presentation.dart';
 import '../models/market_hours.dart';
 import '../models/watch_card.dart';
@@ -21,6 +22,7 @@ import '../theme/qima_colors.dart';
 import '../theme/strings.dart';
 import '../widgets/alerts_card.dart';
 import '../widgets/help_button.dart';
+import '../widgets/instrument_facts_widgets.dart';
 import '../widgets/instrument_icon.dart';
 import '../widgets/key_stats_grid.dart';
 import '../widgets/market_status.dart';
@@ -154,10 +156,19 @@ class _InstrumentDetailScreenState extends State<InstrumentDetailScreen> {
     _ensureCompareHistory();
   }
 
-  /// The person's own transactions on this instrument, for the chart.
-  List<ChartMark> _marks(BuildContext context, AppCubit cubit, Instrument instrument) {
+  /// The person's own transactions on this instrument, and the dividends
+  /// it paid, for the chart.
+  List<ChartMark> _marks(BuildContext context, AppCubit cubit, InstrumentPresentation presentation, InstrumentFacts? facts) {
     final l10n = AppLocalizations.of(context)!;
+    final instrument = presentation.instrument;
     return [
+      if (facts != null)
+        for (final d in facts.dividends)
+          ChartMark(
+            date: d.date,
+            kind: ChartMarkKind.dividend,
+            label: l10n.chartDividendMark(presentation.exchangeMoney(d.amount, facts.currency).formatted()),
+          ),
       for (final t in cubit.transactionsFor(instrument))
         ChartMark(
           date: t.date,
@@ -184,7 +195,11 @@ class _InstrumentDetailScreenState extends State<InstrumentDetailScreen> {
         final presentation = cubit.presentation(_card);
         final instrument = presentation.instrument;
         final now = DateTime.now();
-        final windowChange = presentation.change(_range, now);
+        final facts = state.factsByID[instrument.id];
+        // A day's change is against the previous close, as exchanges quote it.
+        final windowChange = (_range == ChartRange.day1 ? presentation.dayChange(facts, now) : null) ??
+            presentation.change(_range, now);
+        final pendingSplits = cubit.pendingSplitsFor(instrument);
         final accent = InstrumentTheme.accentColor(instrument, colors);
         final lastQuoteTime = presentation.series.latest?.timestamp.toLocal();
         if (_compare != null && !state.isLoadingHistory) {
@@ -269,10 +284,23 @@ class _InstrumentDetailScreenState extends State<InstrumentDetailScreen> {
                       InstrumentIcon(instrument: instrument, size: 40),
                       const SizedBox(width: DS.spaceSM),
                       Expanded(
-                        child: Text(
-                          '${presentation.symbol} · ${presentation.displayCurrency}'
-                          '${presentation.unitSuffix != null ? ' / ${displayLabel(context, presentation.unitSuffix!)}' : ''}',
-                          style: TextStyle(color: colors.textTertiary, fontSize: 13),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (facts?.name case final name?)
+                              Text(
+                                name,
+                                key: const ValueKey('fullName'),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(color: colors.textSecondary, fontSize: 14, fontWeight: FontWeight.w600),
+                              ),
+                            Text(
+                              '${presentation.symbol} · ${presentation.displayCurrency}'
+                              '${presentation.unitSuffix != null ? ' / ${displayLabel(context, presentation.unitSuffix!)}' : ''}',
+                              style: TextStyle(color: colors.textTertiary, fontSize: 13),
+                            ),
+                          ],
                         ),
                       ),
                     ],
@@ -316,7 +344,25 @@ class _InstrumentDetailScreenState extends State<InstrumentDetailScreen> {
                     ],
                   ),
                   const SizedBox(height: DS.spaceXS),
-                  MarketStatusLine(instrument: instrument, now: now),
+                  MarketStatusLine(
+                    instrument: instrument,
+                    now: now,
+                    session: facts?.sessionStart != null && facts?.sessionEnd != null
+                        ? (facts!.sessionStart!, facts.sessionEnd!)
+                        : null,
+                  ),
+                  if (facts != null && facts.isStale(now)) ...[
+                    const SizedBox(height: DS.spaceXS),
+                    StaleQuoteLine(lastTraded: facts.lastTraded!),
+                  ],
+                  if (pendingSplits.isNotEmpty) ...[
+                    const SizedBox(height: DS.spaceMD),
+                    SplitNoticeCard(
+                      split: pendingSplits.first,
+                      onAdjust: () => cubit.applySplit(instrument, pendingSplits.first),
+                      onKeep: () => cubit.keepSplit(instrument, pendingSplits.first),
+                    ),
+                  ],
                   const SizedBox(height: DS.spaceMD),
                   AlertsCard(card: _card),
                   const SizedBox(height: DS.spaceMD),
@@ -341,11 +387,7 @@ class _InstrumentDetailScreenState extends State<InstrumentDetailScreen> {
                       onClose: () => _setCompare(null),
                     ),
                   const SizedBox(height: DS.spaceMD),
-                  KeyStatsGrid(
-                    windowed: _range.filter(presentation.points, now),
-                    changePercent: windowChange?.percentValue,
-                    changeIsUp: windowChange?.isUp,
-                  ),
+                  _keyStats(presentation, facts, windowChange, now),
                   if (instrument.assetClass == AssetClass.metal) ...[
                     const SizedBox(height: DS.spaceMD),
                     UnitPriceCarousel(rows: presentation.metalBreakdown),
@@ -353,6 +395,7 @@ class _InstrumentDetailScreenState extends State<InstrumentDetailScreen> {
                   const SizedBox(height: DS.spaceMD),
                   HoldingsCard(
                     instrument: instrument,
+                    facts: pendingSplits.isEmpty ? facts : null,
                     displayCurrency: _card.currency,
                     refUnit: _card.unit,
                     refKarat: _card.karat,
@@ -372,6 +415,32 @@ class _InstrumentDetailScreenState extends State<InstrumentDetailScreen> {
           ),
         );
       },
+    );
+  }
+
+  /// Key stats for [_range], with the exchange's figures when there are
+  /// any: the previous close, yield and the day's and year's ranges, all in
+  /// the card's currency and unit.
+  Widget _keyStats(InstrumentPresentation presentation, InstrumentFacts? facts, RangeChange? windowChange, DateTime now) {
+    final current = presentation.latestMoney?.amount;
+    final fresh = facts != null && !facts.isStale(now);
+    double? display(double? v) => v == null || facts == null ? null : presentation.exchangeMoney(v, facts.currency).amount;
+    PriceSpan? span(double? low, double? high) =>
+        low == null || high == null || current == null || high < low ? null : PriceSpan(low: low, high: high, current: current);
+    final yearFromHistory = facts == null ? presentation.yearRangeFromHistory(now) : null;
+    return KeyStatsGrid(
+      windowed: _range.filter(presentation.points, now),
+      changePercent: windowChange?.percentValue,
+      changeIsUp: windowChange?.isUp,
+      currencyCode: presentation.displayCurrency,
+      previousClose: fresh ? display(facts.previousClose) : null,
+      dividendYield: facts?.yieldOn(now),
+      daySpan: fresh ? span(display(facts.dayLow), display(facts.dayHigh)) : null,
+      yearSpan: facts != null
+          ? span(display(facts.yearLow), display(facts.yearHigh))
+          : yearFromHistory == null
+              ? null
+              : span(yearFromHistory.$1, yearFromHistory.$2),
     );
   }
 
@@ -422,7 +491,7 @@ class _InstrumentDetailScreenState extends State<InstrumentDetailScreen> {
       isInteractive: true,
       currencyCode: presentation.displayCurrency,
       market: MarketHours.marketOf(presentation.instrument),
-      marks: _marks(context, cubit, presentation.instrument),
+      marks: _marks(context, cubit, presentation, state.factsByID[presentation.instrument.id]),
       compare: benchmark == null
           ? null
           : ChartCompare(label: displayLabel(context, benchmark.nameKey), points: _comparePoints(cubit, benchmark)),

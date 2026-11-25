@@ -3,6 +3,7 @@ import 'package:equatable/equatable.dart';
 import '../models/fx_history.dart';
 import '../models/holding.dart';
 import '../models/holding_transaction.dart';
+import '../models/instrument_facts.dart';
 import '../models/ledger.dart';
 import '../models/money.dart';
 import '../models/price_alert.dart';
@@ -144,6 +145,13 @@ class AppState extends Equatable {
   /// `Preferences.zakatSettings`.
   final ZakatSettings zakatSettings;
 
+  /// What the exchange says about each stock and index beyond its price,
+  /// by instrument id; see `PriceRepository.refreshFacts`.
+  final Map<String, InstrumentFacts> factsByID;
+
+  /// Splits the person has answered, by `StockSplit.keyFor`; synced.
+  final Set<String> handledSplits;
+
   AppState({
     this.initialized = false,
     Map<String, QuoteSeries>? seriesByID,
@@ -184,6 +192,8 @@ class AppState extends Equatable {
     this.getStartedDismissed = false,
     this.tourRequested = false,
     this.zakatSettings = const ZakatSettings(),
+    this.factsByID = const {},
+    this.handledSplits = const {},
   })  : seriesByID = seriesByID ?? const {},
         rates = rates ?? FXRates.usdIdentity,
         transactions = transactions ?? _buys(lots),
@@ -238,6 +248,8 @@ class AppState extends Equatable {
     bool? getStartedDismissed,
     bool? tourRequested,
     ZakatSettings? zakatSettings,
+    Map<String, InstrumentFacts>? factsByID,
+    Set<String>? handledSplits,
   }) {
     final nextTransactions = transactions ?? (lots == null ? null : _buys(lots));
     return AppState(
@@ -278,6 +290,8 @@ class AppState extends Equatable {
       getStartedDismissed: getStartedDismissed ?? this.getStartedDismissed,
       tourRequested: tourRequested ?? this.tourRequested,
       zakatSettings: zakatSettings ?? this.zakatSettings,
+      factsByID: factsByID ?? this.factsByID,
+      handledSplits: handledSplits ?? this.handledSplits,
     );
   }
 
@@ -319,5 +333,7 @@ class AppState extends Equatable {
         getStartedDismissed,
         tourRequested,
         zakatSettings,
+        factsByID,
+        handledSplits,
       ];
 }
