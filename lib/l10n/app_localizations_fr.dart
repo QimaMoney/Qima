@@ -5588,4 +5588,86 @@ class AppLocalizationsFr extends AppLocalizations {
   String debtRatio(String percent) {
     return 'Vous devez $percent de ce que vous possédez';
   }
+
+  @override
+  String get statOpen => 'Ouverture';
+
+  @override
+  String get statVolume => 'Volume';
+
+  @override
+  String get statAverageVolume => 'Volume moyen (3 mois)';
+
+  @override
+  String get statEarningsDate => 'Date des résultats';
+
+  @override
+  String statEarningsEstimated(String date) {
+    return '$date (estimée)';
+  }
+
+  @override
+  String get valuationTitle => 'Valorisation';
+
+  @override
+  String get statMarketCap => 'Capitalisation';
+
+  @override
+  String get statEnterpriseValue => 'Valeur d\'entreprise';
+
+  @override
+  String get statPeRatio => 'PER';
+
+  @override
+  String get statForwardPe => 'PER prévisionnel';
+
+  @override
+  String get statPegRatio => 'Ratio PEG';
+
+  @override
+  String get statPriceToSales => 'Cours/ventes';
+
+  @override
+  String get statPriceToBook => 'Cours/valeur comptable';
+
+  @override
+  String get statEvToEbitda => 'VE/EBITDA';
+
+  @override
+  String get statBeta => 'Bêta (5 ans, mensuel)';
+
+  @override
+  String get financialsTitle => 'Données financières';
+
+  @override
+  String financialsAsOf(String date) {
+    return 'Dernier rapport : $date';
+  }
+
+  @override
+  String get statRevenue => 'Chiffre d\'affaires (12 mois)';
+
+  @override
+  String get statNetIncome => 'Résultat net (12 mois)';
+
+  @override
+  String get statProfitMargin => 'Marge bénéficiaire';
+
+  @override
+  String get statEps => 'BPA (12 mois)';
+
+  @override
+  String get statReturnOnEquity => 'Rentabilité des capitaux propres';
+
+  @override
+  String get statReturnOnAssets => 'Rentabilité des actifs';
+
+  @override
+  String get statCash => 'Trésorerie';
+
+  @override
+  String get statDebtToEquity => 'Dette/capitaux propres';
+
+  @override
+  String get statFreeCashFlow => 'Flux de trésorerie disponible (12 mois)';
 }

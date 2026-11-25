@@ -9412,6 +9412,162 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'You owe {percent} of what you own'**
   String debtRatio(String percent);
+
+  /// Key stat: today's opening price.
+  ///
+  /// In en, this message translates to:
+  /// **'Open'**
+  String get statOpen;
+
+  /// Key stat: shares traded today.
+  ///
+  /// In en, this message translates to:
+  /// **'Volume'**
+  String get statVolume;
+
+  /// Key stat: average daily shares traded over three months.
+  ///
+  /// In en, this message translates to:
+  /// **'Avg. volume (3 mo)'**
+  String get statAverageVolume;
+
+  /// Key stat: when the company next reports results.
+  ///
+  /// In en, this message translates to:
+  /// **'Earnings date'**
+  String get statEarningsDate;
+
+  /// An earnings date the company hasn't confirmed.
+  ///
+  /// In en, this message translates to:
+  /// **'{date} (estimated)'**
+  String statEarningsEstimated(String date);
+
+  /// Card title: how the market values the company.
+  ///
+  /// In en, this message translates to:
+  /// **'Valuation'**
+  String get valuationTitle;
+
+  /// Valuation: the value of all the company's shares.
+  ///
+  /// In en, this message translates to:
+  /// **'Market cap'**
+  String get statMarketCap;
+
+  /// Valuation: market cap plus debt minus cash.
+  ///
+  /// In en, this message translates to:
+  /// **'Enterprise value'**
+  String get statEnterpriseValue;
+
+  /// Valuation: price over the past year's earnings per share.
+  ///
+  /// In en, this message translates to:
+  /// **'P/E'**
+  String get statPeRatio;
+
+  /// Valuation: price over next year's expected earnings per share.
+  ///
+  /// In en, this message translates to:
+  /// **'Forward P/E'**
+  String get statForwardPe;
+
+  /// Valuation: P/E against expected earnings growth.
+  ///
+  /// In en, this message translates to:
+  /// **'PEG ratio'**
+  String get statPegRatio;
+
+  /// Valuation: market cap over revenue.
+  ///
+  /// In en, this message translates to:
+  /// **'Price/sales'**
+  String get statPriceToSales;
+
+  /// Valuation: price over book value per share.
+  ///
+  /// In en, this message translates to:
+  /// **'Price/book'**
+  String get statPriceToBook;
+
+  /// Valuation: enterprise value over EBITDA.
+  ///
+  /// In en, this message translates to:
+  /// **'EV/EBITDA'**
+  String get statEvToEbitda;
+
+  /// Valuation: how much the price moves with the market, over 5 years of months.
+  ///
+  /// In en, this message translates to:
+  /// **'Beta (5Y monthly)'**
+  String get statBeta;
+
+  /// Card title: the company's latest reported results.
+  ///
+  /// In en, this message translates to:
+  /// **'Financials'**
+  String get financialsTitle;
+
+  /// Under the financials title: the date of the latest report.
+  ///
+  /// In en, this message translates to:
+  /// **'Latest report {date}'**
+  String financialsAsOf(String date);
+
+  /// Financials: revenue over the past twelve months.
+  ///
+  /// In en, this message translates to:
+  /// **'Revenue (12 mo)'**
+  String get statRevenue;
+
+  /// Financials: net income over the past twelve months.
+  ///
+  /// In en, this message translates to:
+  /// **'Net income (12 mo)'**
+  String get statNetIncome;
+
+  /// Financials: net income as a share of revenue.
+  ///
+  /// In en, this message translates to:
+  /// **'Profit margin'**
+  String get statProfitMargin;
+
+  /// Financials: earnings per share over the past twelve months.
+  ///
+  /// In en, this message translates to:
+  /// **'EPS (12 mo)'**
+  String get statEps;
+
+  /// Financials: net income over shareholders' equity.
+  ///
+  /// In en, this message translates to:
+  /// **'Return on equity'**
+  String get statReturnOnEquity;
+
+  /// Financials: net income over total assets.
+  ///
+  /// In en, this message translates to:
+  /// **'Return on assets'**
+  String get statReturnOnAssets;
+
+  /// Financials: cash at the latest quarter's end.
+  ///
+  /// In en, this message translates to:
+  /// **'Cash'**
+  String get statCash;
+
+  /// Financials: total debt over shareholders' equity.
+  ///
+  /// In en, this message translates to:
+  /// **'Debt/equity'**
+  String get statDebtToEquity;
+
+  /// Financials: free cash flow over the past twelve months.
+  ///
+  /// In en, this message translates to:
+  /// **'Free cash flow (12 mo)'**
+  String get statFreeCashFlow;
 }
 
 class _AppLocalizationsDelegate

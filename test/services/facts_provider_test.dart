@@ -9,6 +9,7 @@ import 'package:qima/models/asset.dart';
 import 'package:qima/models/holding_transaction.dart';
 import 'package:qima/models/instrument_catalog.dart';
 import 'package:qima/models/instrument_facts.dart';
+import 'package:qima/models/instrument_fundamentals.dart';
 import 'package:qima/services/cloud_kv_store.dart';
 import 'package:qima/services/facts_provider.dart';
 import 'package:qima/services/holdings_store.dart';
@@ -112,8 +113,12 @@ void main() {
           eventCalls++;
           return http.Response(_events(), 200);
         }
-        todayCalls++;
-        return http.Response(_today(), 200);
+        if (r.url.query.contains('range=1d')) {
+          todayCalls++;
+          return http.Response(_today(), 200);
+        }
+        // Fundamentals: nothing to give.
+        return http.Response('', 404);
       })),
     );
     final apple = InstrumentCatalog.instrument('stock.AAPL')!;
@@ -121,6 +126,7 @@ void main() {
     var facts = await repository.refreshFacts([apple, gold], const {}, now: now);
     expect(facts.keys, ['stock.AAPL']);
     expect(facts['stock.AAPL']!.dividends, hasLength(2));
+    expect(facts['stock.AAPL']!.fundamentals?.hasValuation, isFalse, reason: 'an empty record marks it asked');
     expect((todayCalls, eventCalls), (1, 1));
 
     facts = await repository.refreshFacts([apple], facts, now: now.add(const Duration(minutes: 5)));
@@ -133,6 +139,128 @@ void main() {
     facts = await repository.refreshFacts([apple], facts, now: now.add(const Duration(hours: 25)));
     expect((todayCalls, eventCalls), (3, 2));
     expect(await repository.cachedFacts(), facts);
+  });
+
+  group('fundamentals', () {
+    String series(String type, double value, String date, [String? currency]) => jsonEncode({
+          'meta': {
+            'symbol': ['X'],
+            'type': [type],
+          },
+          type: [
+            {'asOfDate': '2025-01-01', 'reportedValue': {'raw': 1}},
+            {'asOfDate': date, 'currencyCode': ?currency, 'reportedValue': {'raw': value}},
+          ],
+        });
+    final timeseries = '{"timeseries":{"result":[${[
+      series('trailingPeRatio', 38.87, '2026-11-23'),
+      series('trailingMarketCap', 5.07e12, '2026-11-23'),
+      series('trailingTotalRevenue', 400e9, '2026-09-30', 'TWD'),
+      series('trailingNetIncome', 100e9, '2026-09-30', 'TWD'),
+      series('quarterlyTotalDebt', 80e9, '2026-09-30', 'TWD'),
+      series('quarterlyStockholdersEquity', 100e9, '2026-09-30', 'TWD'),
+    ].join(',')}]}}';
+    final threeMonths = jsonEncode({
+      'chart': {
+        'result': [
+          {
+            'meta': {'currency': 'USD'},
+            'indicators': {
+              'quote': [
+                {
+                  'volume': [100, null, 300, 0],
+                },
+              ],
+            },
+          },
+        ],
+      },
+    });
+    String summary() => jsonEncode({
+          'quoteSummary': {
+            'result': [
+              {
+                'summaryDetail': {'beta': {'raw': 1.09}},
+                'defaultKeyStatistics': {'trailingEps': {'raw': 8.98}},
+                'financialData': {
+                  'returnOnEquity': {'raw': 1.42},
+                  'returnOnAssets': {'raw': 0.26},
+                  'debtToEquity': {'raw': 84.29},
+                  'financialCurrency': 'USD',
+                },
+                'calendarEvents': {
+                  'earnings': {
+                    'earningsDate': [
+                      {'raw': _s(DateTime.utc(2027, 1, 28))},
+                    ],
+                    'isEarningsDateEstimate': true,
+                  },
+                },
+              },
+            ],
+          },
+        });
+
+    test('reads valuation, financials, volume and the summary through a session', () async {
+      var crumbs = 0, summaries = 0;
+      final provider = YahooFactsProvider(client: MockClient((r) async {
+        if (r.url.host == 'fc.yahoo.com') {
+          return http.Response('', 404, headers: {'set-cookie': 'A3=abc; Expires=Fri, 23 Oct 2027 10:00:00 GMT; Path=/, B=x; Path=/'});
+        }
+        final path = r.url.path;
+        if (path.contains('timeseries')) return http.Response(timeseries, 200);
+        if (path.contains('/v8/finance/chart')) return http.Response(threeMonths, 200);
+        if (path.contains('getcrumb')) {
+          crumbs++;
+          expect(r.headers['Cookie'], 'A3=abc; B=x');
+          return http.Response('crumb$crumbs', 200);
+        }
+        if (path.contains('quoteSummary')) {
+          summaries++;
+          // The first token has gone stale.
+          if (r.url.queryParameters['crumb'] == 'crumb1') return http.Response('', 401);
+          return http.Response(summary(), 200);
+        }
+        return http.Response('', 404);
+      }));
+      final f = (await provider.fundamentals('TSM', 'USD', now))!;
+      expect(f.peRatio, 38.87);
+      expect(f.marketCap, const ReportedAmount(5.07e12, 'USD'), reason: 'market values in the trading currency');
+      expect(f.revenue, const ReportedAmount(400e9, 'TWD'));
+      expect(f.profitMargin, closeTo(0.25, 1e-12));
+      expect(f.debtToEquity, closeTo(0.8429, 1e-12), reason: 'the summary’s figure, leases included');
+      expect(f.eps, const ReportedAmount(8.98, 'USD'));
+      expect(f.reportedAt, DateTime.utc(2026, 9, 30));
+      expect(f.averageVolume, 200);
+      expect(f.beta, 1.09);
+      expect(f.returnOnEquity, 1.42);
+      expect(f.nextEarnings, DateTime.utc(2027, 1, 28));
+      expect(f.earningsEstimated, isTrue);
+      expect((crumbs, summaries), (2, 2));
+      expect(InstrumentFundamentals.fromJson(f.toJson()), f);
+    });
+
+    test('without a session the rest still comes back', () async {
+      final provider = YahooFactsProvider(client: MockClient((r) async {
+        if (r.url.path.contains('timeseries')) return http.Response(timeseries, 200);
+        return http.Response('', 404);
+      }));
+      final f = (await provider.fundamentals('COMI.CA', 'EGP', now))!;
+      expect(f.peRatio, 38.87);
+      expect(f.beta, isNull);
+      expect(f.debtToEquity, closeTo(0.8, 1e-12), reason: 'worked out from the series');
+      expect(f.nextEarnings, isNull);
+    });
+
+    test('nothing at all is null', () async {
+      final provider = YahooFactsProvider(client: MockClient((_) async => http.Response('', 500)));
+      expect(await provider.fundamentals('X', 'USD', now), isNull);
+    });
+
+    test('the cookie header keeps name=value pairs across commas in dates', () {
+      expect(YahooFundamentals.cookieHeader('A3=d=1&S=2; Expires=Fri, 23 Oct 2027 10:00:00 GMT; Secure, B=x'), 'A3=d=1&S=2; B=x');
+      expect(YahooFundamentals.cookieHeader(null), isNull);
+    });
   });
 
   group('splits', () {

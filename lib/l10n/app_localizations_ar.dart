@@ -5568,4 +5568,86 @@ class AppLocalizationsAr extends AppLocalizations {
   String debtRatio(String percent) {
     return 'عليك $percent مما تملك';
   }
+
+  @override
+  String get statOpen => 'الافتتاح';
+
+  @override
+  String get statVolume => 'حجم التداول';
+
+  @override
+  String get statAverageVolume => 'متوسط الحجم (3 أشهر)';
+
+  @override
+  String get statEarningsDate => 'موعد النتائج';
+
+  @override
+  String statEarningsEstimated(String date) {
+    return '$date (تقديري)';
+  }
+
+  @override
+  String get valuationTitle => 'التقييم';
+
+  @override
+  String get statMarketCap => 'القيمة السوقية';
+
+  @override
+  String get statEnterpriseValue => 'قيمة المنشأة';
+
+  @override
+  String get statPeRatio => 'مكرر الربحية';
+
+  @override
+  String get statForwardPe => 'مكرر الربحية المتوقع';
+
+  @override
+  String get statPegRatio => 'نسبة PEG';
+
+  @override
+  String get statPriceToSales => 'السعر إلى المبيعات';
+
+  @override
+  String get statPriceToBook => 'السعر إلى القيمة الدفترية';
+
+  @override
+  String get statEvToEbitda => 'قيمة المنشأة/EBITDA';
+
+  @override
+  String get statBeta => 'بيتا (5 سنوات شهريًا)';
+
+  @override
+  String get financialsTitle => 'البيانات المالية';
+
+  @override
+  String financialsAsOf(String date) {
+    return 'آخر تقرير $date';
+  }
+
+  @override
+  String get statRevenue => 'الإيرادات (12 شهرًا)';
+
+  @override
+  String get statNetIncome => 'صافي الدخل (12 شهرًا)';
+
+  @override
+  String get statProfitMargin => 'هامش الربح';
+
+  @override
+  String get statEps => 'ربحية السهم (12 شهرًا)';
+
+  @override
+  String get statReturnOnEquity => 'العائد على حقوق الملكية';
+
+  @override
+  String get statReturnOnAssets => 'العائد على الأصول';
+
+  @override
+  String get statCash => 'النقد';
+
+  @override
+  String get statDebtToEquity => 'الدين إلى حقوق الملكية';
+
+  @override
+  String get statFreeCashFlow => 'التدفق النقدي الحر (12 شهرًا)';
 }

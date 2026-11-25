@@ -4,6 +4,7 @@ import '../l10n/app_localizations.dart';
 import '../models/display_point.dart';
 import '../models/money.dart';
 import '../theme/design_system.dart';
+import '../theme/figure_format.dart';
 import '../theme/qima_colors.dart';
 import '../theme/strings.dart';
 import 'stat_pill.dart';
@@ -34,6 +35,12 @@ class KeyStatsGrid extends StatelessWidget {
   final double? dividendYield;
   final PriceSpan? daySpan;
   final PriceSpan? yearSpan;
+  final double? open;
+  final double? volume;
+  final double? averageVolume;
+
+  /// The next earnings date, already written out.
+  final String? earningsDate;
 
   const KeyStatsGrid({
     super.key,
@@ -45,6 +52,10 @@ class KeyStatsGrid extends StatelessWidget {
     this.dividendYield,
     this.daySpan,
     this.yearSpan,
+    this.open,
+    this.volume,
+    this.averageVolume,
+    this.earningsDate,
   });
 
   @override
@@ -54,6 +65,7 @@ class KeyStatsGrid extends StatelessWidget {
     final high = windowed.isEmpty ? null : windowed.map((p) => p.value).reduce((a, b) => a > b ? a : b);
     final low = windowed.isEmpty ? null : windowed.map((p) => p.value).reduce((a, b) => a < b ? a : b);
     String price(double? v) => v == null ? '—' : Money(v, currencyCode).formatted();
+    final locale = Localizations.localeOf(context).toString();
 
     final pills = [
       StatPill(
@@ -64,9 +76,13 @@ class KeyStatsGrid extends StatelessWidget {
         tint: changePercent == null ? null : QimaColors.trendColor(changeIsUp ?? true, colors),
       ),
       if (previousClose != null) StatPill(title: l10n.statPreviousClose, value: price(previousClose)),
+      if (open != null) StatPill(title: l10n.statOpen, value: price(open)),
       StatPill(title: l10n.statHigh, value: price(high)),
       StatPill(title: l10n.statLow, value: price(low)),
+      if (volume != null) StatPill(title: l10n.statVolume, value: bigNumber(volume!, locale)),
+      if (averageVolume != null) StatPill(title: l10n.statAverageVolume, value: bigNumber(averageVolume!, locale)),
       if (dividendYield != null) StatPill(title: l10n.statDividendYield, value: '${(dividendYield! * 100).toStringAsFixed(2)}%'),
+      if (earningsDate != null) StatPill(key: const ValueKey('earningsDate'), title: l10n.statEarningsDate, value: earningsDate!),
     ];
 
     return DSCard(
@@ -75,21 +91,7 @@ class KeyStatsGrid extends StatelessWidget {
         children: [
           Text(l10n.detailKeyStats, style: TextStyle(color: colors.textPrimary, fontWeight: FontWeight.w700)),
           const SizedBox(height: DS.spaceSM),
-          GridView(
-            shrinkWrap: true,
-            // Without this the grid inherits the screen's safe-area inset as
-            // bottom padding, leaving an empty band at the foot of the card.
-            padding: EdgeInsets.zero,
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2,
-              // Room for Arabic's taller small text (Almarai) as well as SF.
-              mainAxisExtent: 52,
-              mainAxisSpacing: DS.spaceSM,
-              crossAxisSpacing: DS.spaceMD,
-            ),
-            children: pills,
-          ),
+          StatGrid(pills: pills),
           if (daySpan case final span?) ...[
             const SizedBox(height: DS.spaceSM),
             _SpanBar(key: const ValueKey('daySpan'), title: l10n.statDayRange, span: span, format: price),
@@ -102,6 +104,30 @@ class KeyStatsGrid extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Stat pills two to a row.
+class StatGrid extends StatelessWidget {
+  final List<Widget> pills;
+
+  const StatGrid({super.key, required this.pills});
+
+  @override
+  Widget build(BuildContext context) => GridView(
+        shrinkWrap: true,
+        // Without this the grid inherits the screen's safe-area inset as
+        // bottom padding, leaving an empty band at the foot of the card.
+        padding: EdgeInsets.zero,
+        physics: const NeverScrollableScrollPhysics(),
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 2,
+          // Room for Arabic's taller small text (Almarai) as well as SF.
+          mainAxisExtent: 52,
+          mainAxisSpacing: DS.spaceSM,
+          crossAxisSpacing: DS.spaceMD,
+        ),
+        children: pills,
+      );
 }
 
 /// A titled track from low to high with a dot where the price is.

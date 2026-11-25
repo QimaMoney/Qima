@@ -1,5 +1,7 @@
 import 'package:equatable/equatable.dart';
 
+import 'instrument_fundamentals.dart';
+
 /// A cash dividend: [amount] per share in the facts' currency, on its
 /// ex-date. Yahoo states it per share as shares stand today, after any later
 /// split.
@@ -69,11 +71,15 @@ class InstrumentFacts extends Equatable {
   /// The company's full name, like "Saudi Arabian Oil Company".
   final String? name;
   final double? price;
+  final double? open;
   final double? previousClose;
   final double? dayHigh;
   final double? dayLow;
   final double? yearHigh;
   final double? yearLow;
+
+  /// Shares traded today.
+  final double? volume;
 
   /// When [price] last traded.
   final DateTime? lastTraded;
@@ -90,22 +96,28 @@ class InstrumentFacts extends Equatable {
   final DateTime fetchedAt;
   final DateTime? eventsFetchedAt;
 
+  /// Valuation and financials, fetched with the dividends and splits.
+  final InstrumentFundamentals? fundamentals;
+
   const InstrumentFacts({
     required this.currency,
     required this.fetchedAt,
     this.name,
     this.price,
+    this.open,
     this.previousClose,
     this.dayHigh,
     this.dayLow,
     this.yearHigh,
     this.yearLow,
+    this.volume,
     this.lastTraded,
     this.sessionStart,
     this.sessionEnd,
     this.dividends = const [],
     this.splits = const [],
     this.eventsFetchedAt,
+    this.fundamentals,
   });
 
   /// The price hasn't traded for [staleAfter], so it shouldn't read as
@@ -126,25 +138,33 @@ class InstrumentFacts extends Equatable {
     return paid / p;
   }
 
-  /// These figures with [dividends] and [splits], fetched at [at] (null
-  /// when they were never fetched).
-  InstrumentFacts withEvents({required List<Dividend> dividends, required List<StockSplit> splits, required DateTime? at}) =>
+  /// These figures with [dividends], [splits] and [fundamentals], fetched
+  /// at [at] (null when they were never fetched).
+  InstrumentFacts withEvents({
+    required List<Dividend> dividends,
+    required List<StockSplit> splits,
+    required DateTime? at,
+    InstrumentFundamentals? fundamentals,
+  }) =>
       InstrumentFacts(
         currency: currency,
         fetchedAt: fetchedAt,
         name: name,
         price: price,
+        open: open,
         previousClose: previousClose,
         dayHigh: dayHigh,
         dayLow: dayLow,
         yearHigh: yearHigh,
         yearLow: yearLow,
+        volume: volume,
         lastTraded: lastTraded,
         sessionStart: sessionStart,
         sessionEnd: sessionEnd,
         dividends: dividends,
         splits: splits,
         eventsFetchedAt: at,
+        fundamentals: fundamentals,
       );
 
   Map<String, dynamic> toJson() => {
@@ -152,6 +172,8 @@ class InstrumentFacts extends Equatable {
         'fetchedAt': fetchedAt.toUtc().toIso8601String(),
         if (name != null) 'name': name,
         if (price != null) 'price': price,
+        if (open != null) 'open': open,
+        if (volume != null) 'volume': volume,
         if (previousClose != null) 'previousClose': previousClose,
         if (dayHigh != null) 'dayHigh': dayHigh,
         if (dayLow != null) 'dayLow': dayLow,
@@ -163,6 +185,7 @@ class InstrumentFacts extends Equatable {
         'dividends': [for (final d in dividends) d.toJson()],
         'splits': [for (final s in splits) s.toJson()],
         if (eventsFetchedAt != null) 'eventsFetchedAt': eventsFetchedAt!.toUtc().toIso8601String(),
+        if (fundamentals != null) 'fundamentals': fundamentals!.toJson(),
       };
 
   static InstrumentFacts? fromJson(Object? json) {
@@ -176,6 +199,8 @@ class InstrumentFacts extends Equatable {
       fetchedAt: fetchedAt,
       name: json['name'] is String ? json['name'] as String : null,
       price: number('price'),
+      open: number('open'),
+      volume: number('volume'),
       previousClose: number('previousClose'),
       dayHigh: number('dayHigh'),
       dayLow: number('dayLow'),
@@ -187,6 +212,7 @@ class InstrumentFacts extends Equatable {
       dividends: [for (final d in (json['dividends'] as List? ?? const [])) ?Dividend.fromJson(d)],
       splits: [for (final s in (json['splits'] as List? ?? const [])) ?StockSplit.fromJson(s)],
       eventsFetchedAt: date('eventsFetchedAt'),
+      fundamentals: InstrumentFundamentals.fromJson(json['fundamentals']),
     );
   }
 
@@ -195,6 +221,8 @@ class InstrumentFacts extends Equatable {
         currency,
         name,
         price,
+        open,
+        volume,
         previousClose,
         dayHigh,
         dayLow,
@@ -207,5 +235,6 @@ class InstrumentFacts extends Equatable {
         splits,
         fetchedAt,
         eventsFetchedAt,
+        fundamentals,
       ];
 }

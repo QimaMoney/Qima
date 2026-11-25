@@ -5545,4 +5545,86 @@ class AppLocalizationsEn extends AppLocalizations {
   String debtRatio(String percent) {
     return 'You owe $percent of what you own';
   }
+
+  @override
+  String get statOpen => 'Open';
+
+  @override
+  String get statVolume => 'Volume';
+
+  @override
+  String get statAverageVolume => 'Avg. volume (3 mo)';
+
+  @override
+  String get statEarningsDate => 'Earnings date';
+
+  @override
+  String statEarningsEstimated(String date) {
+    return '$date (estimated)';
+  }
+
+  @override
+  String get valuationTitle => 'Valuation';
+
+  @override
+  String get statMarketCap => 'Market cap';
+
+  @override
+  String get statEnterpriseValue => 'Enterprise value';
+
+  @override
+  String get statPeRatio => 'P/E';
+
+  @override
+  String get statForwardPe => 'Forward P/E';
+
+  @override
+  String get statPegRatio => 'PEG ratio';
+
+  @override
+  String get statPriceToSales => 'Price/sales';
+
+  @override
+  String get statPriceToBook => 'Price/book';
+
+  @override
+  String get statEvToEbitda => 'EV/EBITDA';
+
+  @override
+  String get statBeta => 'Beta (5Y monthly)';
+
+  @override
+  String get financialsTitle => 'Financials';
+
+  @override
+  String financialsAsOf(String date) {
+    return 'Latest report $date';
+  }
+
+  @override
+  String get statRevenue => 'Revenue (12 mo)';
+
+  @override
+  String get statNetIncome => 'Net income (12 mo)';
+
+  @override
+  String get statProfitMargin => 'Profit margin';
+
+  @override
+  String get statEps => 'EPS (12 mo)';
+
+  @override
+  String get statReturnOnEquity => 'Return on equity';
+
+  @override
+  String get statReturnOnAssets => 'Return on assets';
+
+  @override
+  String get statCash => 'Cash';
+
+  @override
+  String get statDebtToEquity => 'Debt/equity';
+
+  @override
+  String get statFreeCashFlow => 'Free cash flow (12 mo)';
 }

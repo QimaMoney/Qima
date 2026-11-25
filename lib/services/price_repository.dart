@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/asset.dart';
 import '../models/fx_history.dart';
 import '../models/instrument_facts.dart';
+import '../models/instrument_fundamentals.dart';
 import '../models/metal_breakdown.dart';
 import '../models/money.dart';
 import '../models/quote.dart';
@@ -475,8 +476,8 @@ class PriceRepository {
       instrument.assetClass == AssetClass.stock || instrument.assetClass == AssetClass.indices;
 
   /// Refreshes the day's figures for [instruments] at most every
-  /// [factsRefreshInterval], and a stock's dividends and splits at most every
-  /// [eventsRefreshInterval]. A failed fetch keeps what [current] holds.
+  /// [factsRefreshInterval], and a stock's dividends, splits, valuation and
+  /// financials at most every [eventsRefreshInterval]. A failed fetch keeps what [current] holds.
   Future<Map<String, InstrumentFacts>> refreshFacts(
     List<Instrument> instruments,
     Map<String, InstrumentFacts> current, {
@@ -488,17 +489,33 @@ class PriceRepository {
     for (final instrument in instruments) {
       if (!hasFacts(instrument)) continue;
       final old = current[instrument.id];
-      if (old != null && at.difference(old.fetchedAt) < factsRefreshInterval) continue;
+      final eventsAt = old?.eventsFetchedAt;
+      // Facts cached before valuation was fetched are due at once.
+      final eventsDue = instrument.assetClass == AssetClass.stock &&
+          (eventsAt == null || old?.fundamentals == null || at.difference(eventsAt) > eventsRefreshInterval);
+      if (old != null && !eventsDue && at.difference(old.fetchedAt) < factsRefreshInterval) continue;
       final symbol = instrument.sourceSymbol;
       final today = await factsProvider.today(symbol, at);
       if (today == null) continue;
-      final eventsAt = old?.eventsFetchedAt;
-      final eventsDue = instrument.assetClass == AssetClass.stock &&
-          (eventsAt == null || at.difference(eventsAt) > eventsRefreshInterval);
       final events = eventsDue ? await factsProvider.events(symbol) : null;
+      // An empty record marks a stock with none, so it isn't asked again
+      // until the next daily fetch.
+      final fundamentals = eventsDue
+          ? await factsProvider.fundamentals(symbol, today.currency, at) ?? old?.fundamentals ?? InstrumentFundamentals(fetchedAt: at)
+          : null;
       next[instrument.id] = events != null
-          ? today.withEvents(dividends: events.dividends, splits: events.splits, at: at)
-          : today.withEvents(dividends: old?.dividends ?? const [], splits: old?.splits ?? const [], at: eventsAt);
+          ? today.withEvents(
+              dividends: events.dividends,
+              splits: events.splits,
+              at: at,
+              fundamentals: fundamentals ?? old?.fundamentals,
+            )
+          : today.withEvents(
+              dividends: old?.dividends ?? const [],
+              splits: old?.splits ?? const [],
+              at: eventsAt,
+              fundamentals: fundamentals ?? old?.fundamentals,
+            );
       changed = true;
     }
     if (changed) await factsStore.save(next);

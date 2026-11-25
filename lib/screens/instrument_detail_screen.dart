@@ -21,6 +21,7 @@ import '../theme/price_chart.dart';
 import '../theme/qima_colors.dart';
 import '../theme/strings.dart';
 import '../widgets/alerts_card.dart';
+import '../widgets/fundamentals_cards.dart';
 import '../widgets/help_button.dart';
 import '../widgets/instrument_facts_widgets.dart';
 import '../widgets/instrument_icon.dart';
@@ -387,7 +388,15 @@ class _InstrumentDetailScreenState extends State<InstrumentDetailScreen> {
                       onClose: () => _setCompare(null),
                     ),
                   const SizedBox(height: DS.spaceMD),
-                  _keyStats(presentation, facts, windowChange, now),
+                  _keyStats(context, presentation, facts, windowChange, now),
+                  if (facts?.fundamentals case final f? when f.hasValuation) ...[
+                    const SizedBox(height: DS.spaceMD),
+                    ValuationCard(fundamentals: f),
+                  ],
+                  if (facts?.fundamentals case final f? when f.hasFinancials) ...[
+                    const SizedBox(height: DS.spaceMD),
+                    FinancialsCard(fundamentals: f),
+                  ],
                   if (instrument.assetClass == AssetClass.metal) ...[
                     const SizedBox(height: DS.spaceMD),
                     UnitPriceCarousel(rows: presentation.metalBreakdown),
@@ -421,13 +430,18 @@ class _InstrumentDetailScreenState extends State<InstrumentDetailScreen> {
   /// Key stats for [_range], with the exchange's figures when there are
   /// any: the previous close, yield and the day's and year's ranges, all in
   /// the card's currency and unit.
-  Widget _keyStats(InstrumentPresentation presentation, InstrumentFacts? facts, RangeChange? windowChange, DateTime now) {
+  Widget _keyStats(BuildContext context, InstrumentPresentation presentation, InstrumentFacts? facts, RangeChange? windowChange, DateTime now) {
     final current = presentation.latestMoney?.amount;
     final fresh = facts != null && !facts.isStale(now);
     double? display(double? v) => v == null || facts == null ? null : presentation.exchangeMoney(v, facts.currency).amount;
     PriceSpan? span(double? low, double? high) =>
         low == null || high == null || current == null || high < low ? null : PriceSpan(low: low, high: high, current: current);
     final yearFromHistory = facts == null ? presentation.yearRangeFromHistory(now) : null;
+    final earnings = facts?.fundamentals?.nextEarnings;
+    final l10n = AppLocalizations.of(context)!;
+    final earningsText = earnings == null
+        ? null
+        : (DateFormat.yMMMd(Localizations.localeOf(context).toString())..useNativeDigits = false).format(earnings); // Yahoo's day, as the exchange gives it.
     return KeyStatsGrid(
       windowed: _range.filter(presentation.points, now),
       changePercent: windowChange?.percentValue,
@@ -436,6 +450,14 @@ class _InstrumentDetailScreenState extends State<InstrumentDetailScreen> {
       previousClose: fresh ? display(facts.previousClose) : null,
       dividendYield: facts?.yieldOn(now),
       daySpan: fresh ? span(display(facts.dayLow), display(facts.dayHigh)) : null,
+      open: fresh ? display(facts.open) : null,
+      volume: fresh ? facts.volume : null,
+      averageVolume: facts?.fundamentals?.averageVolume,
+      earningsDate: earningsText == null
+          ? null
+          : facts!.fundamentals!.earningsEstimated
+              ? l10n.statEarningsEstimated(earningsText)
+              : earningsText,
       yearSpan: facts != null
           ? span(display(facts.yearLow), display(facts.yearHigh))
           : yearFromHistory == null
