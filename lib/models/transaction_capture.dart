@@ -513,6 +513,8 @@ class TransactionCapture {
     'نوفمبر': 11, 'ديسمبر': 12,
   };
 
+  static final _allDigits = RegExp(r'^\d+$');
+
   static List<String> _termsFor(Instrument instrument, CaptureContext context) {
     final terms = <String>{
       instrument.symbol,
@@ -525,7 +527,9 @@ class TransactionCapture {
     for (final t in terms.toList()) {
       if (RegExp(r'^[\u0600-\u06FF]').hasMatch(t) && !t.startsWith('ال')) terms.add('ال$t');
     }
-    return terms.where((t) => t.trim().isNotEmpty).toList();
+    // A share listed by number ("2222") is named in words: digits in a
+    // sentence are a quantity or a price.
+    return terms.where((t) => t.trim().isNotEmpty && !_allDigits.hasMatch(t.trim())).toList();
   }
 
   // -------------------------------------------------------------------

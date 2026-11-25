@@ -78,6 +78,23 @@ class AppLocalizationsFr extends AppLocalizations {
   String get addCustomTickerTitle => 'Ajouter un symbole personnalisé';
 
   @override
+  String get addMarketUs => 'États-Unis';
+
+  @override
+  String get addMarketSaudi => 'Arabie saoudite';
+
+  @override
+  String get addMarketEgypt => 'Égypte';
+
+  @override
+  String get addMarketOther => 'Autres marchés';
+
+  @override
+  String addShowAll(int count) {
+    return 'Tout afficher ($count)';
+  }
+
+  @override
   String get addCustomTickerSymbol => 'Symbole boursier';
 
   @override

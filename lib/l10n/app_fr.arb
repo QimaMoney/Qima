@@ -53,6 +53,11 @@
     }
   },
   "addCustomTickerTitle": "Ajouter un symbole personnalisé",
+  "addMarketUs": "États-Unis",
+  "addMarketSaudi": "Arabie saoudite",
+  "addMarketEgypt": "Égypte",
+  "addMarketOther": "Autres marchés",
+  "addShowAll": "Tout afficher ({count})",
   "addCustomTickerSymbol": "Symbole boursier",
   "addCustomTickerName": "Nom affiché (facultatif)",
   "addCustomTickerHint": "p. ex. AAPL, TSLA, VOO",

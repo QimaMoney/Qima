@@ -78,6 +78,23 @@ class AppLocalizationsAr extends AppLocalizations {
   String get addCustomTickerTitle => 'إضافة رمز مخصص';
 
   @override
+  String get addMarketUs => 'الولايات المتحدة';
+
+  @override
+  String get addMarketSaudi => 'السعودية';
+
+  @override
+  String get addMarketEgypt => 'مصر';
+
+  @override
+  String get addMarketOther => 'أسواق أخرى';
+
+  @override
+  String addShowAll(int count) {
+    return 'عرض الكل ($count)';
+  }
+
+  @override
   String get addCustomTickerSymbol => 'رمز التداول';
 
   @override

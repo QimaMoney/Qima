@@ -1,4 +1,5 @@
 import 'asset.dart';
+import 'market_listings.dart';
 import 'metal_breakdown.dart';
 
 /// Full registry of built-in instruments plus any user-added custom ones.
@@ -34,6 +35,9 @@ class InstrumentCatalog {
     Instrument(id: 'stock.AMZN', symbol: 'AMZN', assetClass: AssetClass.stock, nameKey: 'asset.amazon'),
     Instrument(id: 'stock.TSLA', symbol: 'TSLA', assetClass: AssetClass.stock, nameKey: 'asset.tesla'),
     Instrument(id: 'stock.GOOGL', symbol: 'GOOGL', assetClass: AssetClass.stock, nameKey: 'asset.alphabet'),
+    ...MarketListings.usStocks,
+    ...MarketListings.saudiStocks,
+    ...MarketListings.egyptStocks,
   ];
 
   static const List<Instrument> indices = [
@@ -86,6 +90,9 @@ class InstrumentCatalog {
       nameKey: 'asset.dax',
       sourceSymbol: '^GDAXI',
     ),
+    ...MarketListings.usIndices,
+    ...MarketListings.saudiIndices,
+    ...MarketListings.egyptIndices,
   ];
 
   static const List<Instrument> fiat = [
@@ -102,7 +109,11 @@ class InstrumentCatalog {
     Instrument(id: 'fx.JOD', symbol: 'JOD', assetClass: AssetClass.fiat, nameKey: 'asset.jordanianDinar'),
   ];
 
-  static List<Instrument> get builtIn => [...metals, ...crypto, ...stocks, ...indices, ...fiat];
+  static final List<Instrument> builtIn = List.unmodifiable([...metals, ...crypto, ...stocks, ...indices, ...fiat]);
+
+  static final Map<String, Instrument> _builtInById = {for (final i in builtIn) i.id: i};
+
+  static bool isBuiltIn(String id) => _builtInById.containsKey(id);
 
   static const List<String> defaultWatchlist = ['metal.XAU', 'metal.XAG', 'crypto.BTC'];
 
@@ -118,13 +129,12 @@ class InstrumentCatalog {
 
   /// Built-ins plus any custom instruments not already present by id
   /// (built-ins win on clash).
-  static List<Instrument> get all {
-    final builtInIds = builtIn.map((i) => i.id).toSet();
-    return [...builtIn, ..._custom.where((i) => !builtInIds.contains(i.id))];
-  }
+  static List<Instrument> get all => [...builtIn, ..._custom.where((i) => !isBuiltIn(i.id))];
 
   static Instrument? instrument(String id) {
-    for (final instrument in all) {
+    final builtIn = _builtInById[id];
+    if (builtIn != null) return builtIn;
+    for (final instrument in _custom) {
       if (instrument.id == id) return instrument;
     }
     return null;

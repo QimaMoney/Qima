@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../models/asset.dart';
+import '../models/feed_symbol.dart';
 import '../models/money.dart';
 
 /// Errors surfaced by a [QuoteProvider].
@@ -123,19 +124,21 @@ class YahooQuoteProvider implements QuoteProvider {
   /// What the feed has under [instrument]'s symbol: its price, and the
   /// name, exchange and currency the feed itself gives it.
   Future<Listing> listing(Instrument instrument) async {
-    final uri = Uri.parse('$baseUrl/${Uri.encodeComponent(instrument.sourceSymbol)}');
+    // A few days of daily bars come with it: see [_latestPrice].
+    final uri = Uri.parse('$baseUrl/${Uri.encodeComponent(instrument.sourceSymbol)}?range=5d&interval=1d');
     final response = await client.get(uri, headers: _userAgentHeader);
     if (response.statusCode != 200) throw const PriceError.invalidResponse();
     try {
       final json = jsonDecode(response.body) as Map<String, dynamic>;
-      final result = ((json['chart'] as Map<String, dynamic>)['result'] as List<dynamic>);
-      if (result.isEmpty) throw const PriceError.decodingFailed();
-      final meta = (result.first as Map<String, dynamic>)['meta'] as Map<String, dynamic>;
-      final price = (meta['regularMarketPrice'] as num).toDouble();
-      final currency = meta['currency'] as String;
+      final results = ((json['chart'] as Map<String, dynamic>)['result'] as List<dynamic>);
+      if (results.isEmpty) throw const PriceError.decodingFailed();
+      final result = results.first as Map<String, dynamic>;
+      final meta = result['meta'] as Map<String, dynamic>;
+      final currency = _feedCurrency(meta, instrument.sourceSymbol);
+      if (currency == null) throw const PriceError.decodingFailed();
       String? text(String key) => switch (meta[key]) { final String s when s.trim().isNotEmpty => s.trim(), _ => null };
       return Listing(
-        canonicalUSD: _toUSD(price, currency, rates),
+        canonicalUSD: _toUSD(_latestPrice(result, meta), currency, rates),
         name: text('shortName') ?? text('longName'),
         exchange: text('fullExchangeName') ?? text('exchangeName'),
         currency: _normalizeCurrency(currency).code,
@@ -146,7 +149,38 @@ class YahooQuoteProvider implements QuoteProvider {
       throw const PriceError.decodingFailed();
     }
   }
+
+  /// The newest price in a chart [result]: the feed's headline price, or
+  /// the last daily close when that is newer. For some exchanges (Cairo's
+  /// shares) the headline stopped moving long ago while the daily bars
+  /// carry on, and the headline alone would show a price years old.
+  static double _latestPrice(Map<String, dynamic> result, Map<String, dynamic> meta) {
+    final headline = meta['regularMarketPrice'];
+    final headlineTime = meta['regularMarketTime'];
+    final timestamps = result['timestamp'];
+    final closes = switch (result['indicators']) {
+      {'quote': [{'close': final List<dynamic> c}, ...]} => c,
+      _ => const <dynamic>[],
+    };
+    if (timestamps is List<dynamic>) {
+      for (var i = timestamps.length < closes.length ? timestamps.length - 1 : closes.length - 1; i >= 0; i--) {
+        final close = closes[i], time = timestamps[i];
+        if (close is! num || time is! num) continue;
+        if (headline is! num || (headlineTime is num && time > headlineTime)) return close.toDouble();
+        break;
+      }
+    }
+    return (headline as num).toDouble();
+  }
 }
+
+/// The currency a chart's prices are in: the feed's own word, or the
+/// currency of the symbol's exchange when the feed leaves it out, as it
+/// does for some Cairo listings and indices.
+String? _feedCurrency(Map<String, dynamic> meta, String symbol) => switch (meta['currency']) {
+      final String c when c.trim().isNotEmpty => c,
+      _ => FeedSymbol.currencyOf(symbol),
+    };
 
 /// What a price feed says a symbol is. A symbol alone does not say: "SR"
 /// is a company in New York, and the Saudi exchange's own suffix is ".SR".
@@ -198,7 +232,7 @@ class YahooHistoryProvider {
       if (results == null || results.isEmpty) return const [];
       final result = results.first as Map<String, dynamic>;
       final meta = result['meta'] as Map<String, dynamic>;
-      final currency = meta['currency'] as String? ?? 'USD';
+      final currency = _feedCurrency(meta, symbol) ?? 'USD';
       final timestamps = (result['timestamp'] as List<dynamic>?)?.cast<num>() ?? const [];
       final quoteList = (result['indicators'] as Map<String, dynamic>)['quote'] as List<dynamic>;
       final series = quoteList.first as Map<String, dynamic>;

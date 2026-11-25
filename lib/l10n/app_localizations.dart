@@ -210,6 +210,36 @@ abstract class AppLocalizations {
   /// **'Add custom ticker'**
   String get addCustomTickerTitle;
 
+  /// No description provided for @addMarketUs.
+  ///
+  /// In en, this message translates to:
+  /// **'United States'**
+  String get addMarketUs;
+
+  /// No description provided for @addMarketSaudi.
+  ///
+  /// In en, this message translates to:
+  /// **'Saudi Arabia'**
+  String get addMarketSaudi;
+
+  /// No description provided for @addMarketEgypt.
+  ///
+  /// In en, this message translates to:
+  /// **'Egypt'**
+  String get addMarketEgypt;
+
+  /// No description provided for @addMarketOther.
+  ///
+  /// In en, this message translates to:
+  /// **'Other markets'**
+  String get addMarketOther;
+
+  /// Row under a shortened list of shares that opens the rest; count is how many the full list holds.
+  ///
+  /// In en, this message translates to:
+  /// **'Show all {count}'**
+  String addShowAll(int count);
+
   /// No description provided for @addCustomTickerSymbol.
   ///
   /// In en, this message translates to:

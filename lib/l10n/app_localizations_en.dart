@@ -78,6 +78,23 @@ class AppLocalizationsEn extends AppLocalizations {
   String get addCustomTickerTitle => 'Add custom ticker';
 
   @override
+  String get addMarketUs => 'United States';
+
+  @override
+  String get addMarketSaudi => 'Saudi Arabia';
+
+  @override
+  String get addMarketEgypt => 'Egypt';
+
+  @override
+  String get addMarketOther => 'Other markets';
+
+  @override
+  String addShowAll(int count) {
+    return 'Show all $count';
+  }
+
+  @override
   String get addCustomTickerSymbol => 'Ticker symbol';
 
   @override

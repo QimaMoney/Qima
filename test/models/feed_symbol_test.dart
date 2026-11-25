@@ -50,4 +50,17 @@ void main() {
       expect(FeedSymbol.candidates('TADAWUL:'), ['TADAWUL:']);
     });
   });
+
+  group('FeedSymbol.currencyOf', () {
+    test('reads the currency of the exchange a symbol is listed on', () {
+      expect(FeedSymbol.currencyOf('COMI.CA'), 'EGP');
+      expect(FeedSymbol.currencyOf('^EGX70EWI.CA'), 'EGP');
+      expect(FeedSymbol.currencyOf('2222.sr'), 'SAR');
+    });
+
+    test('says nothing for a symbol with no exchange, or one it does not know', () {
+      expect(FeedSymbol.currencyOf('AAPL'), isNull);
+      expect(FeedSymbol.currencyOf('BRK.B'), isNull);
+    });
+  });
 }

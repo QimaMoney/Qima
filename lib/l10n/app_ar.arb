@@ -53,6 +53,11 @@
     }
   },
   "addCustomTickerTitle": "إضافة رمز مخصص",
+  "addMarketUs": "الولايات المتحدة",
+  "addMarketSaudi": "السعودية",
+  "addMarketEgypt": "مصر",
+  "addMarketOther": "أسواق أخرى",
+  "addShowAll": "عرض الكل ({count})",
   "addCustomTickerSymbol": "رمز التداول",
   "addCustomTickerName": "اسم العرض (اختياري)",
   "addCustomTickerHint": "مثال: AAPL, TSLA, VOO",
