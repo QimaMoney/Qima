@@ -125,11 +125,7 @@ class PortfolioHistory {
         );
 
     final points = <PortfolioHistoryPoint>[];
-    var cursor = startDate;
-    while (!cursor.isAfter(today)) {
-      // The last microsecond of the day (not the next midnight, which would
-      // also swallow a sample stamped at the very start of the next day).
-      final endOfDay = DateTime(cursor.year, cursor.month, cursor.day + 1).subtract(const Duration(microseconds: 1));
+    for (final (cursor, endOfDay) in steps(range, startDate, now)) {
       final fxRate = baseCurrency == 'USD' ? 1.0 : (baseFxCursor.rateOnOrBefore(endOfDay) ?? rates.rate(baseCurrency) ?? 1);
 
       double valueUSD = 0;
@@ -152,9 +148,39 @@ class PortfolioHistory {
       }
 
       points.add(PortfolioHistoryPoint(date: cursor, value: valueUSD * fxRate, cost: cost, realised: realised));
-      cursor = DateTime(cursor.year, cursor.month, cursor.day + 1);
     }
     return points;
+  }
+
+  /// How far apart the points of a one-day history are: the spacing price
+  /// history keeps its last two days at.
+  static const Duration dayStep = Duration(minutes: 15);
+
+  /// The moments a history for [range] has a point at, each with the
+  /// instant everything up to which counts for it.
+  ///
+  /// A day at a time from [start], each day counting through its last
+  /// microsecond (not the next midnight, which would also swallow a sample
+  /// stamped at the very start of the next day). One day is the exception:
+  /// two daily points are a straight line that says nothing about the day,
+  /// so it is walked a quarter of an hour at a time over the last 24 hours,
+  /// on the clock's quarters, ending at [now].
+  static List<(DateTime, DateTime)> steps(ChartRange range, DateTime start, DateTime now) {
+    final out = <(DateTime, DateTime)>[];
+    if (range == ChartRange.day1) {
+      final local = now.toLocal();
+      final quarter = DateTime(local.year, local.month, local.day, local.hour, local.minute - local.minute % dayStep.inMinutes);
+      for (var t = quarter.subtract(const Duration(days: 1)); !t.isAfter(quarter); t = t.add(dayStep)) {
+        out.add((t, t));
+      }
+      if (local.isAfter(quarter)) out.add((local, local));
+      return out;
+    }
+    final today = _dayStart(now);
+    for (var day = start; !day.isAfter(today); day = DateTime(day.year, day.month, day.day + 1)) {
+      out.add((day, DateTime(day.year, day.month, day.day + 1).subtract(const Duration(microseconds: 1))));
+    }
+    return out;
   }
 
   static DateTime _dayStart(DateTime date) {

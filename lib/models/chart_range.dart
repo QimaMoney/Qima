@@ -61,6 +61,7 @@ enum ChartRange {
   /// portfolio series is computed on the fly rather than gated behind a
   /// "load history" action.
   static const List<ChartRange> portfolioSelectable = [
+    ChartRange.day1,
     ChartRange.week1,
     ChartRange.month1,
     ChartRange.month3,
@@ -68,11 +69,30 @@ enum ChartRange {
     ChartRange.all,
   ];
 
-  static const ChartRange portfolioDefault = ChartRange.all;
+  static const ChartRange portfolioDefault = ChartRange.day1;
+
+  /// The range the charts on Home and the portfolio chart open on, for a
+  /// person whose default in Settings is this range. Those charts offer
+  /// fewer ranges than a price chart does, so each default goes to the
+  /// nearest one they have: never a shorter one, so nothing the person
+  /// asked to see is cut off.
+  ChartRange get onHome => switch (this) {
+        ChartRange.day1 => ChartRange.day1,
+        ChartRange.day3 || ChartRange.day7 || ChartRange.week1 => ChartRange.week1,
+        ChartRange.month1 => ChartRange.month1,
+        ChartRange.month3 => ChartRange.month3,
+        ChartRange.month6 || ChartRange.ytd || ChartRange.year1 => ChartRange.year1,
+        ChartRange.year5 || ChartRange.all => ChartRange.all,
+      };
 
   bool get isExtended => extended.contains(this);
 
-  static const ChartRange fallbackDefault = ChartRange.month3;
+  /// The range charts open on until the person picks their own default in
+  /// Settings.
+  static const ChartRange fallbackDefault = ChartRange.day1;
+
+  /// The fixed window watchlist sparklines draw, whatever the default is.
+  static const ChartRange sparklineRange = ChartRange.month3;
 
   /// Start date for this range relative to [now], or null for "all" (no
   /// filtering).
@@ -125,9 +145,32 @@ enum ChartRange {
   }
 
   List<DisplayPoint> filter(List<DisplayPoint> points, DateTime now) {
-    final start = startDate(now);
+    final start = this == ChartRange.day1 ? _lastDayStart(points, now) : startDate(now);
     if (start == null) return points;
     return points.where((p) => !p.date.isBefore(start)).toList();
+  }
+
+  /// How long a market may have stood still for one day to still mean its
+  /// last day of trading: a weekend with a holiday on each side.
+  static const Duration _longestClosure = Duration(days: 4);
+
+  /// Where one day starts: 24 hours before the price last moved, not before
+  /// now. While a market is closed the price is repeated, sample after
+  /// sample, and the 24 hours before now would hold nothing but that
+  /// repetition: a flat line and no change, on every weekend. People asking
+  /// for a day then mean the last day it traded. A price that has not moved
+  /// for longer than [_longestClosure] (a pegged currency) is simply flat,
+  /// and its day is the last 24 hours.
+  static DateTime _lastDayStart(List<DisplayPoint> points, DateTime now) {
+    final day = now.subtract(const Duration(days: 1));
+    var i = points.length - 1;
+    while (i > 0 && points[i].value == points[i - 1].value) {
+      i--;
+    }
+    if (i <= 0) return day;
+    final moved = points[i].date;
+    if (!moved.isBefore(day) || now.difference(moved) > _longestClosure) return day;
+    return moved.subtract(const Duration(days: 1));
   }
 
   /// Ranges that are actually usable given the data in [points] — a range

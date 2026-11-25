@@ -3,9 +3,15 @@ import 'package:flutter/semantics.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:intl/intl.dart' hide TextDirection;
 
+import '../../blocs/alerts_cubit.dart';
 import '../../blocs/app_cubit.dart';
-import '../../blocs/app_state.dart';
+import '../../blocs/holdings_cubit.dart';
+import '../../blocs/market_cubit.dart';
+import '../../blocs/market_state.dart';
 import '../../blocs/money_cubit.dart';
+import '../../blocs/settings_cubit.dart';
+import '../../blocs/settings_state.dart';
+import '../../blocs/zakat_cubit.dart';
 import '../../l10n/app_localizations.dart';
 import '../../models/book.dart';
 import '../../models/book_account.dart';
@@ -51,15 +57,19 @@ class HomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    final cubit = context.read<AppCubit>();
-    return BlocBuilder<AppCubit, AppState>(
+    final settingsCubit = context.read<SettingsCubit>();
+    return BlocBuilder<SettingsCubit, SettingsState>(
       builder: (context, app) {
         final money = context.watch<MoneyCubit>().state;
+        final holdings = context.watch<HoldingsCubit>();
+        final market = context.watch<MarketCubit>().state;
+        // The zakat card reads its choices through this cubit's assessment.
+        final zakat = context.watch<ZakatCubit>();
         final hidden = app.hideBalances;
-        final valuation = cubit.portfolioValuation;
-        final summary = netWorthOf(cubit, money);
+        final valuation = holdings.portfolioValuation;
+        final summary = netWorthOf(holdings, market, app.baseCurrency, money);
         final hasHoldings = valuation != null;
-        final started = showsGetStarted(app, money);
+        final started = showsGetStarted(context.watch<AppCubit>().state, holdings.state, context.watch<AlertsCubit>().state, money);
 
         final children = <Widget>[const ImportBanner(), const BankMessagesOffer()];
         // The total. Until the first account or asset, it is the Portfolio,
@@ -68,22 +78,23 @@ class HomeScreen extends StatelessWidget {
         if (!money.hasBook && hasHoldings) {
           total = PortfolioHero(
             valuation: valuation,
-            history: cubit.portfolioHistory(app.preferredPortfolioRange),
-            change: cubit.portfolioChange(app.preferredPortfolioRange),
+            history: holdings.portfolioHistory(app.preferredPortfolioRange),
+            change: holdings.portfolioChange(app.preferredPortfolioRange),
             selectedRange: app.preferredPortfolioRange,
-            onSelectRange: cubit.setPreferredPortfolioRange,
+            onSelectRange: settingsCubit.setPreferredPortfolioRange,
             onTap: () => BalanceSheetScreen.open(context),
             hideBalances: hidden,
-            onToggleHideBalances: cubit.toggleHideBalances,
+            onToggleHideBalances: settingsCubit.toggleHideBalances,
           );
         } else if (money.hasBook) {
           total = _NetWorthCard(
             summary: summary,
             hidden: hidden,
             book: money.book,
-            holdings: cubit.portfolioHistory(app.preferredPortfolioRange),
-            app: app,
-            onSelectRange: cubit.setPreferredPortfolioRange,
+            holdings: holdings.portfolioHistory(app.preferredPortfolioRange),
+            settings: app,
+            market: market,
+            onSelectRange: settingsCubit.setPreferredPortfolioRange,
           );
         } else {
           // With nothing added yet: after setup, the first steps for what
@@ -95,7 +106,7 @@ class HomeScreen extends StatelessWidget {
         if (started) children..add(const GetStartedCard())..add(const SizedBox(height: DS.spaceMD));
 
         for (final card in money.settings.visibleCards) {
-          final w = _card(context, card, app, money, summary, hidden);
+          final w = _card(context, card, app, market, holdings, zakat, money, summary, hidden);
           if (w == null) continue;
           children.add(GestureDetector(
             onLongPress: () => EditHomeScreen.open(context),
@@ -119,7 +130,7 @@ class HomeScreen extends StatelessWidget {
                 IconButton(
                   icon: Icon(hidden ? Icons.visibility_off_outlined : Icons.visibility_outlined),
                   tooltip: hidden ? l10n.privacyShowBalances : l10n.privacyHideBalances,
-                  onPressed: cubit.toggleHideBalances,
+                  onPressed: settingsCubit.toggleHideBalances,
                 ),
                 if (onOpenSettings != null) IconButton(icon: const Icon(Icons.settings_outlined), tooltip: l10n.settingsTitle, onPressed: onOpenSettings),
               ],
@@ -136,7 +147,7 @@ class HomeScreen extends StatelessWidget {
   }
 
   /// One Home card, or null when it has nothing to show right now.
-  Widget? _card(BuildContext context, HomeCard card, AppState app, MoneyState money, NetWorthSummary summary, bool hidden) {
+  Widget? _card(BuildContext context, HomeCard card, SettingsState app, MarketState market, HoldingsCubit holdings, ZakatCubit zakat, MoneyState money, NetWorthSummary summary, bool hidden) {
     final l10n = AppLocalizations.of(context)!;
     final locale = Localizations.localeOf(context).toLanguageTag();
     final ccy = app.baseCurrency;
@@ -172,7 +183,7 @@ class HomeScreen extends StatelessWidget {
             ),
         ]);
       case HomeCard.leftToSpend:
-        final a = cubit.monthAnalysis(DateTime.now(), currency: ccy, rates: app.rates);
+        final a = cubit.monthAnalysis(DateTime.now(), currency: ccy, rates: market.rates);
         return MoneySection(
           title: l10n.cardLeftToSpend,
           onTitleTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const BudgetScreen())),
@@ -183,25 +194,24 @@ class HomeScreen extends StatelessWidget {
               MoneyRow(
                 key: const ValueKey('leftToSpend'),
                 icon: Icons.donut_large,
-                title: moneyText(a.leftToSpend, ccy, hidden: hidden),
+                title: minorText(a.leftToSpend, ccy, hidden: hidden),
                 subtitle: [
-                  l10n.moneySpentOf(moneyText(a.spent, ccy, hidden: hidden), moneyText(a.budget, ccy, hidden: hidden)),
-                  if (a.planned > 0) l10n.plannedThisMonth(moneyText(a.planned, ccy, hidden: hidden)),
+                  l10n.moneySpentOf(minorText(a.spent, ccy, hidden: hidden), minorText(a.budget, ccy, hidden: hidden)),
+                  if (a.planned > 0) l10n.plannedThisMonth(minorText(a.planned, ccy, hidden: hidden)),
                 ].join(' · '),
               ),
             if (a.hasBudget && !a.complete) MissingRatesNote(a.missingRates),
           ],
         );
       case HomeCard.holdings:
-        final appCubit = context.read<AppCubit>();
-        final v = appCubit.portfolioValuation;
+        final v = holdings.portfolioValuation;
         // Before the first account, the total above already is the holdings.
         if (v == null || !money.hasBook) return null;
         return _HoldingsCard(
           valuation: v,
-          held: appCubit.heldInstruments,
-          history: appCubit.portfolioHistory(app.preferredPortfolioRange),
-          pricesAt: app.lastRefresh,
+          held: holdings.heldInstruments,
+          history: holdings.portfolioHistory(app.preferredPortfolioRange),
+          pricesAt: market.lastRefresh,
           hidden: hidden,
         );
       case HomeCard.accounts:
@@ -266,7 +276,7 @@ class HomeScreen extends StatelessWidget {
           ],
         );
       case HomeCard.zakat:
-        final z = ZakatOnBook.of(book: book, holdings: context.read<AppCubit>().zakatAssessment, currency: ccy, rates: app.rates);
+        final z = ZakatOnBook.of(book: book, holdings: zakat.assessment, currency: ccy, rates: market.rates);
         return MoneySection(
           title: l10n.featZakat,
           onTitleTap: () => ZakatScreen.open(context),
@@ -304,7 +314,8 @@ class _NetWorthCard extends StatefulWidget {
   final bool hidden;
   final Book book;
   final List<PortfolioHistoryPoint> holdings;
-  final AppState app;
+  final SettingsState settings;
+  final MarketState market;
   final ValueChanged<ChartRange> onSelectRange;
 
   const _NetWorthCard({
@@ -312,7 +323,8 @@ class _NetWorthCard extends StatefulWidget {
     required this.hidden,
     required this.book,
     required this.holdings,
-    required this.app,
+    required this.settings,
+    required this.market,
     required this.onSelectRange,
   });
 
@@ -327,9 +339,10 @@ class _NetWorthCardState extends State<_NetWorthCard> {
   List<DisplayPoint> _points = const [];
 
   List<DisplayPoint> get points {
-    final app = widget.app;
+    final app = widget.settings;
+    final market = widget.market;
     final now = DateTime.now();
-    final inputs = [widget.book, widget.holdings, app.fxHistory, app.rates, app.preferredPortfolioRange, app.baseCurrency, DateUtils.dateOnly(now)];
+    final inputs = [widget.book, widget.holdings, market.fxHistory, market.rates, app.preferredPortfolioRange, app.baseCurrency, DateUtils.dateOnly(now)];
     final same = _inputs.length == inputs.length &&
         [for (var i = 0; i < inputs.length; i++) i < 4 ? identical(_inputs[i], inputs[i]) : _inputs[i] == inputs[i]].every((x) => x);
     if (same) return _points;
@@ -338,8 +351,8 @@ class _NetWorthCardState extends State<_NetWorthCard> {
       book: widget.book,
       holdings: widget.holdings,
       currency: app.baseCurrency,
-      rates: app.rates,
-      fxHistory: app.fxHistory,
+      rates: market.rates,
+      fxHistory: market.fxHistory,
       range: app.preferredPortfolioRange,
       now: now,
     );
@@ -403,7 +416,7 @@ class _NetWorthCardState extends State<_NetWorthCard> {
                 onTap: () {},
                 child: RangeSelector(
                   ranges: ChartRange.portfolioSelectable,
-                  selected: widget.app.preferredPortfolioRange,
+                  selected: widget.settings.preferredPortfolioRange,
                   onSelected: widget.onSelectRange,
                   accent: colors.brand,
                   fill: true,
@@ -665,7 +678,7 @@ class EditHomeScreen extends StatelessWidget {
 /// use. Nothing turns on without a tap.
 Future<void> showWhatsNew(BuildContext context) async {
   final money = context.read<MoneyCubit>();
-  final hasGold = context.read<AppCubit>().state.lots.isNotEmpty;
+  final hasGold = context.read<HoldingsCubit>().state.lots.isNotEmpty;
   final chosen = {...money.state.settings.features, if (hasGold) MoneyFeature.zakat};
   await showModalBottomSheet<void>(
     context: context,

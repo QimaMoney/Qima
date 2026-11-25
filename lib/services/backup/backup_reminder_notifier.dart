@@ -21,7 +21,7 @@ const int backupReminderNotificationId = 0x51424B50; // 'QBKP' in ASCII hex, mas
 /// from BOTH the foreground refresh path and the background task (spec
 /// Phase 6: "have the background task post one notification at most once
 /// per 30 days"). Called from the same place `RefreshPipeline` already
-/// runs — see `AppCubit._evaluateAlertsAfterRefresh` and
+/// runs — see `AlertsCubit.evaluateAfterRefresh` and
 /// `RefreshPipeline.run` — so it piggybacks on the existing refresh cadence
 /// rather than needing its own scheduler.
 class BackupReminderNotifier {

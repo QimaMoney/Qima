@@ -4,9 +4,9 @@ import 'package:workmanager/workmanager.dart';
 
 import 'alert_runtime_store.dart';
 import 'alerts_store.dart';
+import 'book_store.dart';
 import 'custom_instrument_store.dart';
-import 'holdings_store.dart';
-import 'transactions_store.dart';
+import 'holdings_ledger.dart';
 import 'notification_service.dart';
 import 'preferences.dart';
 import 'price_repository.dart';
@@ -33,7 +33,7 @@ import 'watchlist_store.dart';
 ///   (`workmanager`'s macOS backend only runs while the app process is
 ///   alive via `NSBackgroundActivityScheduler`, and there's no equivalent
 ///   on Windows/Linux/Web) — those platforms evaluate alerts only while
-///   the app is actually open and refreshing, via `AppCubit.refreshAll`.
+///   the app is actually open and refreshing, via `MarketCubit.refreshAll`.
 class BackgroundRefresh {
   BackgroundRefresh._();
 
@@ -111,7 +111,7 @@ void callbackDispatcher() {
       final pipeline = RefreshPipeline(
         repository: PriceRepository(),
         watchlistStore: WatchlistStore(),
-        transactionsStore: TransactionsStore(legacyLots: HoldingsStore()),
+        holdings: HoldingsLedger(BookStore()),
         customInstrumentStore: CustomInstrumentStore(),
         alertsStore: AlertsStore(),
         alertRuntimeStore: AlertRuntimeStore(),

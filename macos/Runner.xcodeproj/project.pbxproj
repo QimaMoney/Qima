@@ -56,6 +56,7 @@
 		D0449DDDF2C648BB9599AF06 /* Components.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B1A6D24877E5AD35F0271A4 /* Components.swift */; };
 		D530618D525AABA83D45332E /* PortfolioWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAB6E5380877E84A0DAF4100 /* PortfolioWidget.swift */; };
 		E147DD45B9F3719AE3ABA33C /* CloudKVPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08A3123DA6056FA14123F29F /* CloudKVPlugin.swift */; };
+		7E2B8D4F1A6C49D3B5F0C826 /* CloudSyncPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = D93A5E7C2B1F4680A4C7E15B /* CloudSyncPlugin.swift */; };
 		FCFA6FD55E45018E2A26DCBE /* SystemSettingsPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC5554DCB91DEE7EA62D855B /* SystemSettingsPlugin.swift */; };
 		FFDA55CC64104AFF5CABA8AE /* Style.swift in Sources */ = {isa = PBXBuildFile; fileRef = E802E9E263C0C0E7631C1A9C /* Style.swift */; };
 /* End PBXBuildFile section */
@@ -111,6 +112,7 @@
 /* Begin PBXFileReference section */
 		0607C715929B29FD6B93BF83 /* en */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
 		08A3123DA6056FA14123F29F /* CloudKVPlugin.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CloudKVPlugin.swift; sourceTree = "<group>"; };
+		D93A5E7C2B1F4680A4C7E15B /* CloudSyncPlugin.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CloudSyncPlugin.swift; sourceTree = "<group>"; };
 		0E1F3C77F39972EAD2658424 /* Pods-RunnerTests.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-RunnerTests.debug.xcconfig"; path = "Target Support Files/Pods-RunnerTests/Pods-RunnerTests.debug.xcconfig"; sourceTree = "<group>"; };
 		137760BC25B862D4328A3861 /* Snapshot.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Snapshot.swift; sourceTree = "<group>"; };
 		19941C28A270177D72298BD7 /* Pods-Runner.profile.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.profile.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.profile.xcconfig"; sourceTree = "<group>"; };
@@ -291,6 +293,7 @@
 				33CC11242044D66E0003C045 /* Resources */,
 				33BA886A226E78AF003329D5 /* Configs */,
 				08A3123DA6056FA14123F29F /* CloudKVPlugin.swift */,
+				D93A5E7C2B1F4680A4C7E15B /* CloudSyncPlugin.swift */,
 				AC5554DCB91DEE7EA62D855B /* SystemSettingsPlugin.swift */,
 				939F245B8D59915241B3936C /* AppStore.entitlements */,
 				6273FFFE9222B2958CE83900 /* WidgetBridgePlugin.swift */,
@@ -656,6 +659,7 @@
 				33CC10F12044A3C60003C045 /* AppDelegate.swift in Sources */,
 				335BBD1B22A9A15E00E9071D /* GeneratedPluginRegistrant.swift in Sources */,
 				E147DD45B9F3719AE3ABA33C /* CloudKVPlugin.swift in Sources */,
+				7E2B8D4F1A6C49D3B5F0C826 /* CloudSyncPlugin.swift in Sources */,
 				FCFA6FD55E45018E2A26DCBE /* SystemSettingsPlugin.swift in Sources */,
 				27681779DE28C68EE8095C27 /* WidgetBridgePlugin.swift in Sources */,
 				5FD69F91CF488F7DCAE88044 /* DictationPlugin.swift in Sources */,

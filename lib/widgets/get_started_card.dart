@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../blocs/alerts_cubit.dart';
+import '../blocs/alerts_state.dart';
 import '../blocs/app_cubit.dart';
 import '../blocs/app_state.dart';
+import '../blocs/holdings_cubit.dart';
+import '../blocs/holdings_state.dart';
 import '../blocs/money_cubit.dart';
 import '../l10n/app_localizations.dart';
 import '../models/book_account.dart';
@@ -27,23 +31,23 @@ List<StartTask> startTasksFor(SetupAnswers setup) => [
 
 /// Whether [task] has been done, read from what is in the app, so a task
 /// ticks itself wherever the person does it and never needs marking.
-bool startTaskDone(StartTask task, AppState app, MoneyState money) => switch (task) {
+bool startTaskDone(StartTask task, HoldingsState holdings, AlertsState alerts, MoneyState money) => switch (task) {
       StartTask.account => money.accounts.any((a) => !a.archived && const {AccountType.cash, AccountType.debit, AccountType.credit}.contains(a.type)),
       // An account's opening balance and a valuation are not transactions
       // the person recorded.
-      StartTask.transaction => money.entries.any((e) => e.template != EntryTemplate.opening && e.template != EntryTemplate.valuation),
-      StartTask.holding => app.transactions.isNotEmpty,
+      StartTask.transaction => money.listed.any((e) => e.template != EntryTemplate.opening && e.template != EntryTemplate.valuation),
+      StartTask.holding => holdings.transactions.isNotEmpty,
       StartTask.asset => money.ofType(AccountType.asset).isNotEmpty,
-      StartTask.alert => app.alerts.isNotEmpty,
+      StartTask.alert => alerts.alerts.isNotEmpty,
       StartTask.bankMessages => money.settings.askedBankMessages || money.settings.messageSenders.isNotEmpty,
     };
 
 /// Whether Home shows the Get started card: setup was answered, the card
 /// was not closed, and something on it is still to do.
-bool showsGetStarted(AppState app, MoneyState money) {
+bool showsGetStarted(AppState app, HoldingsState holdings, AlertsState alerts, MoneyState money) {
   final setup = app.setup;
   if (setup == null || app.getStartedDismissed || !money.loaded) return false;
-  return startTasksFor(setup).any((t) => !startTaskDone(t, app, money));
+  return startTasksFor(setup).any((t) => !startTaskDone(t, holdings, alerts, money));
 }
 
 /// Home's Get started card: the first steps for what the person said they
@@ -57,9 +61,11 @@ class GetStartedCard extends StatelessWidget {
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
     final app = context.watch<AppCubit>().state;
+    final holdings = context.watch<HoldingsCubit>().state;
+    final alerts = context.watch<AlertsCubit>().state;
     final money = context.watch<MoneyCubit>().state;
     final tasks = startTasksFor(app.setup ?? const SetupAnswers());
-    final done = {for (final t in tasks) if (startTaskDone(t, app, money)) t};
+    final done = {for (final t in tasks) if (startTaskDone(t, holdings, alerts, money)) t};
     // Setting Qima up is the first step, already done.
     final total = tasks.length + 1;
     final finished = done.length + 1;

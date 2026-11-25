@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:qima/blocs/app_cubit.dart';
-import 'package:qima/blocs/app_state.dart';
+import 'package:qima/blocs/app_blocs.dart';
+import 'package:qima/blocs/market_state.dart';
 import 'package:qima/l10n/app_localizations.dart';
 import 'package:qima/models/asset.dart';
 import 'package:qima/models/instrument_catalog.dart';
@@ -17,10 +17,10 @@ class _FailingRepository extends PriceRepository {
 
 void main() {
   test('a failed refresh stores a localization key, not exception text', () async {
-    final cubit = AppCubit(repository: _FailingRepository());
-    await cubit.refresh(InstrumentCatalog.all.first);
-    expect(cubit.state.phase, RefreshPhase.failed);
-    expect(cubit.state.errorMessage, 'error.refreshFailed');
+    final cubit = AppBlocs(repository: _FailingRepository());
+    await cubit.market.refresh(InstrumentCatalog.all.first);
+    expect(cubit.market.state.phase, RefreshPhase.failed);
+    expect(cubit.market.state.errorMessage, 'error.refreshFailed');
   });
 
   testWidgets('the refresh-failed key resolves to translated text', (tester) async {

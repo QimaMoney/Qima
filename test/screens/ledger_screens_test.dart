@@ -3,12 +3,13 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:qima/blocs/app_cubit.dart';
+import 'package:qima/blocs/app_blocs.dart';
 import 'package:qima/l10n/app_localizations.dart';
 import 'package:qima/l10n/app_localizations_ar.dart';
 import 'package:qima/l10n/app_localizations_en.dart';
 import 'package:qima/models/asset.dart';
 import 'package:qima/models/fx_history.dart';
+import 'package:qima/models/holding_entry_codec.dart';
 import 'package:qima/models/holding_transaction.dart';
 import 'package:qima/models/instrument_catalog.dart';
 import 'package:qima/models/metal_breakdown.dart';
@@ -17,13 +18,15 @@ import 'package:qima/models/quote.dart';
 import 'package:qima/screens/holdings_screen.dart';
 import 'package:qima/screens/transaction_editor_screen.dart';
 import 'package:qima/services/local_file_store.dart';
-import 'package:qima/services/holdings_store.dart';
+import 'package:qima/services/book_store.dart';
 import 'package:qima/services/preferences.dart';
-import 'package:qima/services/transactions_store.dart';
+import 'package:qima/services/holdings_ledger.dart';
 import 'package:qima/services/price_repository.dart';
 import 'package:qima/theme/app_theme.dart';
 import 'package:qima/theme/masking.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../helpers/app_blocs.dart';
+import '../helpers/money_provider.dart';
 
 /// Never touches the network: a save that starts tracking a new instrument
 /// would otherwise try to fetch its price.
@@ -36,10 +39,10 @@ class _OfflineRepository extends PriceRepository {
 }
 
 /// In memory, so saves complete inside the widget test's fake clock.
-class _MemoryTransactionsStore extends TransactionsStore {
+class _MemoryHoldings extends HoldingsLedger {
   final Map<String, HoldingTransaction> _rows = {};
 
-  _MemoryTransactionsStore() : super(legacyLots: HoldingsStore());
+  _MemoryHoldings() : super(BookStore());
 
   List<HoldingTransaction> get _all => _rows.values.toList();
 
@@ -47,7 +50,7 @@ class _MemoryTransactionsStore extends TransactionsStore {
   Future<List<HoldingTransaction>> load() async => _all;
 
   @override
-  Future<List<HoldingTransaction>> upsert(HoldingTransaction transaction) async {
+  Future<List<HoldingTransaction>> upsert(HoldingTransaction transaction, {CashLeg? cash, String? baseCurrency, String merchant = ''}) async {
     _rows[transaction.id] = transaction;
     return _all;
   }
@@ -97,14 +100,14 @@ void main() {
         date: date,
       );
 
-  Future<AppCubit> cubitWith(List<HoldingTransaction> transactions, {bool hidden = false}) async {
-    final store = _MemoryTransactionsStore();
+  Future<AppBlocs> cubitWith(List<HoldingTransaction> transactions, {bool hidden = false}) async {
+    final store = _MemoryHoldings();
     for (final t in transactions) {
       await store.upsert(t);
     }
-    final cubit = AppCubit(repository: _OfflineRepository(), transactionsStore: store);
-    cubit.preferences = await Preferences.create();
-    cubit.emit(cubit.state.copyWith(
+    final blocs = AppBlocs(repository: _OfflineRepository(), holdings: store);
+    blocs.settings.preferences = await Preferences.create();
+    blocs.seed(
       initialized: true,
       transactions: transactions,
       seriesByID: {
@@ -114,12 +117,12 @@ void main() {
       rates: FXRates(base: 'USD', rates: const {'USD': 1}, updatedAt: DateTime(2026)),
       fxHistory: FXHistory.empty,
       hideBalances: hidden,
-    ));
-    return cubit;
+    );
+    return blocs;
   }
 
-  Widget harness(AppCubit cubit, Widget home, {Locale locale = const Locale('en')}) => BlocProvider<AppCubit>.value(
-        value: cubit,
+  Widget harness(AppBlocs blocs, Widget home, {Locale locale = const Locale('en')}) => MultiBlocProvider(
+        providers: [...blocs.providers, testMoneyProvider(blocs)],
         child: MaterialApp(
           locale: locale,
           localizationsDelegates: AppLocalizations.localizationsDelegates,
@@ -140,8 +143,8 @@ void main() {
   group('HoldingsScreen ledger', () {
     testWidgets('summarises holding, average cost, unrealised and realised', (tester) async {
       phone(tester);
-      final cubit = await cubitWith(ledger);
-      await tester.pumpWidget(harness(cubit, HoldingsScreen(instrument: gold, displayCurrency: 'USD', refUnit: PriceUnit.gram)));
+      final blocs = await cubitWith(ledger);
+      await tester.pumpWidget(harness(blocs, HoldingsScreen(instrument: gold, displayCurrency: 'USD', refUnit: PriceUnit.gram)));
       await tester.pumpAndSettle();
       expect(find.text('70 g'), findsOneWidget);
       expect(find.text(en.ledgerPerUnit(usd(80), en.unitAbbrGram)), findsOneWidget);
@@ -153,8 +156,8 @@ void main() {
 
     testWidgets('lists newest first', (tester) async {
       phone(tester);
-      final cubit = await cubitWith(ledger);
-      await tester.pumpWidget(harness(cubit, HoldingsScreen(instrument: gold, displayCurrency: 'USD')));
+      final blocs = await cubitWith(ledger);
+      await tester.pumpWidget(harness(blocs, HoldingsScreen(instrument: gold, displayCurrency: 'USD')));
       await tester.pumpAndSettle();
       final feeY = tester.getTopLeft(find.text(en.transactionKindFee).first).dy;
       final buyY = tester.getTopLeft(find.text(en.transactionKindBuy)).dy;
@@ -163,8 +166,8 @@ void main() {
 
     testWidgets('hidden balances mask the holding and money, not the average cost', (tester) async {
       phone(tester);
-      final cubit = await cubitWith(ledger, hidden: true);
-      await tester.pumpWidget(harness(cubit, HoldingsScreen(instrument: gold, displayCurrency: 'USD', refUnit: PriceUnit.gram)));
+      final blocs = await cubitWith(ledger, hidden: true);
+      await tester.pumpWidget(harness(blocs, HoldingsScreen(instrument: gold, displayCurrency: 'USD', refUnit: PriceUnit.gram)));
       await tester.pumpAndSettle();
       expect(find.text('70 g'), findsNothing);
       expect(find.textContaining('885'), findsNothing);
@@ -173,11 +176,11 @@ void main() {
 
     testWidgets('a sold-out holding says nothing is held and keeps its realised result', (tester) async {
       phone(tester);
-      final cubit = await cubitWith([
+      final blocs = await cubitWith([
         tx('b1', TransactionKind.buy, 10, 80, DateTime(2026, 1, 10)),
         tx('s1', TransactionKind.sell, 10, 100, DateTime(2026, 2, 1)),
       ]);
-      await tester.pumpWidget(harness(cubit, HoldingsScreen(instrument: gold, displayCurrency: 'USD')));
+      await tester.pumpWidget(harness(blocs, HoldingsScreen(instrument: gold, displayCurrency: 'USD')));
       await tester.pumpAndSettle();
       expect(find.text(en.ledgerNothingHeld), findsOneWidget);
       expect(find.textContaining(usd(200)), findsWidgets);
@@ -185,11 +188,11 @@ void main() {
 
     testWidgets('an overdrawn row from a sync conflict is flagged', (tester) async {
       phone(tester);
-      final cubit = await cubitWith([
+      final blocs = await cubitWith([
         tx('b1', TransactionKind.buy, 10, 80, DateTime(2026, 1, 10)),
         tx('s1', TransactionKind.sell, 15, 100, DateTime(2026, 2, 1)),
       ]);
-      await tester.pumpWidget(harness(cubit, HoldingsScreen(instrument: gold, displayCurrency: 'USD')));
+      await tester.pumpWidget(harness(blocs, HoldingsScreen(instrument: gold, displayCurrency: 'USD')));
       await tester.pumpAndSettle();
       expect(find.text(en.ledgerOverdrawnBanner), findsOneWidget);
       expect(find.byIcon(Icons.warning_amber_rounded), findsWidgets);
@@ -197,30 +200,30 @@ void main() {
 
     testWidgets('deleting a buy a later sale depends on is refused with the reason', (tester) async {
       phone(tester);
-      final cubit = await cubitWith(ledger);
-      await tester.pumpWidget(harness(cubit, HoldingsScreen(instrument: gold, displayCurrency: 'USD')));
+      final blocs = await cubitWith(ledger);
+      await tester.pumpWidget(harness(blocs, HoldingsScreen(instrument: gold, displayCurrency: 'USD')));
       await tester.pumpAndSettle();
       await tester.tap(find.text(en.transactionKindBuy));
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip(en.commonDelete));
       await tester.pumpAndSettle();
       expect(find.text(en.ledgerConflictDeleteTitle), findsOneWidget);
-      expect(cubit.state.transactions, hasLength(3));
+      expect(blocs.holdings.state.transactions, hasLength(3));
     });
 
     testWidgets('empty ledger offers to add the first transaction', (tester) async {
       phone(tester);
-      final cubit = await cubitWith(const []);
-      await tester.pumpWidget(harness(cubit, HoldingsScreen(instrument: gold, displayCurrency: 'USD')));
+      final blocs = await cubitWith(const []);
+      await tester.pumpWidget(harness(blocs, HoldingsScreen(instrument: gold, displayCurrency: 'USD')));
       await tester.pumpAndSettle();
       expect(find.text(en.ledgerAddFirst), findsOneWidget);
     });
 
     testWidgets('renders in Arabic without overflow', (tester) async {
       phone(tester);
-      final cubit = await cubitWith(ledger);
+      final blocs = await cubitWith(ledger);
       await tester.pumpWidget(
-          harness(cubit, HoldingsScreen(instrument: gold, displayCurrency: 'USD'), locale: const Locale('ar')));
+          harness(blocs, HoldingsScreen(instrument: gold, displayCurrency: 'USD'), locale: const Locale('ar')));
       await tester.pumpAndSettle();
       expect(find.text(AppLocalizationsAr().transactionKindSell), findsOneWidget);
       expect(tester.takeException(), isNull);
@@ -240,8 +243,8 @@ void main() {
 
     testWidgets('a sell previews its realised gain and saves', (tester) async {
       phone(tester, height: 4200);
-      final cubit = await cubitWith([tx('b1', TransactionKind.buy, 100, 80, DateTime(2026, 1, 10))]);
-      await tester.pumpWidget(harness(cubit, TransactionEditorScreen(instrument: gold, defaultCurrency: 'USD')));
+      final blocs = await cubitWith([tx('b1', TransactionKind.buy, 100, 80, DateTime(2026, 1, 10))]);
+      await tester.pumpWidget(harness(blocs, TransactionEditorScreen(instrument: gold, defaultCurrency: 'USD')));
       await tester.pumpAndSettle();
       await tester.tap(find.text(en.transactionKindSell));
       await tester.pumpAndSettle();
@@ -252,15 +255,15 @@ void main() {
       expect(find.text(en.transactionPreviewTitle.toUpperCase()), findsOneWidget);
       expect(find.textContaining(usd(995)), findsOneWidget);
       await save(tester);
-      final sell = cubit.state.transactions.firstWhere((t) => t.kind == TransactionKind.sell);
+      final sell = blocs.holdings.state.transactions.firstWhere((t) => t.kind == TransactionKind.sell);
       expect(sell.quantity, 25);
       expect(sell.fee, 5);
     });
 
     testWidgets('selling more than is held is refused inline', (tester) async {
       phone(tester, height: 4200);
-      final cubit = await cubitWith([tx('b1', TransactionKind.buy, 10, 80, DateTime(2026, 1, 10))]);
-      await tester.pumpWidget(harness(cubit, TransactionEditorScreen(instrument: gold, defaultCurrency: 'USD')));
+      final blocs = await cubitWith([tx('b1', TransactionKind.buy, 10, 80, DateTime(2026, 1, 10))]);
+      await tester.pumpWidget(harness(blocs, TransactionEditorScreen(instrument: gold, defaultCurrency: 'USD')));
       await tester.pumpAndSettle();
       await tester.tap(find.text(en.transactionKindSell));
       await tester.pumpAndSettle();
@@ -272,9 +275,9 @@ void main() {
 
     testWidgets('shrinking a buy below a later sale names that sale', (tester) async {
       phone(tester, height: 4200);
-      final cubit = await cubitWith(ledger);
+      final blocs = await cubitWith(ledger);
       await tester.pumpWidget(
-          harness(cubit, TransactionEditorScreen(instrument: gold, defaultCurrency: 'USD', existing: ledger.first)));
+          harness(blocs, TransactionEditorScreen(instrument: gold, defaultCurrency: 'USD', existing: ledger.first)));
       await tester.pumpAndSettle();
       await type(tester, en.holdingsQuantity, '20');
       expect(find.textContaining(en.transactionKindSell), findsWidgets);
@@ -283,8 +286,8 @@ void main() {
 
     testWidgets('a new row starts at the karat already held', (tester) async {
       phone(tester, height: 4200);
-      final cubit = await cubitWith([tx('b1', TransactionKind.buy, 100, 80, DateTime(2026, 1, 10), karat: GoldKarat.k21)]);
-      await tester.pumpWidget(harness(cubit, TransactionEditorScreen(instrument: gold, defaultCurrency: 'USD')));
+      final blocs = await cubitWith([tx('b1', TransactionKind.buy, 100, 80, DateTime(2026, 1, 10), karat: GoldKarat.k21)]);
+      await tester.pumpWidget(harness(blocs, TransactionEditorScreen(instrument: gold, defaultCurrency: 'USD')));
       await tester.pumpAndSettle();
       final segmented = tester.widget<SegmentedButton<GoldKarat>>(find.byType(SegmentedButton<GoldKarat>));
       expect(segmented.selected, {GoldKarat.k21});
@@ -292,8 +295,8 @@ void main() {
 
     testWidgets('a fee needs only an amount', (tester) async {
       phone(tester, height: 4200);
-      final cubit = await cubitWith([tx('b1', TransactionKind.buy, 10, 80, DateTime(2026, 1, 10))]);
-      await tester.pumpWidget(harness(cubit, TransactionEditorScreen(instrument: gold, defaultCurrency: 'USD')));
+      final blocs = await cubitWith([tx('b1', TransactionKind.buy, 10, 80, DateTime(2026, 1, 10))]);
+      await tester.pumpWidget(harness(blocs, TransactionEditorScreen(instrument: gold, defaultCurrency: 'USD')));
       await tester.pumpAndSettle();
       await tester.tap(find.text(en.transactionKindFee));
       await tester.pumpAndSettle();
@@ -301,20 +304,20 @@ void main() {
       expect(find.text(en.transactionNeedsFee), findsOneWidget);
       await type(tester, en.transactionFeeAmount, '12,5');
       await save(tester);
-      expect(cubit.state.transactions.firstWhere((t) => t.kind == TransactionKind.fee).fee, 12.5,
+      expect(blocs.holdings.state.transactions.firstWhere((t) => t.kind == TransactionKind.fee).fee, 12.5,
           reason: 'a comma decimal is accepted');
     });
 
     testWidgets('a transfer in may carry no cost', (tester) async {
       phone(tester, height: 4200);
-      final cubit = await cubitWith(const []);
-      await tester.pumpWidget(harness(cubit, TransactionEditorScreen(instrument: gold, defaultCurrency: 'USD')));
+      final blocs = await cubitWith(const []);
+      await tester.pumpWidget(harness(blocs, TransactionEditorScreen(instrument: gold, defaultCurrency: 'USD')));
       await tester.pumpAndSettle();
       await tester.tap(find.text(en.transactionKindTransfer));
       await tester.pumpAndSettle();
       await type(tester, en.holdingsQuantity, '5');
       await save(tester);
-      final t = cubit.state.transactions.single;
+      final t = blocs.holdings.state.transactions.single;
       expect(t.kind, TransactionKind.transferIn);
       expect(t.unitPrice, 0);
     });

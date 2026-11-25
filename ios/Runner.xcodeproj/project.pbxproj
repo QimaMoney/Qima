@@ -37,6 +37,7 @@
 		97C146FE1CF9000F007C117D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FD1CF9000F007C117D /* Assets.xcassets */; };
 		97C147011CF9000F007C117D /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FF1CF9000F007C117D /* LaunchScreen.storyboard */; };
 		A131E80A7AA06ED4A9F20647 /* CloudKVPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C17207816BE6A8A148BE81D /* CloudKVPlugin.swift */; };
+		5B9E4C1D7F3A48E2B6D0A917 /* CloudSyncPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = C47D2A9E61F8435B9A0E3D72 /* CloudSyncPlugin.swift */; };
 		A9E90784C671485521F9FC10 /* QimaWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 1AB69C3516654ACD919EC695 /* QimaWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		B15AC16D03C29EAC2F3F3356 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = 65A3346AE859C728CC9A7012 /* Localizable.strings */; };
 		BCD049D994757152012D26DA /* Snapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45982C19AB91A2BE84668221 /* Snapshot.swift */; };
@@ -121,6 +122,7 @@
 		28164801DADAD4AAA5130696 /* fr */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.strings; name = fr; path = fr.lproj/Localizable.strings; sourceTree = "<group>"; };
 		2BFDCFD8791FD46B2C975F2E /* QimaWidget.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = QimaWidget.entitlements; sourceTree = "<group>"; };
 		2C17207816BE6A8A148BE81D /* CloudKVPlugin.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CloudKVPlugin.swift; sourceTree = "<group>"; };
+		C47D2A9E61F8435B9A0E3D72 /* CloudSyncPlugin.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CloudSyncPlugin.swift; sourceTree = "<group>"; };
 		331C807B294A618700263BE5 /* RunnerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunnerTests.swift; sourceTree = "<group>"; };
 		331C8081294A63A400263BE5 /* RunnerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RunnerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		3B3967151E833CAA004F5970 /* AppFrameworkInfo.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = AppFrameworkInfo.plist; path = Flutter/AppFrameworkInfo.plist; sourceTree = "<group>"; };
@@ -331,6 +333,7 @@
 				7884E8672EC3CC0400C636F2 /* SceneDelegate.swift */,
 				74858FAD1ED2DC5600515810 /* Runner-Bridging-Header.h */,
 				2C17207816BE6A8A148BE81D /* CloudKVPlugin.swift */,
+				C47D2A9E61F8435B9A0E3D72 /* CloudSyncPlugin.swift */,
 				8FC8DB27897060618A7308B6 /* Runner.entitlements */,
 				BF3ECC85679FCE9412D97C20 /* SystemSettingsPlugin.swift */,
 				9732D81EDDDD6CD213AF1A6C /* DictationPlugin.swift */,
@@ -657,6 +660,7 @@
 				1498D2341E8E89220040F4C2 /* GeneratedPluginRegistrant.m in Sources */,
 				7884E8682EC3CC0700C636F2 /* SceneDelegate.swift in Sources */,
 				A131E80A7AA06ED4A9F20647 /* CloudKVPlugin.swift in Sources */,
+				5B9E4C1D7F3A48E2B6D0A917 /* CloudSyncPlugin.swift in Sources */,
 				939D1EC5CEAB4A33465B37CD /* SystemSettingsPlugin.swift in Sources */,
 				0FD9E6C03135E59773D7F5FC /* DictationPlugin.swift in Sources */,
 				BCD049D994757152012D26DA /* Snapshot.swift in Sources */,

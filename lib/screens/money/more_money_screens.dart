@@ -3,7 +3,9 @@ import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:intl/intl.dart' hide TextDirection;
 
-import '../../blocs/app_cubit.dart';
+import '../../blocs/alerts_cubit.dart';
+import '../../blocs/market_cubit.dart';
+import '../../blocs/settings_cubit.dart';
 import '../../blocs/money_cubit.dart';
 import '../../l10n/app_localizations.dart';
 import '../../models/bill_split.dart';
@@ -28,28 +30,20 @@ class BudgetScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
-    final app = context.watch<AppCubit>().state;
+    final settings = context.watch<SettingsCubit>().state;
+    final rates = context.watch<MarketCubit>().state.rates;
     final money = context.read<MoneyCubit>();
     final state = context.watch<MoneyCubit>().state;
-    final ccy = app.baseCurrency;
-    final a = money.monthAnalysis(DateTime.now(), currency: ccy, rates: app.rates);
+    final ccy = settings.baseCurrency;
+    final a = money.monthAnalysis(DateTime.now(), currency: ccy, rates: rates);
     final categories = state.categories(AccountSide.spending);
 
     Future<void> edit(BookAccount c) async {
       final current = state.settings.budgets[c.id];
-      final controller = TextEditingController(text: current == null ? '' : minorFieldText(current, ccy));
       final value = await showDialog<int>(
         context: context,
-        builder: (dialogContext) => AlertDialog(
-          title: Text(l10n.budgetFor(l10n.accountName(c))),
-          content: AmountField(controller: controller, autofocus: true, label: l10n.budgetMonthly, currency: ccy, helper: l10n.budgetZeroHelp),
-          actions: [
-            TextButton(onPressed: () => Navigator.of(dialogContext).pop(), child: Text(l10n.commonCancel)),
-            FilledButton(onPressed: () => Navigator.of(dialogContext).pop(parseMinor(controller.text.isEmpty ? '0' : controller.text, ccy)), child: Text(l10n.holdingsSave)),
-          ],
-        ),
+        builder: (_) => _BudgetAmountDialog(title: l10n.budgetFor(l10n.accountName(c)), amount: current, currency: ccy),
       );
-      controller.dispose();
       if (value == null) return;
       try {
         await money.setBudget(c.id, value);
@@ -69,20 +63,33 @@ class BudgetScreen extends StatelessWidget {
             const SizedBox(height: DS.spaceMD),
             if (a.hasBudget)
               MoneySection(children: [
-                MoneyRow(title: l10n.budgetTotal, bold: true, trailing: moneyText(a.budget, ccy, hidden: app.hideBalances)),
-                MoneyRow(title: l10n.moneySpent, trailing: moneyText(a.spent, ccy, hidden: app.hideBalances)),
-                if (a.planned > 0) MoneyRow(title: l10n.plannedThisMonth(moneyText(a.planned, ccy, hidden: app.hideBalances))),
-                MoneyRow(title: l10n.cardLeftToSpend, trailing: moneyText(a.leftToSpend, ccy, hidden: app.hideBalances), trailingColor: a.leftToSpend < 0 ? colors.down : colors.up),
+                MoneyRow(title: l10n.budgetTotal, bold: true, trailing: minorText(a.budget, ccy, hidden: settings.hideBalances)),
+                MoneyRow(title: l10n.moneySpent, trailing: minorText(a.spent, ccy, hidden: settings.hideBalances)),
+                if (a.planned > 0) MoneyRow(title: l10n.plannedThisMonth(minorText(a.planned, ccy, hidden: settings.hideBalances))),
+                MoneyRow(title: l10n.cardLeftToSpend, trailing: minorText(a.leftToSpend, ccy, hidden: settings.hideBalances), trailingColor: a.leftToSpend < 0 ? colors.down : colors.up),
                 if (!a.complete) MissingRatesNote(a.missingRates),
               ]),
             MoneySection(
               children: [
+                // First, where it is seen without scrolling past every
+                // category.
+                // A budget for something that has no category yet: the
+                // category is made first, then its amount is asked for.
+                MoneyRow(
+                  key: const ValueKey('budgetAdd'),
+                  icon: Icons.add,
+                  title: l10n.budgetAdd,
+                  onTap: () async {
+                    final made = await addCategory(context, AccountSide.spending);
+                    if (made != null && context.mounted) await edit(made);
+                  },
+                ),
                 for (final c in categories)
                   MoneyRow(
                     icon: MoneyIcons.account(c),
                     title: l10n.accountName(c),
-                    subtitle: l10n.moneySpentSoFar(moneyText(a.spentIn(c.id), ccy, hidden: app.hideBalances)),
-                    trailing: a.budgets[c.id] == null ? l10n.budgetNone : moneyText(a.budgets[c.id]!, ccy, hidden: app.hideBalances),
+                    subtitle: l10n.moneySpentSoFar(minorText(a.spentIn(c.id), ccy, hidden: settings.hideBalances)),
+                    trailing: a.budgets[c.id] == null ? l10n.budgetNone : minorText(a.budgets[c.id]!, ccy, hidden: settings.hideBalances),
                     onTap: () => edit(c),
                   ),
               ],
@@ -90,6 +97,43 @@ class BudgetScreen extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Asks for a category's monthly amount. It keeps its own text controller,
+/// which must outlive the dialog's closing animation: one disposed by the
+/// caller as soon as the dialog answered was still being drawn.
+class _BudgetAmountDialog extends StatefulWidget {
+  final String title;
+  final int? amount;
+  final String currency;
+
+  const _BudgetAmountDialog({required this.title, required this.amount, required this.currency});
+
+  @override
+  State<_BudgetAmountDialog> createState() => _BudgetAmountDialogState();
+}
+
+class _BudgetAmountDialogState extends State<_BudgetAmountDialog> {
+  late final _controller = TextEditingController(text: widget.amount == null ? '' : minorFieldText(widget.amount!, widget.currency));
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    return AlertDialog(
+      title: Text(widget.title),
+      content: AmountField(controller: _controller, autofocus: true, label: l10n.budgetMonthly, currency: widget.currency, helper: l10n.budgetZeroHelp),
+      actions: [
+        TextButton(onPressed: () => Navigator.of(context).pop(), child: Text(l10n.commonCancel)),
+        FilledButton(onPressed: () => Navigator.of(context).pop(parseMinor(_controller.text.isEmpty ? '0' : _controller.text, widget.currency)), child: Text(l10n.holdingsSave)),
+      ],
     );
   }
 }
@@ -112,7 +156,7 @@ class RecurringScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    final hidden = context.select<AppCubit, bool>((c) => c.state.hideBalances);
+    final hidden = context.select<SettingsCubit, bool>((c) => c.state.hideBalances);
     final state = context.watch<MoneyCubit>().state;
     final locale = Localizations.localeOf(context).toLanguageTag();
     final today = DateUtils.dateOnly(DateTime.now());
@@ -260,7 +304,7 @@ class _RecurringEditorScreenState extends State<RecurringEditorScreen> {
   Future<void> _save() async {
     final l10n = AppLocalizations.of(context)!;
     final money = context.read<MoneyCubit>();
-    final app = context.read<AppCubit>();
+    final alerts = context.read<AlertsCubit>();
     if (_name.text.trim().isEmpty) return setState(() => _error = l10n.accountErrorName);
     if (_account == null || _category == null) return setState(() => _error = l10n.entryErrorAccount);
     final amount = parseMinor(_amount.text, _account!.currency!);
@@ -286,7 +330,7 @@ class _RecurringEditorScreenState extends State<RecurringEditorScreen> {
       remind: _remind,
     );
     await money.saveRecurring(plan);
-    if (_remind) await app.notificationService.requestPermission();
+    if (_remind) await alerts.notificationService.requestPermission();
     if (mounted) Navigator.of(context).pop();
   }
 
@@ -312,7 +356,7 @@ class _RecurringEditorScreenState extends State<RecurringEditorScreen> {
         }),
       ),
       TextField(controller: _name, autofocus: widget.existing == null, decoration: InputDecoration(labelText: l10n.accountNameLabel, border: const OutlineInputBorder())),
-      AmountField(controller: _amount, label: l10n.entryAmount, currency: _account?.currency ?? context.read<AppCubit>().state.baseCurrency),
+      AmountField(controller: _amount, label: l10n.entryAmount, currency: _account?.currency ?? context.read<SettingsCubit>().state.baseCurrency),
       AccountPicker(label: _incoming ? l10n.planPaidInto : l10n.entryPaidFrom, accounts: accounts, value: _account, onChanged: (a) => setState(() => _account = a)),
       CategoryPicker(
         accounts: categories,
@@ -378,7 +422,7 @@ class PeopleScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    final hidden = context.select<AppCubit, bool>((c) => c.state.hideBalances);
+    final hidden = context.select<SettingsCubit, bool>((c) => c.state.hideBalances);
     final state = context.watch<MoneyCubit>().state;
     // One row per person and currency: what was lent to them and borrowed
     // from them nets out, in the group the net falls in.
@@ -550,11 +594,11 @@ class _BillSplitScreenState extends State<BillSplitScreen> {
     final colors = context.colors;
     final state = context.watch<MoneyCubit>().state;
     final accounts = [...state.ofType(AccountType.credit), ...state.ofType(AccountType.debit), ...state.ofType(AccountType.cash)];
-    final ccy = _from?.currency ?? context.read<AppCubit>().state.baseCurrency;
+    final ccy = _from?.currency ?? context.read<SettingsCubit>().state.baseCurrency;
     final total = parseMinor(_total.text, ccy) ?? 0;
     final parts = _parts(ccy, l10n, forSave: false);
     final others = parts.mine == null ? null : total - parts.mine!;
-    final hidden = context.select<AppCubit, bool>((c) => c.state.hideBalances);
+    final hidden = context.select<SettingsCubit, bool>((c) => c.state.hideBalances);
 
     return ScreenBackground(
       child: Scaffold(

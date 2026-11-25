@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
-import '../blocs/app_cubit.dart';
+import '../blocs/settings_cubit.dart';
 import '../l10n/app_localizations.dart';
 import '../models/spoken_numbers.dart';
 import '../services/dictation_service.dart';
@@ -53,7 +53,7 @@ class _DictationButtonState extends State<DictationButton> {
   String? _checkedTag;
   StreamSubscription<DictationEvent>? _session;
 
-  DictationService get _service => context.read<AppCubit>().dictation;
+  DictationService get _service => context.read<SettingsCubit>().dictation;
 
   String get _tag => dictationLocaleTag(widget.language ?? Localizations.localeOf(context));
 

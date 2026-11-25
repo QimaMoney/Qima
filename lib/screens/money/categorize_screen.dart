@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
-import '../../blocs/app_cubit.dart';
+import '../../blocs/settings_cubit.dart';
 import '../../blocs/money_cubit.dart';
 import '../../l10n/app_localizations.dart';
 import '../../models/book_account.dart';
@@ -30,7 +30,7 @@ class ToCategorizeScreen extends StatelessWidget {
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
     final state = context.watch<MoneyCubit>().state;
-    final hidden = context.select<AppCubit, bool>((c) => c.state.hideBalances);
+    final hidden = context.select<SettingsCubit, bool>((c) => c.state.hideBalances);
     final groups = state.uncategorized;
     return ScreenBackground(
       child: Scaffold(

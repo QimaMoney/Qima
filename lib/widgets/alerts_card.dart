@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
-import '../blocs/app_cubit.dart';
-import '../blocs/app_state.dart';
+import '../blocs/alerts_cubit.dart';
+import '../blocs/alerts_state.dart';
+import '../blocs/market_cubit.dart';
 import '../l10n/app_localizations.dart';
 import '../models/price_alert.dart';
 import '../models/watch_card.dart';
@@ -22,11 +23,11 @@ class AlertsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cubit = context.read<AppCubit>();
+    final cubit = context.read<AlertsCubit>();
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
 
-    return BlocBuilder<AppCubit, AppState>(
+    return BlocBuilder<AlertsCubit, AlertsState>(
       buildWhen: (previous, current) => previous.alerts != current.alerts,
       builder: (context, state) {
         final alerts = cubit.alertsFor(card.id);
@@ -69,9 +70,9 @@ class _AlertRow extends StatelessWidget {
 
   const _AlertRow({required this.alert, required this.card});
 
-  String _summary(BuildContext context, AppCubit cubit) {
+  String _summary(BuildContext context, MarketCubit market) {
     final l10n = AppLocalizations.of(context)!;
-    final converter = cubit.presentation(card).converter;
+    final converter = market.presentation(card).converter;
     switch (alert.kind) {
       case AlertKind.above:
         return '${l10n.alertKindAbove} ${converter.money(alert.target).formatted()}';
@@ -87,7 +88,8 @@ class _AlertRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cubit = context.read<AppCubit>();
+    final cubit = context.read<AlertsCubit>();
+    final market = context.read<MarketCubit>();
     final colors = context.colors;
 
     return InkWell(
@@ -99,7 +101,7 @@ class _AlertRow extends StatelessWidget {
           children: [
             Expanded(
               child: Text(
-                _summary(context, cubit),
+                _summary(context, market),
                 style: TextStyle(
                   color: alert.enabled ? colors.textPrimary : colors.textTertiary,
                   fontSize: 14,

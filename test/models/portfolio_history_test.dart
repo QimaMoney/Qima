@@ -25,6 +25,71 @@ void main() {
     );
   }
 
+  group('PortfolioHistory.build over one day', () {
+    test('walks the last 24 hours a quarter of an hour at a time and follows the prices', () {
+      final now = DateTime(2024, 6, 10, 14, 7);
+      final lot = HoldingLot(id: 'l1', instrumentID: gold.id, quantity: 2, unit: PriceUnit.troyOunce, unitCost: 1900, costCurrency: 'USD', date: DateTime(2024, 6, 1));
+      final series = seriesOf(gold, [
+        MapEntry(DateTime(2024, 6, 8), 2000),
+        MapEntry(DateTime(2024, 6, 10, 9), 2050),
+        MapEntry(DateTime(2024, 6, 10, 12, 30), 2100),
+      ]);
+      final points = PortfolioHistory.build(
+        ledger: ledgerOf([lot]),
+        seriesByID: {gold.id: series},
+        rates: usdRates,
+        fxHistory: FXHistory.empty,
+        baseCurrency: 'USD',
+        range: ChartRange.day1,
+        now: now,
+      );
+      // 24 hours of quarters, both ends, and the moment itself.
+      expect(points.length, 24 * 4 + 2);
+      expect(points.first.date, DateTime(2024, 6, 9, 14));
+      expect(points[1].date.difference(points.first.date), PortfolioHistory.dayStep);
+      expect(points.last.date, now);
+      expect(points.first.value, 4000);
+      double at(DateTime t) => points.firstWhere((p) => p.date == t).value;
+      expect(at(DateTime(2024, 6, 10, 8, 45)), 4000);
+      expect(at(DateTime(2024, 6, 10, 9)), 4100);
+      expect(at(DateTime(2024, 6, 10, 12, 15)), 4100);
+      expect(at(DateTime(2024, 6, 10, 12, 30)), 4200);
+      expect(points.last.value, 4200);
+    });
+
+    test('a lot bought during the day counts from that moment', () {
+      final now = DateTime(2024, 6, 10, 14);
+      final lot = HoldingLot(id: 'l1', instrumentID: gold.id, quantity: 1, unit: PriceUnit.troyOunce, unitCost: 2000, costCurrency: 'USD', date: DateTime(2024, 6, 10, 10, 20));
+      final points = PortfolioHistory.build(
+        ledger: ledgerOf([lot]),
+        seriesByID: {gold.id: seriesOf(gold, [MapEntry(DateTime(2024, 6, 1), 2000)])},
+        rates: usdRates,
+        fxHistory: FXHistory.empty,
+        baseCurrency: 'USD',
+        range: ChartRange.day1,
+        now: now,
+      );
+      expect(points.firstWhere((p) => p.date == DateTime(2024, 6, 10, 10, 15)).value, 0);
+      expect(points.firstWhere((p) => p.date == DateTime(2024, 6, 10, 10, 30)).value, 2000);
+    });
+
+    test('every other range is still one point a day', () {
+      final now = DateTime(2024, 6, 10, 14, 7);
+      final lot = HoldingLot(id: 'l1', instrumentID: gold.id, quantity: 1, unit: PriceUnit.troyOunce, unitCost: 2000, costCurrency: 'USD', date: DateTime(2024, 6, 1));
+      final points = PortfolioHistory.build(
+        ledger: ledgerOf([lot]),
+        seriesByID: {gold.id: seriesOf(gold, [MapEntry(DateTime(2024, 6, 1), 2000)])},
+        rates: usdRates,
+        fxHistory: FXHistory.empty,
+        baseCurrency: 'USD',
+        range: ChartRange.week1,
+        now: now,
+      );
+      expect(points.length, 8);
+      expect(points.every((p) => p.date.hour == 0 && p.date.minute == 0), isTrue);
+    });
+  });
+
   group('PortfolioHistory.build — day walk correctness', () {
     test('empty portfolio (no lots) returns an empty series', () {
       final points = PortfolioHistory.build(

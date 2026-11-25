@@ -52,7 +52,12 @@ class PriceConverter {
     if (currencyCode == 'USD' || samples.isEmpty) {
       final flat = currencyCode == 'USD' ? (unit.multiplier * purity) : factor;
       return series.quotes
-          .map((q) => DisplayPoint(date: q.timestamp, value: q.canonicalUSD * flat))
+          .map((q) => DisplayPoint(
+                date: q.timestamp,
+                value: q.canonicalUSD * flat,
+                high: q.high == null ? null : q.high! * flat,
+                low: q.low == null ? null : q.low! * flat,
+              ))
           .toList();
     }
 
@@ -67,7 +72,13 @@ class PriceConverter {
         cursor += 1;
       }
       final value = quote.canonicalUSD * (rate ?? earliest) * multiplier;
-      result.add(DisplayPoint(date: quote.timestamp, value: value));
+      final scale = (rate ?? earliest) * multiplier;
+      result.add(DisplayPoint(
+        date: quote.timestamp,
+        value: value,
+        high: quote.high == null ? null : quote.high! * scale,
+        low: quote.low == null ? null : quote.low! * scale,
+      ));
     }
     return result;
   }

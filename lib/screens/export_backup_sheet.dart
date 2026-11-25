@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:intl/intl.dart';
 
-import '../blocs/app_cubit.dart';
-import '../blocs/app_state.dart';
+import '../blocs/holdings_cubit.dart';
+import '../blocs/sync_cubit.dart';
+import '../blocs/watchlist_cubit.dart';
 import '../l10n/app_localizations.dart';
+import '../services/backup/backup_codec.dart';
 import '../theme/design_system.dart';
 import '../theme/qima_colors.dart';
 
@@ -15,7 +17,7 @@ import '../theme/qima_colors.dart';
 ///
 /// The password never leaves this widget's local `TextEditingController`s
 /// except as a direct argument to `BackupService.exportJson` — it's never
-/// logged, stored in [AppState]/persisted, or passed through any
+/// logged, stored in any cubit state/persisted, or passed through any
 /// intermediate object.
 class ExportBackupSheet extends StatefulWidget {
   const ExportBackupSheet({super.key});
@@ -62,7 +64,7 @@ class _ExportBackupSheetState extends State<ExportBackupSheet> {
   bool get _canExport => _passwordValid && _passwordsMatch && !_working;
 
   Future<void> _export(BuildContext context) async {
-    final cubit = context.read<AppCubit>();
+    final cubit = context.read<SyncCubit>();
     final l10n = AppLocalizations.of(context)!;
     setState(() {
       _working = true;
@@ -87,19 +89,19 @@ class _ExportBackupSheetState extends State<ExportBackupSheet> {
       if (!mounted) return;
       setState(() {
         _working = false;
-        _error = l10n.backupExportSheetFailed;
+        _error = e is BackupError ? e.message(l10n) : l10n.backupExportSheetFailed;
       });
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final cubit = context.read<AppCubit>();
+    final watchlist = context.read<WatchlistCubit>();
+    final holdings = context.read<HoldingsCubit>();
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
     final now = DateTime.now();
     final filename = 'qima-backup-${DateFormat('yyyy-MM-dd').format(now)}.json';
-    final state = cubit.state;
 
     return SafeArea(
       child: Padding(
@@ -133,9 +135,9 @@ class _ExportBackupSheetState extends State<ExportBackupSheet> {
                       colors,
                       l10n.backupExportSheetFileContents,
                       l10n.backupExportSheetContentsSummary(
-                        state.cards.length,
-                        state.transactions.length,
-                        _customTickerCount(cubit),
+                        watchlist.state.cards.length,
+                        holdings.state.transactions.length,
+                        _customTickerCount(watchlist),
                       ),
                     ),
                   ],
@@ -246,12 +248,12 @@ class _ExportBackupSheetState extends State<ExportBackupSheet> {
     );
   }
 
-  /// Custom ticker count isn't tracked directly in [AppState]; approximate
+  /// Custom ticker count isn't tracked directly in any state; approximate
   /// it from the watchlist cards whose instrument isn't built-in. The exact
   /// count comes from the exported payload itself (shown on the
   /// import-preview side) — this is a best-effort summary for the export
   /// sheet only.
-  int _customTickerCount(AppCubit cubit) {
+  int _customTickerCount(WatchlistCubit cubit) {
     final ids = <String>{};
     for (final card in cubit.state.cards) {
       if (cubit.isCustom(card.instrumentID)) ids.add(card.instrumentID);
