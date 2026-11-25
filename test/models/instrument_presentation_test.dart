@@ -52,7 +52,7 @@ void main() {
       expect(change.isUp, isTrue);
     });
 
-    test('sparklineChange always matches the fallbackDefault window, never a wider one', () {
+    test('sparklineChange always matches the sparkline window, never a wider one', () {
       final now = DateTime(2024, 6, 1, 12);
       final presentation = presentationWith([
         Quote(instrumentID: instrument.id, timestamp: now.subtract(const Duration(days: 400)), canonicalUSD: 1000),
@@ -60,7 +60,7 @@ void main() {
         Quote(instrumentID: instrument.id, timestamp: now, canonicalUSD: 2000),
       ]);
       final sparkline = presentation.sparklineChange(now);
-      final explicit = presentation.change(ChartRange.fallbackDefault, now);
+      final explicit = presentation.change(ChartRange.sparklineRange, now);
       expect(sparkline?.percentValue, explicit?.percentValue);
       // Must NOT equal the whole-series (400-day) change.
       expect(sparkline!.percentValue, isNot(closeTo(1.0, 1e-9)));

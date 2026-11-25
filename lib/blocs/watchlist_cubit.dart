@@ -2,12 +2,14 @@ import 'dart:async';
 
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../models/chart_range.dart';
 import '../models/asset.dart';
 import '../models/custom_instrument.dart';
 import '../models/instrument_catalog.dart';
 import '../models/watch_card.dart';
 import '../models/watchlist_sort.dart';
 import '../services/custom_instrument_store.dart';
+import '../services/quote_provider.dart';
 import '../services/watchlist_store.dart';
 import 'guarded_emit.dart';
 import 'market_cubit.dart';
@@ -179,13 +181,14 @@ class WatchlistCubit extends Cubit<WatchlistState> with GuardedEmit<WatchlistSta
 
   /// Rewrites the watchlist order by [sort]. [nameOf] is the localized row
   /// name, which only the UI can resolve.
-  Future<void> sortWatchlist(WatchlistSort sort, {required String Function(WatchCard) nameOf}) async {
+  Future<void> sortWatchlist(WatchlistSort sort, {required String Function(WatchCard) nameOf, ChartRange range = ChartRange.sparklineRange}) async {
     final now = DateTime.now();
     final cards = sortWatchCards(
       state.cards,
       sort,
       nameOf: nameOf,
-      changeOf: (card) => _market.presentation(card).sparklineChange(now)?.percentValue,
+      // The change the rows show: over the person's default range.
+      changeOf: (card) => _market.presentation(card).sparklineChange(now, range: range)?.percentValue,
       assetClassOf: (card) => _market.presentation(card).instrument.assetClass,
     );
     await _saveOrder(cards);
@@ -209,11 +212,10 @@ class WatchlistCubit extends Cubit<WatchlistState> with GuardedEmit<WatchlistSta
     return resolved && !builtInIds.contains(instrumentID);
   }
 
-  Future<Instrument> validateCustomTicker(String symbol, String? name, {AssetClass assetClass = AssetClass.stock}) async {
-    final candidate = CustomInstrument(symbol: symbol, name: name, assetClass: assetClass);
-    await _market.probePrice(candidate.instrument);
-    return candidate.instrument;
-  }
+  /// What the feed has under [symbol]; throws when it has nothing, so a
+  /// ticker is only ever added once the feed has answered for it.
+  Future<Listing> lookUpCustomTicker(String symbol, {AssetClass assetClass = AssetClass.stock}) =>
+      _market.probeListing(CustomInstrument(symbol: symbol, assetClass: assetClass).instrument);
 
   Future<Instrument> addCustomTicker(String symbol, String? name, {AssetClass assetClass = AssetClass.stock}) async {
     final candidate = CustomInstrument(symbol: symbol, name: name, assetClass: assetClass);

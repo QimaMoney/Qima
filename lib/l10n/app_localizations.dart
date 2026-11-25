@@ -246,6 +246,18 @@ abstract class AppLocalizations {
   /// **'Add ticker'**
   String get addCustomTickerSubmit;
 
+  /// No description provided for @addCustomTickerConfirmBody.
+  ///
+  /// In en, this message translates to:
+  /// **'This is what the price feed has under this symbol. Add it only if it is the one you mean.'**
+  String get addCustomTickerConfirmBody;
+
+  /// No description provided for @addCustomTickerConfirmNo.
+  ///
+  /// In en, this message translates to:
+  /// **'Not this one'**
+  String get addCustomTickerConfirmNo;
+
   /// No description provided for @cardConfigAddToWatchlist.
   ///
   /// In en, this message translates to:
@@ -525,7 +537,7 @@ abstract class AppLocalizations {
   /// No description provided for @settingsDefaultRangeFooter.
   ///
   /// In en, this message translates to:
-  /// **'Used when opening an asset for the first time.'**
+  /// **'Charts on Home and on an asset open on this range. Choosing a range on an asset\'s chart updates it.'**
   String get settingsDefaultRangeFooter;
 
   /// No description provided for @settingsWidgetRefresh.
@@ -7331,6 +7343,12 @@ abstract class AppLocalizations {
   /// **'No budget'**
   String get budgetNone;
 
+  /// No description provided for @budgetAdd.
+  ///
+  /// In en, this message translates to:
+  /// **'New budget'**
+  String get budgetAdd;
+
   /// No description provided for @budgetOf.
   ///
   /// In en, this message translates to:
@@ -7888,6 +7906,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Move to another account'**
   String get importMoveMessage;
+
+  /// No description provided for @importRowAccount.
+  ///
+  /// In en, this message translates to:
+  /// **'Card or account'**
+  String get importRowAccount;
+
+  /// No description provided for @importRowAccountWholeFile.
+  ///
+  /// In en, this message translates to:
+  /// **'Moves every row from this file'**
+  String get importRowAccountWholeFile;
 
   /// No description provided for @bankMessagesNotifyTitle.
   ///

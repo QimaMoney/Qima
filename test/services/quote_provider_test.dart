@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:qima/models/asset.dart';
+import 'package:qima/models/money.dart';
 import 'package:qima/services/quote_provider.dart';
 
 void main() {
@@ -29,6 +30,72 @@ void main() {
         GoldAPIProvider(client: client).canonicalUSDPrice(gold),
         throwsA(isA<PriceError>().having((e) => e.kind, 'kind', 'invalidResponse')),
       );
+    });
+  });
+
+  group('YahooQuoteProvider.listing', () {
+    const share = Instrument(id: 'stock.ZD', symbol: 'ZD', assetClass: AssetClass.stock, nameKey: 'ZD', sourceSymbol: 'ZD');
+
+    Future<Listing> read(String meta) {
+      final client = MockClient((request) async => http.Response('{"chart":{"result":[{"meta":$meta}]}}', 200));
+      return YahooQuoteProvider(FXRates(base: 'USD', rates: const {'SAR': 4.0}, updatedAt: DateTime.utc(2026)), client: client).listing(share);
+    }
+
+    test('says what the feed has under a symbol: its name, exchange and currency', () async {
+      final listing = await read(
+        '{"regularMarketPrice":50.0,"currency":"USD","shortName":"Zed Utilities Inc.","longName":"Zed Utilities Incorporated","fullExchangeName":"Northport","exchangeName":"NPT"}',
+      );
+      expect(listing.canonicalUSD, 50.0);
+      expect(listing.name, 'Zed Utilities Inc.');
+      expect(listing.exchange, 'Northport');
+      expect(listing.currency, 'USD');
+      expect(listing.isDescribed, isTrue);
+    });
+
+    test('prices a share in another currency in dollars and still names that currency', () async {
+      final listing = await read('{"regularMarketPrice":20.0,"currency":"SAR","longName":"Dune Oil Company","exchangeName":"DNE"}');
+      expect(listing.canonicalUSD, 5.0);
+      expect(listing.name, 'Dune Oil Company');
+      expect(listing.exchange, 'DNE');
+      expect(listing.currency, 'SAR');
+    });
+
+    test('a feed that names nothing gives a price alone', () async {
+      final listing = await read('{"regularMarketPrice":50.0,"currency":"USD","shortName":" "}');
+      expect(listing.isDescribed, isFalse);
+    });
+  });
+
+  group('YahooHistoryProvider.bars', () {
+    String chart({required String quote}) =>
+        '{"chart":{"result":[{"meta":{"currency":"USD"},"timestamp":[1700000000,1700000900,1700001800],"indicators":{"quote":[$quote]}}]}}';
+
+    Future<List<Bar>> read(String quote) {
+      final client = MockClient((request) async => http.Response(chart(quote: quote), 200));
+      return YahooHistoryProvider(client: client).bars('ZZTEST');
+    }
+
+    test('reads each bar\'s high and low beside its close', () async {
+      final bars = await read('{"close":[10.0,12,11.5],"high":[10.0,14,12.5],"low":[10.0,9.5,11]}');
+      expect(bars.map((b) => b.close), [10.0, 12.0, 11.5]);
+      expect(bars.map((b) => b.high), [10.0, 14.0, 12.5]);
+      expect(bars.map((b) => b.low), [10.0, 9.5, 11.0]);
+    });
+
+    test('missing high and low arrays, or null entries, give null', () async {
+      final without = await read('{"close":[10.0,12,11.5]}');
+      expect(without.map((b) => b.high), [null, null, null]);
+      expect(without.map((b) => b.low), [null, null, null]);
+
+      final partial = await read('{"close":[10.0,12,11.5],"high":[10.0,null],"low":[null,9.5,11]}');
+      expect(partial.map((b) => b.high), [10.0, null, null]);
+      expect(partial.map((b) => b.low), [null, 9.5, 11.0]);
+    });
+
+    test('a bar with no close is skipped, whatever its high and low', () async {
+      final bars = await read('{"close":[10.0,null,11.5],"high":[10.0,99,12.5],"low":[10.0,1,11]}');
+      expect(bars, hasLength(2));
+      expect(bars.map((b) => b.high), [10.0, 12.5]);
     });
   });
 }

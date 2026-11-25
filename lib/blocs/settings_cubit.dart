@@ -62,7 +62,7 @@ class SettingsCubit extends Cubit<SettingsState> with GuardedEmit<SettingsState>
       appLanguage: appLanguage,
       appearance: appearance,
       preferredChartRange: preferences.preferredChartRange,
-      preferredPortfolioRange: preferences.preferredPortfolioRange,
+      preferredPortfolioRange: preferences.preferredChartRange.onHome,
       hideBalances: preferences.hideBalances,
       appLockEnabled: preferences.appLockEnabled,
       lockGrace: preferences.lockGrace,
@@ -97,6 +97,7 @@ class SettingsCubit extends Cubit<SettingsState> with GuardedEmit<SettingsState>
         appLanguage: restored.appLanguage,
         appearance: restored.appearance,
         preferredChartRange: restored.preferredChartRange,
+        preferredPortfolioRange: restored.preferredChartRange.onHome,
         widgetRefreshInterval: restored.widgetRefreshInterval,
       ));
 
@@ -121,12 +122,15 @@ class SettingsCubit extends Cubit<SettingsState> with GuardedEmit<SettingsState>
   Future<void> setPreferredChartRange(ChartRange value) async {
     if (value.isExtended || value == state.preferredChartRange) return;
     await preferences.setPreferredChartRange(value);
-    emit(state.copyWith(preferredChartRange: value));
+    // The charts on Home follow the default the moment it changes.
+    emit(state.copyWith(preferredChartRange: value, preferredPortfolioRange: value.onHome));
   }
 
+  /// The range picked on a chart on Home or on the portfolio chart. It
+  /// holds until the app is closed: those charts open on the default range
+  /// in Settings, so that one setting says how every chart opens.
   Future<void> setPreferredPortfolioRange(ChartRange value) async {
     if (!ChartRange.portfolioSelectable.contains(value) || value == state.preferredPortfolioRange) return;
-    await preferences.setPreferredPortfolioRange(value);
     emit(state.copyWith(preferredPortfolioRange: value));
   }
 

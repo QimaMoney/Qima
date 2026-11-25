@@ -97,6 +97,13 @@ class AppLocalizationsFr extends AppLocalizations {
   String get addCustomTickerSubmit => 'Ajouter le symbole';
 
   @override
+  String get addCustomTickerConfirmBody =>
+      'Voici ce que la source des cours a sous ce symbole. Ajoutez-le seulement si c’est bien celui que vous cherchez.';
+
+  @override
+  String get addCustomTickerConfirmNo => 'Ce n’est pas celui-ci';
+
+  @override
   String get cardConfigAddToWatchlist => 'Ajouter à la liste de suivi';
 
   @override
@@ -252,7 +259,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get settingsDefaultRangeFooter =>
-      'Utilisée à la première ouverture d\'un actif.';
+      'Les graphiques de l\'accueil et d\'un actif s\'ouvrent sur cette période. Choisir une période sur le graphique d\'un actif la met à jour.';
 
   @override
   String get settingsWidgetRefresh => 'Intervalle d\'actualisation du widget';
@@ -4267,6 +4274,9 @@ class AppLocalizationsFr extends AppLocalizations {
   String get budgetNone => 'Sans budget';
 
   @override
+  String get budgetAdd => 'Nouveau budget';
+
+  @override
   String budgetOf(String amount) {
     return 'Budget $amount';
   }
@@ -4613,6 +4623,13 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get importMoveMessage => 'Déplacer vers un autre compte';
+
+  @override
+  String get importRowAccount => 'Carte ou compte';
+
+  @override
+  String get importRowAccountWholeFile =>
+      'Déplace toutes les lignes de ce fichier';
 
   @override
   String get bankMessagesNotifyTitle => 'Messages bancaires à vérifier';

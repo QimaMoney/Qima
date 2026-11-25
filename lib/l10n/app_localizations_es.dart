@@ -97,6 +97,13 @@ class AppLocalizationsEs extends AppLocalizations {
   String get addCustomTickerSubmit => 'Añadir símbolo';
 
   @override
+  String get addCustomTickerConfirmBody =>
+      'Esto es lo que la fuente de precios tiene con este símbolo. Añádelo solo si es el que buscas.';
+
+  @override
+  String get addCustomTickerConfirmNo => 'No es este';
+
+  @override
   String get cardConfigAddToWatchlist => 'Añadir a la lista de seguimiento';
 
   @override
@@ -252,7 +259,7 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get settingsDefaultRangeFooter =>
-      'Se usa al abrir un activo por primera vez.';
+      'Los gráficos de Inicio y de un activo se abren con este rango. Elegir un rango en el gráfico de un activo lo actualiza.';
 
   @override
   String get settingsWidgetRefresh => 'Intervalo de actualización del widget';
@@ -4268,6 +4275,9 @@ class AppLocalizationsEs extends AppLocalizations {
   String get budgetNone => 'Sin presupuesto';
 
   @override
+  String get budgetAdd => 'Nuevo presupuesto';
+
+  @override
   String budgetOf(String amount) {
     return 'Presupuesto $amount';
   }
@@ -4612,6 +4622,13 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get importMoveMessage => 'Mover a otra cuenta';
+
+  @override
+  String get importRowAccount => 'Tarjeta o cuenta';
+
+  @override
+  String get importRowAccountWholeFile =>
+      'Mueve todas las filas de este archivo';
 
   @override
   String get bankMessagesNotifyTitle => 'Mensajes del banco por revisar';

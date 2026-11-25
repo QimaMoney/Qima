@@ -1,3 +1,4 @@
+import '../models/feed_symbol.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:uuid/uuid.dart';
@@ -9,6 +10,7 @@ import '../l10n/app_localizations.dart';
 import '../models/asset.dart';
 import '../models/custom_instrument.dart';
 import '../models/watch_card.dart';
+import '../services/quote_provider.dart';
 import '../theme/design_system.dart';
 import '../theme/help_topics.dart';
 import '../theme/qima_colors.dart';
@@ -56,27 +58,89 @@ class _CustomTickerScreenState extends State<CustomTickerScreen> {
     }
   }
 
+  /// The symbol the feed knows [typed] by: the first of the ways it could be
+  /// written there that the feed answers for. A ticker copied with its
+  /// exchange in front ("TADAWUL:2222") or typed without one ("2222", in
+  /// SAR) is found this way, and comes back with what the feed says it is.
+  /// Throws what the last check threw when none is.
+  Future<(String, Listing)> _feedSymbol(WatchlistCubit cubit, String typed) async {
+    Object? failure;
+    for (final candidate in FeedSymbol.candidates(typed, currency: _currency)) {
+      try {
+        return (candidate, await cubit.lookUpCustomTicker(candidate, assetClass: _assetClass));
+      } catch (error) {
+        failure = error;
+      }
+    }
+    throw failure ?? StateError('no symbol');
+  }
+
+  /// Shows what the feed has under [symbol] and asks whether that is the
+  /// one meant. The feed answers for any symbol it knows, and a short one
+  /// can be a different company on another exchange ("SR" is not a Saudi
+  /// share), so nothing is added on the symbol alone.
+  Future<bool> _confirm(String symbol, Listing listing) async {
+    final l10n = AppLocalizations.of(context)!;
+    final colors = context.colors;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        key: const ValueKey('customTickerConfirm'),
+        title: Text(listing.name ?? symbol),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text([symbol, listing.exchange, listing.currency].nonNulls.join(' · '), style: TextStyle(color: colors.textPrimary)),
+            const SizedBox(height: DS.spaceSM),
+            Text(l10n.addCustomTickerConfirmBody, style: TextStyle(color: colors.textSecondary)),
+          ],
+        ),
+        actions: [
+          TextButton(
+            key: const ValueKey('customTickerConfirmNo'),
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text(l10n.addCustomTickerConfirmNo),
+          ),
+          FilledButton(
+            key: const ValueKey('customTickerConfirmYes'),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(l10n.addCustomTickerSubmit),
+          ),
+        ],
+      ),
+    );
+    return confirmed ?? false;
+  }
+
   Future<void> _submit() async {
     final l10n = AppLocalizations.of(context)!;
-    final symbol = _symbolController.text.trim();
-    if (symbol.isEmpty) {
+    final typed = _symbolController.text.trim();
+    if (typed.isEmpty) {
       setState(() => _error = l10n.addCustomTickerSymbolRequired);
       return;
     }
+    // The keyboard goes with the form: the fields keep focus through the
+    // navigation that follows, and it would stay up over the asset's page.
+    FocusManager.instance.primaryFocus?.unfocus();
     setState(() {
       _isSubmitting = true;
       _error = null;
     });
     final cubit = context.read<WatchlistCubit>();
     try {
-      await cubit.validateCustomTicker(symbol, _nameController.text.trim(), assetClass: _assetClass);
+      final (symbol, listing) = await _feedSymbol(cubit, typed);
+      if (!mounted) return;
+      if (listing.isDescribed && !await _confirm(symbol, listing)) return;
+      final typedName = _nameController.text.trim();
+      final name = typedName.isEmpty ? listing.name : typedName;
       // Checked BEFORE addCustomTicker (which would make it true
       // unconditionally) so we can tell "this ticker already existed" apart
       // from "this flow just created it" — only the latter should be undone
       // by Undo removing the ticker itself, not just the watchlist card.
       final candidateID = CustomInstrument(symbol: symbol, assetClass: _assetClass).instrumentID;
       final tickerAlreadyExisted = cubit.isCustom(candidateID);
-      final instrument = await cubit.addCustomTicker(symbol, _nameController.text.trim(), assetClass: _assetClass);
+      final instrument = await cubit.addCustomTicker(symbol, name, assetClass: _assetClass);
       final card = WatchCard(
         id: const Uuid().v4(),
         instrumentID: instrument.id,

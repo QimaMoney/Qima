@@ -22,16 +22,20 @@ import 'package:qima/screens/transaction_editor_screen.dart';
 import 'package:qima/screens/watchlist_screen.dart';
 import 'package:qima/services/local_file_store.dart';
 import 'package:qima/services/price_repository.dart';
+import 'package:qima/services/quote_provider.dart';
 import '../helpers/money_provider.dart';
 
 /// No-ops every network/shared_preferences-touching call `AppCubit` fires in
 /// the background (refresh, FX/history backfill) so the widget tests below
-/// can exercise the add flow deterministically and offline. `validateCustomTicker`
+/// can exercise the add flow deterministically and offline. `probeListing`
 /// is overridden too, standing in for "the ticker is real" without hitting
 /// Yahoo — these tests are about navigation/state, not price validation.
 class _FakeRepository extends PriceRepository {
+  /// What the feed says the next ticker is; it names nothing by default.
+  Listing listing = const Listing(canonicalUSD: 100);
+
   @override
-  Future<double> probePrice(Instrument instrument) async => 100;
+  Future<Listing> probeListing(Instrument instrument) async => listing;
 
   @override
   Future<QuoteSeries> refresh(Instrument instrument, {DateTime? now}) async => QuoteSeries.empty(instrument.id);
@@ -160,11 +164,13 @@ void main() {
 
   late Directory tempDir;
   late AppBlocs cubit;
+  late _FakeRepository repository;
 
   setUp(() async {
     tempDir = await Directory.systemTemp.createTemp('qima_add_flow_test');
     LocalFileStore.overrideDirectoryForTesting(tempDir);
-    cubit = AppBlocs(repository: _FakeRepository());
+    repository = _FakeRepository();
+    cubit = AppBlocs(repository: repository);
     cubit.seed(initialized: true);
   });
 
@@ -334,6 +340,56 @@ void main() {
     // The pre-existing ticker (and its card) must survive.
     expect(cubit.watchlist.isCustom(preExisting.id), isTrue);
     expect(cubit.watchlist.state.cards.any((c) => c.instrumentID == preExisting.id), isTrue);
+  });
+
+  testWidgets('a custom ticker is added only after the feed\'s own name for it is confirmed', (tester) async {
+    // The feed answers for any symbol it knows, so a short one can be a
+    // different company on another exchange than the one meant.
+    repository.listing = const Listing(canonicalUSD: 100, name: 'Zed Utilities Inc.', exchange: 'Northport', currency: 'USD');
+    await tester.pumpWidget(_app(cubit));
+    await _openWatch(tester);
+    await tester.enterText(find.byType(TextField), 'ZD');
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(FilledButton));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, 'Ticker symbol'), 'ZD');
+    const instrumentID = 'stock.ZD';
+
+    // The button spins while the question is up, so frames never settle.
+    expect(tester.testTextInput.isVisible, isTrue);
+    await tester.tap(find.text('Add ticker'));
+    await _settle(tester);
+    expect(find.byKey(const ValueKey('customTickerConfirm')), findsOneWidget);
+    // The keyboard is put away, or it would stay up over the asset's page.
+    expect(tester.testTextInput.isVisible, isFalse);
+    expect(find.text('Zed Utilities Inc.'), findsOneWidget);
+    expect(find.text('ZD · Northport · USD'), findsOneWidget);
+
+    // Not the one meant: nothing is added and the screen stays for another try.
+    await tester.tap(find.byKey(const ValueKey('customTickerConfirmNo')));
+    await _settle(tester);
+    expect(find.byType(CustomTickerScreen), findsOneWidget);
+    expect(cubit.watchlist.isCustom(instrumentID), isFalse);
+    expect(cubit.watchlist.state.cards, isEmpty);
+
+    // Tapped in a real zone: everything that follows the answer (the file
+    // IO of adding) runs in the zone the tap started in.
+    await tester.runAsync(() async {
+      await tester.tap(find.text('Add ticker'));
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    });
+    await _settle(tester);
+    await _tapAndAwaitRealWork(
+      tester,
+      find.byKey(const ValueKey('customTickerConfirmYes')),
+      () => _awaitAddCardSettled(cubit, instrumentID),
+    );
+    await _settle(tester);
+
+    // With no name typed, it carries the feed's name and not the bare symbol.
+    expect(find.byType(InstrumentDetailScreen), findsOneWidget);
+    final stored = await tester.runAsync(() => cubit.watchlist.customInstruments());
+    expect(stored!.single.name, 'Zed Utilities Inc.');
   });
 
   testWidgets('adding a duplicate opens the existing card with no Undo action', (tester) async {

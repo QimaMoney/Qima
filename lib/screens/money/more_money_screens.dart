@@ -40,19 +40,10 @@ class BudgetScreen extends StatelessWidget {
 
     Future<void> edit(BookAccount c) async {
       final current = state.settings.budgets[c.id];
-      final controller = TextEditingController(text: current == null ? '' : minorFieldText(current, ccy));
       final value = await showDialog<int>(
         context: context,
-        builder: (dialogContext) => AlertDialog(
-          title: Text(l10n.budgetFor(l10n.accountName(c))),
-          content: AmountField(controller: controller, autofocus: true, label: l10n.budgetMonthly, currency: ccy, helper: l10n.budgetZeroHelp),
-          actions: [
-            TextButton(onPressed: () => Navigator.of(dialogContext).pop(), child: Text(l10n.commonCancel)),
-            FilledButton(onPressed: () => Navigator.of(dialogContext).pop(parseMinor(controller.text.isEmpty ? '0' : controller.text, ccy)), child: Text(l10n.holdingsSave)),
-          ],
-        ),
+        builder: (_) => _BudgetAmountDialog(title: l10n.budgetFor(l10n.accountName(c)), amount: current, currency: ccy),
       );
-      controller.dispose();
       if (value == null) return;
       try {
         await money.setBudget(c.id, value);
@@ -80,6 +71,19 @@ class BudgetScreen extends StatelessWidget {
               ]),
             MoneySection(
               children: [
+                // First, where it is seen without scrolling past every
+                // category.
+                // A budget for something that has no category yet: the
+                // category is made first, then its amount is asked for.
+                MoneyRow(
+                  key: const ValueKey('budgetAdd'),
+                  icon: Icons.add,
+                  title: l10n.budgetAdd,
+                  onTap: () async {
+                    final made = await addCategory(context, AccountSide.spending);
+                    if (made != null && context.mounted) await edit(made);
+                  },
+                ),
                 for (final c in categories)
                   MoneyRow(
                     icon: MoneyIcons.account(c),
@@ -93,6 +97,43 @@ class BudgetScreen extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Asks for a category's monthly amount. It keeps its own text controller,
+/// which must outlive the dialog's closing animation: one disposed by the
+/// caller as soon as the dialog answered was still being drawn.
+class _BudgetAmountDialog extends StatefulWidget {
+  final String title;
+  final int? amount;
+  final String currency;
+
+  const _BudgetAmountDialog({required this.title, required this.amount, required this.currency});
+
+  @override
+  State<_BudgetAmountDialog> createState() => _BudgetAmountDialogState();
+}
+
+class _BudgetAmountDialogState extends State<_BudgetAmountDialog> {
+  late final _controller = TextEditingController(text: widget.amount == null ? '' : minorFieldText(widget.amount!, widget.currency));
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    return AlertDialog(
+      title: Text(widget.title),
+      content: AmountField(controller: _controller, autofocus: true, label: l10n.budgetMonthly, currency: widget.currency, helper: l10n.budgetZeroHelp),
+      actions: [
+        TextButton(onPressed: () => Navigator.of(context).pop(), child: Text(l10n.commonCancel)),
+        FilledButton(onPressed: () => Navigator.of(context).pop(parseMinor(_controller.text.isEmpty ? '0' : _controller.text, widget.currency)), child: Text(l10n.holdingsSave)),
+      ],
     );
   }
 }

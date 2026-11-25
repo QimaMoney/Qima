@@ -51,6 +51,7 @@ import 'package:qima/screens/money/more_money_screens.dart';
 import 'package:qima/theme/money_labels.dart';
 import 'package:qima/services/local_file_store.dart';
 import 'package:qima/services/price_repository.dart';
+import 'package:qima/services/quote_provider.dart';
 import 'package:qima/theme/app_theme.dart';
 import 'package:qima/widgets/money_widgets.dart';
 import 'package:qima/theme/help_topics.dart';
@@ -82,7 +83,7 @@ class _SpokenWords implements DictationService {
 
 class _OfflineRepository extends PriceRepository {
   @override
-  Future<double> probePrice(Instrument instrument) async => 100;
+  Future<Listing> probeListing(Instrument instrument) async => const Listing(canonicalUSD: 100);
   @override
   Future<QuoteSeries> refresh(Instrument instrument, {DateTime? now}) async => QuoteSeries.empty(instrument.id);
   @override
@@ -649,6 +650,108 @@ void main() {
     expect(money.state.book.balanceOf('rajhi'), rajhi + sar(1700));
     expect(money.state.book.balanceOf('wallet'), wallet - sar(1700));
     expect(money.state.entries.last.template, EntryTemplate.transfer);
+  });
+
+  testWidgets('an imported row: a move between accounts can be taken back, and the row put on another card', (tester) async {
+    await tester.runAsync(seed);
+    size(tester, const Size(390, 2400));
+    final l10n = await AppLocalizations.delegate.load(const Locale('en'));
+    await tester.pumpWidget(wrap(const ImportReviewScreen(), const Locale('en')));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.text('SALARY NOVEMBER'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('importPick-wallet')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining(l10n.importTransferWith('Wallet')), findsOneWidget);
+
+    // Tapping the ticked account again unticks it and keeps the sheet open.
+    await tester.tap(find.text('SALARY NOVEMBER'));
+    await tester.pumpAndSettle();
+    final wallet = find.byKey(const ValueKey('importPick-wallet'));
+    expect(find.descendant(of: wallet, matching: find.byIcon(Icons.check)), findsOneWidget);
+    await tester.tap(wallet);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('importRowDone')), findsOneWidget);
+    expect(find.descendant(of: wallet, matching: find.byIcon(Icons.check)), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('importRowDone')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining(l10n.importTransferWith('Wallet')), findsNothing);
+
+    // The card or account it was on can be changed from the same sheet.
+    await tester.tap(find.text('SALARY NOVEMBER'));
+    await tester.pumpAndSettle();
+    final account = find.byKey(const ValueKey('importRowAccount'));
+    expect(find.descendant(of: account, matching: find.text('Al Rajhi current account')), findsOneWidget);
+    // The file holds more rows, and they go with it.
+    expect(find.text(l10n.importRowAccountWholeFile), findsOneWidget);
+    await tester.tap(account);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('importMoveTo-visa')));
+    await tester.pumpAndSettle();
+    expect(find.descendant(of: account, matching: find.text('Visa Signature')), findsOneWidget);
+    // The account it is now on is no longer offered as the other side.
+    expect(find.byKey(const ValueKey('importPick-visa')), findsNothing);
+    expect(find.byKey(const ValueKey('importPick-rajhi')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('importRowDone')));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    // The rows now sit under the card.
+    expect(find.byKey(const ValueKey('importPick-visa')), findsNothing);
+    await tester.tap(find.text('SALARY NOVEMBER'));
+    await tester.pumpAndSettle();
+    expect(find.descendant(of: find.byKey(const ValueKey('importRowAccount')), matching: find.text('Visa Signature')), findsOneWidget);
+  });
+
+  testWidgets('an imported row can be set as lent to someone new or as a repayment, and taken back', (tester) async {
+    await tester.runAsync(seed);
+    size(tester, const Size(390, 2800));
+    final l10n = await AppLocalizations.delegate.load(const Locale('en'));
+    await tester.pumpWidget(wrap(const ImportReviewScreen(), const Locale('en')));
+    await tester.pump(const Duration(milliseconds: 300));
+
+    // Money out: lent to someone who is not in the book yet.
+    await tester.tap(find.text('PANDA RIYADH'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('importPerson-lent')), findsOneWidget);
+    expect(find.byKey(const ValueKey('importPerson-borrowed')), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('importPerson-lent')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.descendant(of: find.byKey(const ValueKey('importPersonName')), matching: find.byType(TextField)), 'Omar');
+    await tester.tap(find.byKey(const ValueKey('importPersonSave')));
+    await tester.pump();
+    // Saving the new person is real work on the book.
+    for (var i = 0; i < 40 && !money.state.accounts.any((a) => a.name == 'Omar'); i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.pump();
+    }
+    await tester.pumpAndSettle();
+    expect(money.state.accounts.where((a) => a.name == 'Omar').single.type, AccountType.receivable);
+    expect(find.textContaining('${l10n.tplLent} · Omar'), findsOneWidget);
+
+    // It is ticked with the name under it, and tapping it again takes it back.
+    await tester.tap(find.text('PANDA RIYADH'));
+    await tester.pumpAndSettle();
+    final lent = find.byKey(const ValueKey('importPerson-lent'));
+    expect(find.descendant(of: lent, matching: find.text('Omar')), findsOneWidget);
+    expect(find.descendant(of: lent, matching: find.byIcon(Icons.check)), findsOneWidget);
+    await tester.tap(lent);
+    await tester.pumpAndSettle();
+    expect(find.descendant(of: lent, matching: find.byIcon(Icons.check)), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('importRowDone')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('${l10n.tplLent} · Omar'), findsNothing);
+
+    // Money in: a repayment from someone who owes.
+    await tester.tap(find.text('SALARY NOVEMBER'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('importPerson-lent')), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('importPerson-repaymentIn')));
+    await tester.pumpAndSettle();
+    final faisal = money.state.accounts.firstWhere((a) => a.name == 'Faisal' && a.type == AccountType.receivable);
+    await tester.tap(find.byKey(ValueKey('importPersonPick-${faisal.id}')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('${l10n.tplRepaymentIn} · Faisal'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('the import review in Arabic on a narrow phone: the balance offer fits', (tester) async {
@@ -1519,6 +1622,37 @@ void main() {
       await tester.tap(find.text(l10n.holdingsSave).last);
       await settle(tester, () => money.state.categories(AccountSide.spending).any((c) => c.name == 'Pets'));
       expect(find.text('Pets'), findsOneWidget, reason: 'the new category is the one picked');
+    });
+
+    testWidgets('Budget has a New budget row first: it makes the category, then asks for its amount', (tester) async {
+      await tester.runAsync(seed);
+      final l10n = await AppLocalizations.delegate.load(const Locale('en'));
+      await tester.pumpWidget(wrap(const BudgetScreen(), const Locale('en')));
+      await tester.pumpAndSettle();
+      // Seen without scrolling.
+      expect(tester.getTopLeft(find.byKey(const ValueKey('budgetAdd'))).dy, lessThan(tester.getTopLeft(find.text('Groceries')).dy));
+      await tester.tap(find.byKey(const ValueKey('budgetAdd')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const ValueKey('categoryName')), 'Pets');
+      await tester.tap(find.text(l10n.holdingsSave).last);
+      for (var i = 0; i < 40 && !money.state.accounts.any((a) => a.name == 'Pets'); i++) {
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+        await tester.pump();
+      }
+      await tester.pumpAndSettle();
+      final pets = money.state.accounts.firstWhere((a) => a.name == 'Pets');
+      expect(pets.side, AccountSide.spending);
+      // The amount is asked for straight away.
+      expect(find.text(l10n.budgetFor('Pets')), findsOneWidget);
+      await tester.enterText(find.widgetWithText(TextField, l10n.budgetMonthly), '300');
+      await tester.tap(find.text(l10n.holdingsSave).last);
+      for (var i = 0; i < 40 && money.state.settings.budgets[pets.id] == null; i++) {
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+        await tester.pump();
+      }
+      await tester.pumpAndSettle();
+      expect(money.state.settings.budgets[pets.id], sar(300));
+      expect(tester.takeException(), isNull);
     });
 
     testWidgets('Categories has a clear add row for each side', (tester) async {

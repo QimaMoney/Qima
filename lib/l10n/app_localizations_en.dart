@@ -97,6 +97,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String get addCustomTickerSubmit => 'Add ticker';
 
   @override
+  String get addCustomTickerConfirmBody =>
+      'This is what the price feed has under this symbol. Add it only if it is the one you mean.';
+
+  @override
+  String get addCustomTickerConfirmNo => 'Not this one';
+
+  @override
   String get cardConfigAddToWatchlist => 'Add to watchlist';
 
   @override
@@ -249,7 +256,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settingsDefaultRangeFooter =>
-      'Used when opening an asset for the first time.';
+      'Charts on Home and on an asset open on this range. Choosing a range on an asset\'s chart updates it.';
 
   @override
   String get settingsWidgetRefresh => 'Widget refresh interval';
@@ -4240,6 +4247,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get budgetNone => 'No budget';
 
   @override
+  String get budgetAdd => 'New budget';
+
+  @override
   String budgetOf(String amount) {
     return 'Budget $amount';
   }
@@ -4582,6 +4592,12 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get importMoveMessage => 'Move to another account';
+
+  @override
+  String get importRowAccount => 'Card or account';
+
+  @override
+  String get importRowAccountWholeFile => 'Moves every row from this file';
 
   @override
   String get bankMessagesNotifyTitle => 'Bank messages to check';

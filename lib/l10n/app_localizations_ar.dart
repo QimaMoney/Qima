@@ -97,6 +97,13 @@ class AppLocalizationsAr extends AppLocalizations {
   String get addCustomTickerSubmit => 'إضافة الرمز';
 
   @override
+  String get addCustomTickerConfirmBody =>
+      'هذا ما لدى مصدر الأسعار تحت هذا الرمز. أضِفه فقط إذا كان هو المقصود.';
+
+  @override
+  String get addCustomTickerConfirmNo => 'ليس هذا';
+
+  @override
   String get cardConfigAddToWatchlist => 'إضافة إلى قائمة المتابعة';
 
   @override
@@ -248,7 +255,8 @@ class AppLocalizationsAr extends AppLocalizations {
   String get settingsDefaultRange => 'النطاق الزمني الافتراضي';
 
   @override
-  String get settingsDefaultRangeFooter => 'يُستخدم عند فتح أصل لأول مرة.';
+  String get settingsDefaultRangeFooter =>
+      'تُفتح الرسوم البيانية في الرئيسية وفي صفحة الأصل على هذا النطاق. اختيار نطاق على رسم الأصل يحدّثه.';
 
   @override
   String get settingsWidgetRefresh => 'فاصل تحديث الودجة';
@@ -4250,6 +4258,9 @@ class AppLocalizationsAr extends AppLocalizations {
   String get budgetNone => 'بلا ميزانية';
 
   @override
+  String get budgetAdd => 'ميزانية جديدة';
+
+  @override
   String budgetOf(String amount) {
     return 'الميزانية $amount';
   }
@@ -4593,6 +4604,12 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get importMoveMessage => 'نقل إلى حساب آخر';
+
+  @override
+  String get importRowAccount => 'البطاقة أو الحساب';
+
+  @override
+  String get importRowAccountWholeFile => 'ينقل كل معاملات هذا الملف';
 
   @override
   String get bankMessagesNotifyTitle => 'رسائل بنكية للمراجعة';
