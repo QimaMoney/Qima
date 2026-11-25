@@ -207,9 +207,7 @@ class WatchlistCubit extends Cubit<WatchlistState> with GuardedEmit<WatchlistSta
   Future<List<CustomInstrument>> customInstruments() => customInstrumentStore.load();
 
   bool isCustom(String instrumentID) {
-    final builtInIds = InstrumentCatalog.builtIn.map((i) => i.id).toSet();
-    final resolved = InstrumentCatalog.instrument(instrumentID) != null;
-    return resolved && !builtInIds.contains(instrumentID);
+    return !InstrumentCatalog.isBuiltIn(instrumentID) && InstrumentCatalog.instrument(instrumentID) != null;
   }
 
   /// What the feed has under [symbol]; throws when it has nothing, so a

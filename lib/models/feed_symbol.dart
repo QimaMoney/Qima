@@ -47,6 +47,18 @@ abstract final class FeedSymbol {
     'TRY': ['.IS'],
   };
 
+  /// The currency shares on [symbol]'s exchange trade in, read from the
+  /// feed's suffix ("COMI.CA" is EGP); null when the suffix doesn't say.
+  static String? currencyOf(String symbol) {
+    final dot = symbol.lastIndexOf('.');
+    if (dot < 0) return null;
+    final suffix = symbol.substring(dot).toUpperCase();
+    for (final MapEntry(key: currency, value: suffixes) in _suffixesFor.entries) {
+      if (suffixes.contains(suffix)) return currency;
+    }
+    return null;
+  }
+
   /// The symbols to ask the feed for, in order, for [typed] with the
   /// [currency] chosen on the screen. Never empty for a non-empty [typed];
   /// the first is the most likely.

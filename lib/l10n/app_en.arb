@@ -67,6 +67,19 @@
     }
   },
   "addCustomTickerTitle": "Add custom ticker",
+  "addMarketUs": "United States",
+  "addMarketSaudi": "Saudi Arabia",
+  "addMarketEgypt": "Egypt",
+  "addMarketOther": "Other markets",
+  "addShowAll": "Show all {count}",
+  "@addShowAll": {
+    "description": "Row under a shortened list of shares that opens the rest; count is how many the full list holds.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "addCustomTickerSymbol": "Ticker symbol",
   "addCustomTickerName": "Display name (optional)",
   "addCustomTickerHint": "e.g. AAPL, TSLA, VOO",
