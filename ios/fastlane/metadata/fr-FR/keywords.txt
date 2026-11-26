@@ -1,1 +1,1 @@
-or,carat,21k,24k,dépenses,budget,banque,relevé,sms,carte,prêt,nisab,bitcoin,argent,valeur nette
+or,carat,21k,24k,dépenses,budget,banque,relevé,sms,prêt,money,nisab,bitcoin,argent,valeur nette

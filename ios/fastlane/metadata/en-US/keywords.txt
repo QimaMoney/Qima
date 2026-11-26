@@ -1,1 +1,1 @@
-gold,karat,21k,24k,expense,spending,tracker,bank,statement,sms,card,loan,nisab,bitcoin,silver,assets
+gold,karat,21k,24k,expense,spending,tracker,bank,statement,sms,loan,nisab,bitcoin,silver,qimamoney
