@@ -11,8 +11,8 @@ import 'qima_colors.dart';
 ///
 /// This is the one place the app's font is decided ([DS.fontFamilyFor]
 /// [locale]). Component themes whose label styles replace the ambient text
-/// style rather than merging with it (chips, navigation labels) build them
-/// from [text] so they carry the same family.
+/// style rather than merging with it (chips, segmented buttons, navigation
+/// labels) build them from [text] so they carry the same family.
 ///
 /// Every text style uses tabular figures, so prices, balances and
 /// percentages line up digit-for-digit down a list and don't jitter as
@@ -123,7 +123,7 @@ ThemeData buildTheme(Brightness brightness, {Locale? locale}) {
       secondaryLabelStyle: text(color: colors.textPrimary),
     ),
     segmentedButtonTheme: SegmentedButtonThemeData(
-      style: DS.segmentedButtonStyle(colors),
+      style: DS.segmentedButtonStyle(colors, label: text(fontWeight: FontWeight.w600)),
     ),
     // The selected tab is marked by a gold icon and label, not a filled
     // indicator pill.
