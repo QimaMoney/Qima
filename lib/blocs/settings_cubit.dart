@@ -63,6 +63,7 @@ class SettingsCubit extends Cubit<SettingsState> with GuardedEmit<SettingsState>
       appearance: appearance,
       preferredChartRange: preferences.preferredChartRange,
       preferredPortfolioRange: preferences.preferredChartRange.onHome,
+      candleCharts: preferences.candleCharts,
       hideBalances: preferences.hideBalances,
       appLockEnabled: preferences.appLockEnabled,
       lockGrace: preferences.lockGrace,
@@ -124,6 +125,12 @@ class SettingsCubit extends Cubit<SettingsState> with GuardedEmit<SettingsState>
     await preferences.setPreferredChartRange(value);
     // The charts on Home follow the default the moment it changes.
     emit(state.copyWith(preferredChartRange: value, preferredPortfolioRange: value.onHome));
+  }
+
+  Future<void> setCandleCharts(bool value) async {
+    if (value == state.candleCharts) return;
+    await preferences.setCandleCharts(value);
+    emit(state.copyWith(candleCharts: value));
   }
 
   /// The range picked on a chart on Home or on the portfolio chart. It

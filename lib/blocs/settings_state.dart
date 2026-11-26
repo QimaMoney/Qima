@@ -13,6 +13,9 @@ class SettingsState extends Equatable {
   final ChartRange preferredChartRange;
   final ChartRange preferredPortfolioRange;
 
+  /// Whether price charts draw candles rather than a line.
+  final bool candleCharts;
+
   /// Local-only privacy settings (spec Phase 4 "Hide balances + App lock") —
   /// never synced, see `Preferences`.
   final bool hideBalances;
@@ -37,6 +40,7 @@ class SettingsState extends Equatable {
     this.appearance = Appearance.system,
     this.preferredChartRange = ChartRange.fallbackDefault,
     this.preferredPortfolioRange = ChartRange.portfolioDefault,
+    this.candleCharts = false,
     this.hideBalances = false,
     this.appLockEnabled = false,
     this.lockGrace = LockGrace.defaultValue,
@@ -52,6 +56,7 @@ class SettingsState extends Equatable {
     Appearance? appearance,
     ChartRange? preferredChartRange,
     ChartRange? preferredPortfolioRange,
+    bool? candleCharts,
     bool? hideBalances,
     bool? appLockEnabled,
     LockGrace? lockGrace,
@@ -66,6 +71,7 @@ class SettingsState extends Equatable {
       appearance: appearance ?? this.appearance,
       preferredChartRange: preferredChartRange ?? this.preferredChartRange,
       preferredPortfolioRange: preferredPortfolioRange ?? this.preferredPortfolioRange,
+      candleCharts: candleCharts ?? this.candleCharts,
       hideBalances: hideBalances ?? this.hideBalances,
       appLockEnabled: appLockEnabled ?? this.appLockEnabled,
       lockGrace: lockGrace ?? this.lockGrace,
@@ -83,6 +89,7 @@ class SettingsState extends Equatable {
         appearance,
         preferredChartRange,
         preferredPortfolioRange,
+        candleCharts,
         hideBalances,
         appLockEnabled,
         lockGrace,

@@ -57,6 +57,7 @@ class PriceConverter {
                 value: q.canonicalUSD * flat,
                 high: q.high == null ? null : q.high! * flat,
                 low: q.low == null ? null : q.low! * flat,
+                open: q.open == null ? null : q.open! * flat,
               ))
           .toList();
     }
@@ -78,6 +79,7 @@ class PriceConverter {
         value: value,
         high: quote.high == null ? null : quote.high! * scale,
         low: quote.low == null ? null : quote.low! * scale,
+        open: quote.open == null ? null : quote.open! * scale,
       ));
     }
     return result;

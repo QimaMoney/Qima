@@ -105,6 +105,7 @@ class _ShareAssetSheetState extends State<ShareAssetSheet> {
         ShareDestination.facebookPost => l10n.shareToFacebookPost,
         ShareDestination.facebookStory => l10n.shareToFacebookStory,
         ShareDestination.linkedinPost => l10n.shareToLinkedinPost,
+        ShareDestination.xPost => l10n.shareToXPost,
       };
 
   Future<void> _share(BuildContext context, AssetShareData data) async {

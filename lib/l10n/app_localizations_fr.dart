@@ -3126,6 +3126,9 @@ class AppLocalizationsFr extends AppLocalizations {
   String get shareToLinkedinPost => 'Publication LinkedIn';
 
   @override
+  String get shareToXPost => 'Publication X';
+
+  @override
   String shareCaption(String name, String price) {
     return '$name est à $price.';
   }
@@ -3164,7 +3167,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get helpAssetDetailStep6Body =>
-      'Touchez partager pour publier le prix et le graphique en image au format WhatsApp, Instagram, Facebook ou LinkedIn, avec un texte prêt.';
+      'Touchez partager pour publier le prix et le graphique en image au format WhatsApp, Instagram, Facebook, LinkedIn ou X, avec un texte prêt.';
 
   @override
   String get captureRecordThis => 'Enregistrer ceci';
@@ -5801,5 +5804,60 @@ class AppLocalizationsFr extends AppLocalizations {
           'Remplacer retire le compte avec lequel 1 opération a été payée ou encaissée, car cette ancienne sauvegarde ne l\'a pas.',
     );
     return '$_temp0';
+  }
+
+  @override
+  String get historyTitle => 'Historique';
+
+  @override
+  String get historyDay => 'Jour';
+
+  @override
+  String get historyMonth => 'Mois';
+
+  @override
+  String get historyYear => 'Année';
+
+  @override
+  String get historyShowAll => 'Voir tout l’historique';
+
+  @override
+  String get historyPeriod => 'Période';
+
+  @override
+  String get historyToday => 'Aujourd’hui';
+
+  @override
+  String get historyYesterday => 'Hier';
+
+  @override
+  String get historySoFar => 'Jusqu’ici';
+
+  @override
+  String get historyDayAverageNote =>
+      'La moyenne et la médiane demandent des prix relevés dans la journée. Qima les garde pour les 2 derniers jours.';
+
+  @override
+  String get historyRowHint =>
+      'Affiche ouverture, clôture, haut, bas, moyenne et médiane';
+
+  @override
+  String get statClose => 'Clôture';
+
+  @override
+  String get statAverage => 'Moyenne';
+
+  @override
+  String get statMedian => 'Médiane';
+
+  @override
+  String get chartStyleLine => 'Graphique en ligne';
+
+  @override
+  String get chartStyleCandles => 'Graphique en chandeliers';
+
+  @override
+  String chartCandleFigures(String open, String high, String low) {
+    return 'Ouverture $open · Haut $high · Bas $low';
   }
 }

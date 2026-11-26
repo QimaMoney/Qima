@@ -16,6 +16,7 @@ import '../models/instrument_catalog.dart';
 import '../models/instrument_facts.dart';
 import '../models/instrument_presentation.dart';
 import '../models/market_hours.dart';
+import '../models/price_bar.dart';
 import '../models/watch_card.dart';
 import '../theme/design_system.dart';
 import '../theme/help_topics.dart';
@@ -24,17 +25,20 @@ import '../theme/price_chart.dart';
 import '../theme/qima_colors.dart';
 import '../theme/strings.dart';
 import '../widgets/alerts_card.dart';
+import '../widgets/chart_style_switch.dart';
 import '../widgets/fundamentals_cards.dart';
 import '../widgets/help_button.dart';
 import '../widgets/instrument_facts_widgets.dart';
 import '../widgets/instrument_icon.dart';
 import '../widgets/key_stats_grid.dart';
 import '../widgets/market_status.dart';
+import '../widgets/price_history.dart';
 import '../widgets/range_selector.dart';
 import '../widgets/unit_price_carousel.dart';
 import 'currency_picker.dart';
 import 'holdings_card.dart';
 import 'holdings_screen.dart';
+import 'price_history_screen.dart';
 import 'share_asset_sheet.dart';
 
 /// Chart-first ranges offered on the instrument detail screen. Every range
@@ -76,6 +80,9 @@ class _InstrumentDetailScreenState extends State<InstrumentDetailScreen> {
 
   /// The benchmark drawn against the price, if any.
   Instrument? _compare;
+
+  /// What the History card lists the price by.
+  BarPeriod _historyPeriod = BarPeriod.month;
 
   /// Benchmark history already asked for, per range, so a failed download
   /// isn't retried on every rebuild.
@@ -197,12 +204,20 @@ class _InstrumentDetailScreenState extends State<InstrumentDetailScreen> {
     final holdings = context.watch<HoldingsCubit>();
     final l10n = AppLocalizations.of(context)!;
     final colors = context.colors;
+    final wantsCandles = context.select((SettingsCubit settings) => settings.state.candleCharts);
 
     return BlocBuilder<MarketCubit, MarketState>(
       builder: (context, state) {
         final presentation = cubit.presentation(_card);
         final instrument = presentation.instrument;
         final now = DateTime.now();
+        final windowed = _range.filter(presentation.points, now);
+        // Candles are offered where the history says enough to draw them,
+        // and not over a comparison.
+        final market = MarketHours.marketOf(instrument);
+        final candleBars = PriceBars.build(windowed, BarPeriod.forChart(_range), now: now, market: market);
+        final canCandle = _compare == null && PriceBars.drawable(candleBars);
+        final asCandles = canCandle && wantsCandles;
         final facts = state.factsByID[instrument.id];
         // A day's change is against the previous close, as exchanges quote it.
         final windowChange = (_range == ChartRange.day1 ? presentation.dayChange(facts, now) : null) ??
@@ -314,9 +329,27 @@ class _InstrumentDetailScreenState extends State<InstrumentDetailScreen> {
                     ],
                   ),
                   const SizedBox(height: DS.spaceSM),
-                  Text(
-                    presentation.latestPrice,
-                    style: TextStyle(color: colors.textPrimary, fontSize: DS.figureDisplay, fontWeight: FontWeight.w800),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: AlignmentDirectional.centerStart,
+                          child: Text(
+                            presentation.latestPrice,
+                            maxLines: 1,
+                            style: TextStyle(color: colors.textPrimary, fontSize: DS.figureDisplay, fontWeight: FontWeight.w800),
+                          ),
+                        ),
+                      ),
+                      if (canCandle) ...[
+                        const SizedBox(width: DS.spaceSM),
+                        ChartStyleSwitch(
+                          selected: asCandles ? ChartStyle.candles : ChartStyle.line,
+                          onSelected: (style) => context.read<SettingsCubit>().setCandleCharts(style == ChartStyle.candles),
+                        ),
+                      ],
+                    ],
                   ),
                   const SizedBox(height: DS.spaceXS),
                   Row(
@@ -384,8 +417,17 @@ class _InstrumentDetailScreenState extends State<InstrumentDetailScreen> {
                   SizedBox(
                     height: 260,
                     child: KeyedSubtree(
-                      key: ValueKey(_range),
-                      child: _buildChart(context, colors, presentation, _range, now, windowChange, accent, state),
+                      key: ValueKey((_range, asCandles)),
+                      child: _buildChart(
+                        context,
+                        colors,
+                        presentation,
+                        asCandles ? [for (final bar in candleBars) bar.toPoint()] : windowed,
+                        windowChange,
+                        accent,
+                        state,
+                        asCandles ? ChartStyle.candles : ChartStyle.line,
+                      ),
                     ),
                   ),
                   if (_compare case final benchmark?)
@@ -395,7 +437,23 @@ class _InstrumentDetailScreenState extends State<InstrumentDetailScreen> {
                       onClose: () => _setCompare(null),
                     ),
                   const SizedBox(height: DS.spaceMD),
-                  _keyStats(context, presentation, facts, windowChange, now),
+                  _keyStats(context, presentation, facts, windowed, windowChange, now),
+                  if (PriceBars.build(presentation.points, _historyPeriod, now: now, market: market) case final bars
+                      when bars.isNotEmpty) ...[
+                    const SizedBox(height: DS.spaceMD),
+                    PriceHistoryCard(
+                      bars: bars,
+                      period: _historyPeriod,
+                      onPeriod: (period) => setState(() => _historyPeriod = period),
+                      currencyCode: presentation.displayCurrency,
+                      now: now,
+                      onShowAll: () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => PriceHistoryScreen(card: _card, initialPeriod: _historyPeriod),
+                        ),
+                      ),
+                    ),
+                  ],
                   if (facts?.fundamentals case final f? when f.hasValuation) ...[
                     const SizedBox(height: DS.spaceMD),
                     ValuationCard(fundamentals: f),
@@ -437,7 +495,14 @@ class _InstrumentDetailScreenState extends State<InstrumentDetailScreen> {
   /// Key stats for [_range], with the exchange's figures when there are
   /// any: the previous close, yield and the day's and year's ranges, all in
   /// the card's currency and unit.
-  Widget _keyStats(BuildContext context, InstrumentPresentation presentation, InstrumentFacts? facts, RangeChange? windowChange, DateTime now) {
+  Widget _keyStats(
+    BuildContext context,
+    InstrumentPresentation presentation,
+    InstrumentFacts? facts,
+    List<DisplayPoint> windowed,
+    RangeChange? windowChange,
+    DateTime now,
+  ) {
     final current = presentation.latestMoney?.amount;
     final fresh = facts != null && !facts.isStale(now);
     double? display(double? v) => v == null || facts == null ? null : presentation.exchangeMoney(v, facts.currency).amount;
@@ -450,7 +515,7 @@ class _InstrumentDetailScreenState extends State<InstrumentDetailScreen> {
         ? null
         : (DateFormat.yMMMd(Localizations.localeOf(context).toString())..useNativeDigits = false).format(earnings); // Yahoo's day, as the exchange gives it.
     return KeyStatsGrid(
-      windowed: _range.filter(presentation.points, now),
+      windowed: windowed,
       changePercent: windowChange?.percentValue,
       changeIsUp: windowChange?.isUp,
       currencyCode: presentation.displayCurrency,
@@ -486,13 +551,12 @@ class _InstrumentDetailScreenState extends State<InstrumentDetailScreen> {
     BuildContext context,
     QimaColors colors,
     InstrumentPresentation presentation,
-    ChartRange range,
-    DateTime now,
+    List<DisplayPoint> windowed,
     RangeChange? windowChange,
     Color accent,
     MarketState state,
+    ChartStyle style,
   ) {
-    final windowed = range.filter(presentation.points, now);
     if (windowed.length < 2) {
       if (state.isLoadingHistory) {
         return const Center(child: CircularProgressIndicator());
@@ -524,6 +588,7 @@ class _InstrumentDetailScreenState extends State<InstrumentDetailScreen> {
       compare: benchmark == null
           ? null
           : ChartCompare(label: displayLabel(context, benchmark.nameKey), points: _comparePoints(cubit, benchmark)),
+      style: style,
     );
     if (!state.isLoadingHistory) return chart;
     // What's cached shows at once; a thin bar says older prices are on the way.

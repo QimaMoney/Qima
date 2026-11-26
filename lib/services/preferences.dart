@@ -141,6 +141,7 @@ class Preferences {
   static const String _appLanguageKey = 'appLanguage';
   static const String _appearanceKey = 'appearance';
   static const String _preferredChartRangeKey = 'preferredChartRange';
+  static const String _candleChartsKey = 'candleCharts';
   static const String _hideBalancesKey = 'hideBalances';
   static const String _plainSummariesKey = 'plainSummaries';
   static const String _speechLanguageKey = 'speechLanguage';
@@ -327,6 +328,11 @@ class Preferences {
     final coerced = value.isExtended ? ChartRange.fallbackDefault : value;
     await local.setString(_preferredChartRangeKey, coerced.name);
   }
+
+  /// Local-only: whether price charts draw candles rather than a line.
+  bool get candleCharts => local.getBool(_candleChartsKey) ?? false;
+
+  Future<void> setCandleCharts(bool value) => local.setBool(_candleChartsKey, value);
 
   /// Local-only, NOT synced — hiding balances is a per-device, in-the-moment
   /// privacy choice (e.g. "don't show this over someone's shoulder right

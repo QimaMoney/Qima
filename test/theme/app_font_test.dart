@@ -4,8 +4,8 @@ import 'package:qima/l10n/app_localizations.dart';
 import 'package:qima/theme/app_theme.dart';
 import 'package:qima/theme/design_system.dart';
 
-/// The app's font is decided once, in `buildTheme`. Chips and navigation
-/// labels replace the ambient text style instead of merging with it, so
+/// The app's font is decided once, in `buildTheme`. Chips, segmented
+/// buttons and navigation labels replace the ambient text style instead of merging with it, so
 /// these check they still end up in the locale's family.
 void main() {
   Widget app(Locale locale) {
@@ -18,7 +18,16 @@ void main() {
         child: child!,
       ),
       home: Scaffold(
-        body: DSChoiceChip(label: 'chip', selected: false, onSelected: (_) {}),
+        body: Column(
+          children: [
+            DSChoiceChip(label: 'chip', selected: false, onSelected: (_) {}),
+            SegmentedButton<int>(
+              segments: const [ButtonSegment(value: 0, label: Text('one')), ButtonSegment(value: 1, label: Text('two'))],
+              selected: const {0},
+              onSelectionChanged: (_) {},
+            ),
+          ],
+        ),
         bottomNavigationBar: NavigationBar(
           destinations: const [
             NavigationDestination(icon: Icon(Icons.list), label: 'first'),
@@ -35,11 +44,13 @@ void main() {
     return DefaultTextStyle.of(element).style.merge(widget.style).fontFamily;
   }
 
-  testWidgets('Arabic sets chips and navigation labels in Almarai', (tester) async {
+  testWidgets('Arabic sets chips, segmented buttons and navigation labels in Almarai', (tester) async {
     await tester.pumpWidget(app(const Locale('ar')));
     await tester.pumpAndSettle();
 
     expect(familyOf(tester, 'chip'), DS.arabicFontFamily);
+    expect(familyOf(tester, 'one'), DS.arabicFontFamily);
+    expect(familyOf(tester, 'two'), DS.arabicFontFamily);
     expect(familyOf(tester, 'first'), DS.arabicFontFamily);
     expect(familyOf(tester, 'second'), DS.arabicFontFamily);
   });

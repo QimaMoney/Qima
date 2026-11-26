@@ -3117,6 +3117,9 @@ class AppLocalizationsAr extends AppLocalizations {
   String get shareToLinkedinPost => 'منشور لينكدإن';
 
   @override
+  String get shareToXPost => 'منشور على إكس';
+
+  @override
   String shareCaption(String name, String price) {
     return 'سعر $name الآن $price.';
   }
@@ -3154,7 +3157,7 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get helpAssetDetailStep6Body =>
-      'اضغط على المشاركة لنشر السعر والرسم البياني كصورة بمقاس واتساب أو إنستغرام أو فيسبوك أو لينكدإن، مع نص جاهز.';
+      'اضغط على المشاركة لنشر السعر والرسم البياني كصورة بمقاس واتساب أو إنستغرام أو فيسبوك أو لينكدإن أو إكس، مع نص جاهز.';
 
   @override
   String get captureRecordThis => 'سجّل هذه العملية';
@@ -5779,5 +5782,60 @@ class AppLocalizationsAr extends AppLocalizations {
           'الاستبدال يزيل الحساب الذي دُفعت منه عملية واحدة أو دخلت إليه، لأن هذه النسخة الأقدم لا تحتويه.',
     );
     return '$_temp0';
+  }
+
+  @override
+  String get historyTitle => 'السجل';
+
+  @override
+  String get historyDay => 'يوم';
+
+  @override
+  String get historyMonth => 'شهر';
+
+  @override
+  String get historyYear => 'سنة';
+
+  @override
+  String get historyShowAll => 'عرض السجل كاملًا';
+
+  @override
+  String get historyPeriod => 'الفترة';
+
+  @override
+  String get historyToday => 'اليوم';
+
+  @override
+  String get historyYesterday => 'أمس';
+
+  @override
+  String get historySoFar => 'حتى الآن';
+
+  @override
+  String get historyDayAverageNote =>
+      'المتوسط والوسيط يحتاجان إلى أسعار من داخل اليوم. يحتفظ Qima بها لآخر يومين.';
+
+  @override
+  String get historyRowHint =>
+      'يعرض الافتتاح والإغلاق والأعلى والأدنى والمتوسط والوسيط';
+
+  @override
+  String get statClose => 'الإغلاق';
+
+  @override
+  String get statAverage => 'المتوسط';
+
+  @override
+  String get statMedian => 'الوسيط';
+
+  @override
+  String get chartStyleLine => 'مخطط خطي';
+
+  @override
+  String get chartStyleCandles => 'مخطط الشموع';
+
+  @override
+  String chartCandleFigures(String open, String high, String low) {
+    return 'الافتتاح $open · الأعلى $high · الأدنى $low';
   }
 }

@@ -14,7 +14,11 @@ class DisplayPoint extends Equatable {
   final double? high;
   final double? low;
 
-  DisplayPoint({required DateTime date, required this.value, this.high, this.low}) : date = date.toLocal();
+  /// The price that span started at, in the same terms as [value]. Null
+  /// where the feed didn't say.
+  final double? open;
+
+  DisplayPoint({required DateTime date, required this.value, this.high, this.low, this.open}) : date = date.toLocal();
 
   /// The highest price the point stands for: its own extreme, else its value.
   double get peak => high ?? value;
@@ -23,5 +27,5 @@ class DisplayPoint extends Equatable {
   double get trough => low ?? value;
 
   @override
-  List<Object?> get props => [date, value, high, low];
+  List<Object?> get props => [date, value, high, low, open];
 }

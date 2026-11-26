@@ -3101,6 +3101,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get shareToLinkedinPost => 'LinkedIn post';
 
   @override
+  String get shareToXPost => 'X post';
+
+  @override
   String shareCaption(String name, String price) {
     return '$name is at $price.';
   }
@@ -3139,7 +3142,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get helpAssetDetailStep6Body =>
-      'Tap share to post the price and chart as an image sized for WhatsApp, Instagram, Facebook or LinkedIn, with a ready caption.';
+      'Tap share to post the price and chart as an image sized for WhatsApp, Instagram, Facebook, LinkedIn or X, with a ready caption.';
 
   @override
   String get captureRecordThis => 'Record this';
@@ -5756,5 +5759,60 @@ class AppLocalizationsEn extends AppLocalizations {
           'Replacing removes the account that 1 trade was paid from or into, because this older backup doesn\'t have it.',
     );
     return '$_temp0';
+  }
+
+  @override
+  String get historyTitle => 'History';
+
+  @override
+  String get historyDay => 'Day';
+
+  @override
+  String get historyMonth => 'Month';
+
+  @override
+  String get historyYear => 'Year';
+
+  @override
+  String get historyShowAll => 'Show all history';
+
+  @override
+  String get historyPeriod => 'Period';
+
+  @override
+  String get historyToday => 'Today';
+
+  @override
+  String get historyYesterday => 'Yesterday';
+
+  @override
+  String get historySoFar => 'So far';
+
+  @override
+  String get historyDayAverageNote =>
+      'Average and median need prices from within the day. Qima keeps those for the last 2 days.';
+
+  @override
+  String get historyRowHint =>
+      'Shows open, close, high, low, average and median';
+
+  @override
+  String get statClose => 'Close';
+
+  @override
+  String get statAverage => 'Average';
+
+  @override
+  String get statMedian => 'Median';
+
+  @override
+  String get chartStyleLine => 'Line chart';
+
+  @override
+  String get chartStyleCandles => 'Candle chart';
+
+  @override
+  String chartCandleFigures(String open, String high, String low) {
+    return 'Open $open · High $high · Low $low';
   }
 }
