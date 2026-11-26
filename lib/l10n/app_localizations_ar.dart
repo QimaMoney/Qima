@@ -5780,4 +5780,59 @@ class AppLocalizationsAr extends AppLocalizations {
     );
     return '$_temp0';
   }
+
+  @override
+  String get historyTitle => 'السجل';
+
+  @override
+  String get historyDay => 'يوم';
+
+  @override
+  String get historyMonth => 'شهر';
+
+  @override
+  String get historyYear => 'سنة';
+
+  @override
+  String get historyShowAll => 'عرض السجل كاملًا';
+
+  @override
+  String get historyPeriod => 'الفترة';
+
+  @override
+  String get historyToday => 'اليوم';
+
+  @override
+  String get historyYesterday => 'أمس';
+
+  @override
+  String get historySoFar => 'حتى الآن';
+
+  @override
+  String get historyDayAverageNote =>
+      'المتوسط والوسيط يحتاجان إلى أسعار من داخل اليوم. يحتفظ Qima بها لآخر يومين.';
+
+  @override
+  String get historyRowHint =>
+      'يعرض الافتتاح والإغلاق والأعلى والأدنى والمتوسط والوسيط';
+
+  @override
+  String get statClose => 'الإغلاق';
+
+  @override
+  String get statAverage => 'المتوسط';
+
+  @override
+  String get statMedian => 'الوسيط';
+
+  @override
+  String get chartStyleLine => 'مخطط خطي';
+
+  @override
+  String get chartStyleCandles => 'مخطط الشموع';
+
+  @override
+  String chartCandleFigures(String open, String high, String low) {
+    return 'الافتتاح $open · الأعلى $high · الأدنى $low';
+  }
 }

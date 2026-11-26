@@ -371,9 +371,10 @@ class PriceRepository {
       final intradayKey = 'quoteIntradayAt.${instrument.id}';
       final levelKey = 'quoteHistoryLevel.${instrument.id}';
       final scaled = _pricedByAnotherSource(instrument);
-      // History stored before it was scaled to the live price is pulled
-      // again in full, once, so old and new bars sit at the same level.
-      final relevel = !force && deep && scaled && prefs.getString(levelKey) != _historyLevel && retryDue;
+      // History stored in an older shape (before bars kept their open, or
+      // before it was scaled to the live price) is pulled again in full,
+      // once, so old and new bars are stored alike.
+      final relevel = !force && deep && prefs.getString(levelKey) != _historyLevel && retryDue;
       final doTail = !force && deep && !relevel && tailDue;
       final doDaily = force || !deep || relevel || doTail;
       // Daily bars always come with intraday ones: the newest intraday bar
@@ -385,8 +386,8 @@ class PriceRepository {
       if (doTail || relevel) await _stamp(prefs, attemptedKey, effectiveNow);
       if (doIntraday) await _stamp(prefs, intradayKey, effectiveNow);
 
-      // A bar's high and low are converted exactly as its close; one that
-      // can't be converted is left out and the bar stands on its close.
+      // A bar's open, high and low are converted exactly as its close; one
+      // that can't be converted is left out and the bar stands on its close.
       double? usdOrNull(double? price, String currency) {
         if (price == null) return null;
         try {
@@ -405,6 +406,7 @@ class PriceRepository {
                 canonicalUSD: usdOrNull(bar.close, bar.currency) ?? double.nan,
                 high: usdOrNull(bar.high, bar.currency),
                 low: usdOrNull(bar.low, bar.currency),
+                open: usdOrNull(bar.open, bar.currency),
               ),
           ].where((q) => !q.canonicalUSD.isNaN).toList();
 
@@ -428,18 +430,7 @@ class PriceRepository {
         if (level == null) continue;
         factor = level;
       }
-      List<Quote> leveled(List<Quote> quotes) => factor == 1.0
-          ? quotes
-          : [
-              for (final q in quotes)
-                Quote(
-                  instrumentID: q.instrumentID,
-                  timestamp: q.timestamp,
-                  canonicalUSD: q.canonicalUSD * factor,
-                  high: q.high == null ? null : q.high! * factor,
-                  low: q.low == null ? null : q.low! * factor,
-                ),
-            ];
+      List<Quote> leveled(List<Quote> quotes) => factor == 1.0 ? quotes : [for (final q in quotes) q.scaled(factor)];
 
       var merged = existing;
       if (daily.isNotEmpty) merged = merged.merging(leveled(daily), effectiveNow);
@@ -456,7 +447,7 @@ class PriceRepository {
       // A full pull is as fresh as a tail refresh, so the tail waits its
       // interval after one too.
       if (doDaily) await _stamp(prefs, tailKey, effectiveNow);
-      if (scaled && !doTail) await prefs.setString(levelKey, _historyLevel);
+      if (!doTail) await prefs.setString(levelKey, _historyLevel);
     }
 
     if (result.isNotEmpty) _maybeReloadWidgets();
@@ -465,7 +456,7 @@ class PriceRepository {
 
   /// Bumped when stored history must be pulled again to match how new bars
   /// are stored.
-  static const String _historyLevel = 'live-v1';
+  static const String _historyLevel = 'ohlc-v1';
 
   /// Whether [instrument]'s live price comes from another provider than its
   /// history bars.

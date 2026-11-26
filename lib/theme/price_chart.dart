@@ -54,6 +54,17 @@ class ChartCompare {
   const ChartCompare({required this.label, required this.points});
 }
 
+/// How a price chart draws its samples.
+enum ChartStyle {
+  /// A smooth line over a faded area.
+  line,
+
+  /// One candle per sample: a wick from its low to its high and a body from
+  /// its open to its close. Each sample is then a whole period (see
+  /// `PriceBar.toPoint`).
+  candles,
+}
+
 /// Price chart matching `PriceChartView.swift` (spec §3.3): an area+line
 /// mark with a smooth curve, optional axes, and optional interaction.
 ///
@@ -87,7 +98,11 @@ class PriceChartView extends StatefulWidget {
   /// The person's own transactions, pinned to the price on their dates.
   final List<ChartMark> marks;
 
+  /// Not drawn over candles: two prices as candles on one scale can't be
+  /// told apart.
   final ChartCompare? compare;
+
+  final ChartStyle style;
 
   const PriceChartView({
     super.key,
@@ -103,6 +118,7 @@ class PriceChartView extends StatefulWidget {
     this.market,
     this.marks = const [],
     this.compare,
+    this.style = ChartStyle.line,
   });
 
   @override
@@ -432,16 +448,22 @@ class _Scene {
     final visible = view == null ? points : points.sublist(first, last + 1);
     final base = points[inFirst];
 
+    // A candle reaches to its sample's own extremes, a line only to its
+    // price.
+    final candles = widget.style == ChartStyle.candles;
+    double top(DisplayPoint p) => candles ? p.peak : p.value;
+    double bottom(DisplayPoint p) => candles ? p.trough : p.value;
+
     var high = inFirst, low = inFirst;
     for (var i = inFirst; i <= inLast; i++) {
-      if (points[i].value > points[high].value) high = i;
-      if (points[i].value < points[low].value) low = i;
+      if (top(points[i]) > top(points[high])) high = i;
+      if (bottom(points[i]) < bottom(points[low])) low = i;
     }
 
     // The comparison, scaled to start where the price starts in view.
     var compare = const <DisplayPoint>[];
     double? Function(DateTime)? compareChangeAt;
-    final source = widget.compare;
+    final source = candles ? null : widget.compare;
     if (source != null && base.value != 0) {
       final end = points[inLast].date;
       DisplayPoint? anchor;
@@ -474,8 +496,8 @@ class _Scene {
 
     var lo = double.infinity, hi = double.negativeInfinity;
     for (final p in visible) {
-      lo = math.min(lo, p.value);
-      hi = math.max(hi, p.value);
+      lo = math.min(lo, bottom(p));
+      hi = math.max(hi, top(p));
     }
     for (final p in compare) {
       lo = math.min(lo, p.value);
@@ -494,6 +516,22 @@ class _Scene {
           for (final p in ChartSampling.thinned(series, maxDrawnPoints))
             Offset(frame.x(axis.positionOf(p.date)), y(p.value)),
         ];
+
+    // A candle with no open of its own starts where the one before closed.
+    double openOf(int i) => points[i].open ?? (i > 0 ? points[i - 1].value : points[i].value);
+    final candleMarks = <_Candle>[
+      if (candles)
+        for (var i = first; i <= last; i++)
+          _Candle(
+            x: frame.x(axis.positions[i]),
+            open: y(openOf(i)),
+            close: y(points[i].value),
+            high: y(points[i].peak),
+            low: y(points[i].trough),
+            isUp: points[i].value >= openOf(i),
+          ),
+    ];
+    final candleWidth = (plotWidth / math.max(1, inLast - inFirst + 1) * 0.62).clamp(1.5, 12.0);
 
     final granularity = AxisGranularity.forSpan(points[inLast].date.difference(base.date));
     final ticks = <(double, String)>[];
@@ -522,10 +560,12 @@ class _Scene {
 
     final scrubIndex = scrub != null && scrub < n ? scrub : null;
     final measured = measure != null && measure.$2 < n ? measure : null;
-    final showExtremes = showsAxes && scrubIndex == null && measured == null && points[high].value != points[low].value;
+    final showExtremes = showsAxes && scrubIndex == null && measured == null && top(points[high]) != bottom(points[low]);
 
     final painter = _PriceChartPainter(
       line: coords(visible),
+      candles: candleMarks,
+      candleWidth: candleWidth,
       compare: compare.length >= 2 ? coords(compare) : const [],
       plot: Size(plotWidth, plotHeight),
       zoomed: view != null,
@@ -542,8 +582,8 @@ class _Scene {
       ticks: ticks,
       extremes: showExtremes
           ? [
-              (at(high), _valueLabel(points[high].value, widget.currencyCode), true),
-              (at(low), _valueLabel(points[low].value, widget.currencyCode), false),
+              (Offset(at(high).dx, y(top(points[high]))), _valueLabel(top(points[high]), widget.currencyCode), true),
+              (Offset(at(low).dx, y(bottom(points[low]))), _valueLabel(bottom(points[low]), widget.currencyCode), false),
             ]
           : const [],
       marks: markDots,
@@ -578,6 +618,12 @@ class _Scene {
         title: dateFormat.format(p.date),
         headline: widget.maskValues ? Masking.mask : _valueLabel(p.value, widget.currencyCode),
         lines: [
+          if (candles && !widget.maskValues)
+            l10n.chartCandleFigures(
+              _valueLabel(openOf(scrubIndex), widget.currencyCode),
+              _valueLabel(p.peak, widget.currencyCode),
+              _valueLabel(p.trough, widget.currencyCode),
+            ),
           if (since != null) l10n.chartSince(_signedPercent(context, since), dateFormat.format(base.date)),
           if (compareChange != null) '${source!.label} ${_signedPercent(context, compareChange)}',
           for (final mark in marksAt[scrubIndex] ?? const <ChartMark>[]) mark.label,
@@ -691,8 +737,31 @@ DateFormat calloutDateFormat(AxisGranularity granularity, [String? locale]) {
   return format..useNativeDigits = false;
 }
 
+/// One candle in plot coordinates.
+class _Candle {
+  final double x;
+  final double open;
+  final double close;
+  final double high;
+  final double low;
+  final bool isUp;
+
+  const _Candle({
+    required this.x,
+    required this.open,
+    required this.close,
+    required this.high,
+    required this.low,
+    required this.isUp,
+  });
+}
+
 class _PriceChartPainter extends CustomPainter {
   final List<Offset> line;
+
+  /// Drawn in place of the line and its area when not empty.
+  final List<_Candle> candles;
+  final double candleWidth;
   final List<Offset> compare;
   final Size plot;
 
@@ -719,6 +788,8 @@ class _PriceChartPainter extends CustomPainter {
 
   _PriceChartPainter({
     required this.line,
+    required this.candles,
+    required this.candleWidth,
     required this.compare,
     required this.plot,
     required this.zoomed,
@@ -753,6 +824,68 @@ class _PriceChartPainter extends CustomPainter {
       canvas.drawRect(Rect.fromLTRB(a.dx, 0, b.dx, plotHeight), Paint()..color = color.withValues(alpha: 0.08));
     }
 
+    if (candles.isNotEmpty) {
+      _paintCandles(canvas);
+    } else {
+      _paintLine(canvas, plotHeight);
+    }
+
+    for (final (center, kind) in marks) {
+      final fill = switch (kind) {
+        ChartMarkKind.buy => up,
+        ChartMarkKind.sell => down,
+        ChartMarkKind.dividend => dividend,
+        ChartMarkKind.other => textSecondary,
+      };
+      canvas.drawCircle(center, 5, Paint()..color = ring);
+      canvas.drawCircle(center, 3.5, Paint()..color = fill);
+    }
+    canvas.restore();
+
+    for (final (x, label) in ticks) {
+      final tp = _text(label, TextStyle(color: textTertiary, fontSize: 10));
+      tp.paint(canvas, Offset((x - tp.width / 2).clamp(0.0, math.max(0.0, size.width - tp.width)), plotHeight + 4));
+    }
+
+    for (final (center, label, above) in extremes) {
+      // A candle's wick already ends at its extreme.
+      if (candles.isEmpty) canvas.drawCircle(center, 3, Paint()..color = color);
+      final tp = _text(label, TextStyle(color: textSecondary, fontSize: 10, fontWeight: FontWeight.w600));
+      final dx = (center.dx - tp.width / 2).clamp(0.0, math.max(0.0, size.width - tp.width)).toDouble();
+      final dy = above ? center.dy - tp.height - 4 : center.dy + 4;
+      tp.paint(canvas, Offset(dx, dy.clamp(0.0, math.max(0.0, plotHeight - tp.height))));
+    }
+
+    if (measure case (final a, final b)) {
+      _rule(canvas, a.dx, plotHeight);
+      _rule(canvas, b.dx, plotHeight);
+      _dot(canvas, a);
+      _dot(canvas, b);
+    }
+
+    if (scrub case final point?) {
+      _rule(canvas, point.dx, plotHeight);
+      _dot(canvas, point);
+    }
+  }
+
+  void _paintCandles(Canvas canvas) {
+    final half = candleWidth / 2;
+    final wick = math.min(1.5, candleWidth);
+    for (final c in candles) {
+      final paint = Paint()..color = c.isUp ? up : down;
+      canvas.drawRect(Rect.fromLTRB(c.x - wick / 2, c.high, c.x + wick / 2, c.low), paint);
+      // A body is at least a hairline tall, so an unchanged period shows.
+      final bodyTop = math.min(c.open, c.close), bodyBottom = math.max(c.open, c.close);
+      final pad = bodyBottom - bodyTop < 1 ? (1 - (bodyBottom - bodyTop)) / 2 : 0.0;
+      canvas.drawRRect(
+        RRect.fromLTRBR(c.x - half, bodyTop - pad, c.x + half, bodyBottom + pad, Radius.circular(math.min(1.5, half))),
+        paint,
+      );
+    }
+  }
+
+  void _paintLine(Canvas canvas, double plotHeight) {
     final linePath = _smoothPath(line);
     final areaPath = Path.from(linePath)
       ..lineTo(line.last.dx, plotHeight)
@@ -788,43 +921,6 @@ class _PriceChartPainter extends CustomPainter {
         ..strokeJoin = StrokeJoin.round
         ..color = color,
     );
-
-    for (final (center, kind) in marks) {
-      final fill = switch (kind) {
-        ChartMarkKind.buy => up,
-        ChartMarkKind.sell => down,
-        ChartMarkKind.dividend => dividend,
-        ChartMarkKind.other => textSecondary,
-      };
-      canvas.drawCircle(center, 5, Paint()..color = ring);
-      canvas.drawCircle(center, 3.5, Paint()..color = fill);
-    }
-    canvas.restore();
-
-    for (final (x, label) in ticks) {
-      final tp = _text(label, TextStyle(color: textTertiary, fontSize: 10));
-      tp.paint(canvas, Offset((x - tp.width / 2).clamp(0.0, math.max(0.0, size.width - tp.width)), plotHeight + 4));
-    }
-
-    for (final (center, label, above) in extremes) {
-      canvas.drawCircle(center, 3, Paint()..color = color);
-      final tp = _text(label, TextStyle(color: textSecondary, fontSize: 10, fontWeight: FontWeight.w600));
-      final dx = (center.dx - tp.width / 2).clamp(0.0, math.max(0.0, size.width - tp.width)).toDouble();
-      final dy = above ? center.dy - tp.height - 4 : center.dy + 4;
-      tp.paint(canvas, Offset(dx, dy.clamp(0.0, math.max(0.0, plotHeight - tp.height))));
-    }
-
-    if (measure case (final a, final b)) {
-      _rule(canvas, a.dx, plotHeight);
-      _rule(canvas, b.dx, plotHeight);
-      _dot(canvas, a);
-      _dot(canvas, b);
-    }
-
-    if (scrub case final point?) {
-      _rule(canvas, point.dx, plotHeight);
-      _dot(canvas, point);
-    }
   }
 
   TextPainter _text(String text, TextStyle style) =>

@@ -59,9 +59,9 @@ void main() {
   late Directory dir;
 
   setUp(() {
-    // History already stored at the live price's level, as after the first
+    // History already stored in the current shape, as after the first
     // pull with this version.
-    SharedPreferences.setMockInitialValues({'quoteHistoryLevel.${gold.id}': 'live-v1'});
+    SharedPreferences.setMockInitialValues({'quoteHistoryLevel.${gold.id}': 'ohlc-v1'});
     dir = Directory.systemTemp.createTempSync('qima_backfill_test');
     LocalFileStore.overrideDirectoryForTesting(dir);
   });
@@ -276,6 +276,53 @@ void main() {
 
       expect(result, isEmpty);
       expect((await store.load(gold.id)).isEmpty, isTrue);
+    });
+
+    test("a bar's open is stored, scaled like its close", () async {
+      final provider = _FakeHistoryProvider(
+        now.subtract(const Duration(days: 365)),
+        now.subtract(const Duration(days: 3)),
+        daily: [
+          for (var d = now.subtract(const Duration(days: 365)); d.isBefore(now.subtract(const Duration(days: 3))); d = d.add(const Duration(days: 1)))
+            Bar(date: d, open: 4000, close: 4040, high: 4080, low: 3960, currency: 'USD'),
+        ],
+        intraday: intradayBars(now.subtract(const Duration(hours: 2)), now, close: 4040),
+      );
+
+      await repositoryWith(provider, spot: 4000).backfillInstruments([gold], FXHistory.empty, now: now);
+
+      final first = (await store.load(gold.id)).quotes.first;
+      final factor = 4000 / 4040;
+      expect(first.canonicalUSD, closeTo(4040 * factor, 1e-9));
+      expect(first.open, closeTo(4000 * factor, 1e-9));
+      expect(first.high, closeTo(4080 * factor, 1e-9));
+    });
+
+    test('a stock stored before bars kept their open is pulled again in full, once', () async {
+      SharedPreferences.setMockInitialValues({});
+      final tesla = InstrumentCatalog.all.firstWhere((i) => i.assetClass == AssetClass.stock);
+      final from = now.subtract(const Duration(days: 365)), to = now.subtract(const Duration(days: 3));
+      await store.save(QuoteSeries(instrumentID: tesla.id, quotes: [
+        for (var d = from; !d.isAfter(to); d = d.add(const Duration(days: 1)))
+          Quote(instrumentID: tesla.id, timestamp: d, canonicalUSD: 350),
+      ]));
+      final provider = _FakeHistoryProvider(
+        from,
+        to,
+        daily: [
+          for (var d = from; !d.isAfter(to); d = d.add(const Duration(days: 1)))
+            Bar(date: d, open: 340, close: 350, high: 360, low: 330, currency: 'USD'),
+        ],
+        intraday: intradayBars(now.subtract(const Duration(hours: 2)), now, close: 350),
+      );
+      final repository = repositoryWith(provider, spot: null);
+
+      await repository.backfillInstruments([tesla], FXHistory.empty, now: now);
+      expect(provider.requestedRanges, ['5y']);
+      expect((await store.load(tesla.id)).quotes.first.open, 340);
+
+      await repository.backfillInstruments([tesla], FXHistory.empty, now: now.add(const Duration(minutes: 20)));
+      expect(provider.requestedRanges, ['5y'], reason: 'in the new shape now; the tail waits for its interval');
     });
 
     test('history stored before scaling is pulled again in full, once', () async {

@@ -9766,6 +9766,108 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'{count, plural, =1{Replacing removes the account that 1 trade was paid from or into, because this older backup doesn\'t have it.} other{Replacing removes the accounts that {count} trades were paid from or into, because this older backup doesn\'t have them.}}'**
   String backupImportReplaceDropsCash(int count);
+
+  /// Title of the card and screen listing what a price did each day, month and year.
+  ///
+  /// In en, this message translates to:
+  /// **'History'**
+  String get historyTitle;
+
+  /// History switch: one row per day.
+  ///
+  /// In en, this message translates to:
+  /// **'Day'**
+  String get historyDay;
+
+  /// History switch: one row per month.
+  ///
+  /// In en, this message translates to:
+  /// **'Month'**
+  String get historyMonth;
+
+  /// History switch: one row per year.
+  ///
+  /// In en, this message translates to:
+  /// **'Year'**
+  String get historyYear;
+
+  /// Opens the full History screen from the card.
+  ///
+  /// In en, this message translates to:
+  /// **'Show all history'**
+  String get historyShowAll;
+
+  /// Column header over the day, month or year of each History row.
+  ///
+  /// In en, this message translates to:
+  /// **'Period'**
+  String get historyPeriod;
+
+  /// Caption on the History row for today.
+  ///
+  /// In en, this message translates to:
+  /// **'Today'**
+  String get historyToday;
+
+  /// Caption on the History row for yesterday.
+  ///
+  /// In en, this message translates to:
+  /// **'Yesterday'**
+  String get historyYesterday;
+
+  /// Caption on the History row for the month or year still under way.
+  ///
+  /// In en, this message translates to:
+  /// **'So far'**
+  String get historySoFar;
+
+  /// Shown under an older day whose average and median are dashes.
+  ///
+  /// In en, this message translates to:
+  /// **'Average and median need prices from within the day. Qima keeps those for the last 2 days.'**
+  String get historyDayAverageNote;
+
+  /// Screen reader hint on a History row that opens when tapped.
+  ///
+  /// In en, this message translates to:
+  /// **'Shows open, close, high, low, average and median'**
+  String get historyRowHint;
+
+  /// The last price of a period.
+  ///
+  /// In en, this message translates to:
+  /// **'Close'**
+  String get statClose;
+
+  /// The mean price over a period.
+  ///
+  /// In en, this message translates to:
+  /// **'Average'**
+  String get statAverage;
+
+  /// The median price over a period.
+  ///
+  /// In en, this message translates to:
+  /// **'Median'**
+  String get statMedian;
+
+  /// Chart type switch: draw the price as a line.
+  ///
+  /// In en, this message translates to:
+  /// **'Line chart'**
+  String get chartStyleLine;
+
+  /// Chart type switch: draw the price as candles.
+  ///
+  /// In en, this message translates to:
+  /// **'Candle chart'**
+  String get chartStyleCandles;
+
+  /// Scrub callout line under a candle’s closing price.
+  ///
+  /// In en, this message translates to:
+  /// **'Open {open} · High {high} · Low {low}'**
+  String chartCandleFigures(String open, String high, String low);
 }
 
 class _AppLocalizationsDelegate

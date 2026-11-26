@@ -324,4 +324,69 @@ void main() {
       expect(series.quotes.last, same(recent));
     });
   });
+
+  group('the open of a sample', () {
+    const id = 'stock.ZZTEST';
+    final now = DateTime(2024, 3, 10, 12);
+    final day = DateTime(2024, 3, 5);
+
+    Quote bar(DateTime at, double close, {double? open, double? high, double? low}) =>
+        Quote(instrumentID: id, timestamp: at, canonicalUSD: close, open: open, high: high, low: low);
+
+    test('round-trips, and a file written before it existed reads with none', () {
+      final quote = bar(DateTime.utc(2024, 3, 5, 9), 12.5, open: 12, high: 20, low: 11.25);
+      expect(Quote.fromJson(quote.toJson()), quote);
+      expect(Quote.fromJson(quote.toJson()..remove('open')).open, isNull);
+      expect(bar(DateTime.utc(2024, 3, 5, 9), 12.5).toJson().containsKey('open'), isFalse);
+    });
+
+    test('is scaled with the price and the extremes', () {
+      final scaled = bar(DateTime.utc(2024, 3, 5, 9), 10, open: 8, high: 12, low: 6).scaled(1.5);
+      expect([scaled.canonicalUSD, scaled.open, scaled.high, scaled.low], [15, 12, 18, 9]);
+      expect(bar(DateTime.utc(2024, 3, 5, 9), 10).scaled(1.5).open, isNull);
+    });
+
+    test('a collapsed day opens where its first bar opened', () {
+      final series = QuoteSeries(instrumentID: id, quotes: [bar(DateTime(2024, 3, 1, 9), 8)]).merging([
+        bar(day.add(const Duration(hours: 9, minutes: 30)), 11, open: 10, high: 12, low: 9),
+        bar(day.add(const Duration(hours: 9, minutes: 45)), 13, open: 11, high: 14, low: 11),
+        bar(day.add(const Duration(hours: 16)), 15, open: 13, high: 16, low: 12),
+      ], now);
+
+      final kept = series.quotes.last;
+      expect(kept.canonicalUSD, 15);
+      expect(kept.open, 10);
+      expect(kept.high, 16);
+      expect(kept.low, 9);
+    });
+
+    test('a daily bar dated at the open gives its open to a day whose price is a later live quote', () {
+      final series = QuoteSeries(instrumentID: id, quotes: [
+        bar(DateTime(2024, 3, 1, 9), 8),
+        bar(day.add(const Duration(hours: 17)), 15.5),
+      ]).merging([bar(day.add(const Duration(hours: 9, minutes: 30)), 15, open: 10, high: 16, low: 9)], now);
+
+      final kept = series.quotes.last;
+      expect(kept.canonicalUSD, 15.5, reason: 'the later sample is still the day\'s price');
+      expect(kept.open, 10);
+    });
+
+    test('a day known only from live quotes has no open', () {
+      final series = QuoteSeries(instrumentID: id, quotes: [bar(DateTime(2024, 3, 1, 9), 8)]).merging([
+        bar(day.add(const Duration(hours: 10)), 11),
+        bar(day.add(const Duration(hours: 12)), 12),
+      ], now);
+      expect(series.quotes.last.open, isNull);
+    });
+
+    test('merging the same day again keeps the open', () {
+      final bars = [
+        bar(day.add(const Duration(hours: 9, minutes: 30)), 11, open: 10, high: 12, low: 9),
+        bar(day.add(const Duration(hours: 16)), 15, open: 13, high: 16, low: 12),
+      ];
+      final once = QuoteSeries(instrumentID: id, quotes: [bar(DateTime(2024, 3, 1, 9), 8)]).merging(bars, now);
+      final twice = once.merging([bar(day.add(const Duration(hours: 16)), 15, open: 13, high: 16, low: 12)], now);
+      expect(twice.quotes.last.open, 10);
+    });
+  });
 }

@@ -5757,4 +5757,59 @@ class AppLocalizationsEn extends AppLocalizations {
     );
     return '$_temp0';
   }
+
+  @override
+  String get historyTitle => 'History';
+
+  @override
+  String get historyDay => 'Day';
+
+  @override
+  String get historyMonth => 'Month';
+
+  @override
+  String get historyYear => 'Year';
+
+  @override
+  String get historyShowAll => 'Show all history';
+
+  @override
+  String get historyPeriod => 'Period';
+
+  @override
+  String get historyToday => 'Today';
+
+  @override
+  String get historyYesterday => 'Yesterday';
+
+  @override
+  String get historySoFar => 'So far';
+
+  @override
+  String get historyDayAverageNote =>
+      'Average and median need prices from within the day. Qima keeps those for the last 2 days.';
+
+  @override
+  String get historyRowHint =>
+      'Shows open, close, high, low, average and median';
+
+  @override
+  String get statClose => 'Close';
+
+  @override
+  String get statAverage => 'Average';
+
+  @override
+  String get statMedian => 'Median';
+
+  @override
+  String get chartStyleLine => 'Line chart';
+
+  @override
+  String get chartStyleCandles => 'Candle chart';
+
+  @override
+  String chartCandleFigures(String open, String high, String low) {
+    return 'Open $open · High $high · Low $low';
+  }
 }

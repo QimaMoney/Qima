@@ -12,7 +12,18 @@ class Quote extends Equatable {
   final double? high;
   final double? low;
 
-  const Quote({required this.instrumentID, required this.timestamp, required this.canonicalUSD, this.high, this.low});
+  /// The price that span started at, in canonical USD. Null when the feed
+  /// didn't say, as for a live quote.
+  final double? open;
+
+  const Quote({
+    required this.instrumentID,
+    required this.timestamp,
+    required this.canonicalUSD,
+    this.high,
+    this.low,
+    this.open,
+  });
 
   Map<String, dynamic> toJson() => {
         'instrumentID': instrumentID,
@@ -20,6 +31,7 @@ class Quote extends Equatable {
         'canonicalUSD': canonicalUSD,
         if (high != null) 'high': high,
         if (low != null) 'low': low,
+        if (open != null) 'open': open,
       };
 
   factory Quote.fromJson(Map<String, dynamic> json) => Quote(
@@ -28,14 +40,32 @@ class Quote extends Equatable {
         canonicalUSD: (json['canonicalUSD'] as num).toDouble(),
         high: (json['high'] as num?)?.toDouble(),
         low: (json['low'] as num?)?.toDouble(),
+        open: (json['open'] as num?)?.toDouble(),
       );
 
-  /// This sample with its extremes replaced.
-  Quote withExtremes({required double high, required double low}) =>
-      Quote(instrumentID: instrumentID, timestamp: timestamp, canonicalUSD: canonicalUSD, high: high, low: low);
+  /// This sample standing for a whole span: its extremes and the price the
+  /// span started at.
+  Quote withSpan({required double high, required double low, required double? open}) => Quote(
+        instrumentID: instrumentID,
+        timestamp: timestamp,
+        canonicalUSD: canonicalUSD,
+        high: high,
+        low: low,
+        open: open,
+      );
+
+  /// This sample with every price multiplied by [factor].
+  Quote scaled(double factor) => Quote(
+        instrumentID: instrumentID,
+        timestamp: timestamp,
+        canonicalUSD: canonicalUSD * factor,
+        high: high == null ? null : high! * factor,
+        low: low == null ? null : low! * factor,
+        open: open == null ? null : open! * factor,
+      );
 
   @override
-  List<Object?> get props => [instrumentID, timestamp, canonicalUSD, high, low];
+  List<Object?> get props => [instrumentID, timestamp, canonicalUSD, high, low, open];
 }
 
 String _minuteKey(DateTime t) {
@@ -49,18 +79,30 @@ String _dayKey(DateTime t) {
   return 'd-${startOfDay.millisecondsSinceEpoch}';
 }
 
-/// The extremes and sample count of one collapsed calendar day.
+/// The extremes, opening price and sample count of one collapsed calendar
+/// day.
 class _DaySpan {
   double high;
   double low;
   int count = 1;
 
+  /// The open of the day's earliest sample that has one, and when that
+  /// sample was. On a tie the first one seen keeps it.
+  double? open;
+  DateTime? _openAt;
+
   _DaySpan(Quote q)
       : high = q.high ?? q.canonicalUSD,
-        low = q.low ?? q.canonicalUSD;
+        low = q.low ?? q.canonicalUSD,
+        open = q.open,
+        _openAt = q.open == null ? null : q.timestamp;
 
   void add(Quote q) {
     count += 1;
+    if (q.open != null && (_openAt == null || q.timestamp.isBefore(_openAt!))) {
+      open = q.open;
+      _openAt = q.timestamp;
+    }
     final qHigh = q.high ?? q.canonicalUSD;
     final qLow = q.low ?? q.canonicalUSD;
     if (qHigh > high) high = qHigh;
@@ -81,6 +123,9 @@ class _DaySpan {
 ///   extremes counting by its price. A daily bar stamped at the market open
 ///   (it carries the day's close, high and low) therefore loses to a later
 ///   sample as the day's price, yet still widens its range.
+/// - A collapsed day's sample also takes the open of the day's earliest
+///   sample that has one: a daily bar's open, or the first intraday bar's.
+///   Live quotes have none, so a day known only from them has no open.
 /// - The earliest calendar day present also keeps its first sample. For a
 ///   new listing that sample is the price it started at, the one fact about
 ///   it people look for, and keeping only the day's last sample would start
@@ -118,7 +163,7 @@ List<Quote> _collapsed(Iterable<Quote> input, DateTime intradayCutoff) {
     final span = spans[entry.key];
     final q = entry.value;
     // A day of one sample is left exactly as it was stored.
-    out.add(span == null || span.count < 2 ? q : q.withExtremes(high: span.high, low: span.low));
+    out.add(span == null || span.count < 2 ? q : q.withSpan(high: span.high, low: span.low, open: span.open));
   }
   if (first != null && first.timestamp.isBefore(intradayCutoff)) {
     final dayLast = byKey[_dayKey(first.timestamp)];
