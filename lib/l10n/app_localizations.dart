@@ -5354,6 +5354,12 @@ abstract class AppLocalizations {
   /// **'LinkedIn post'**
   String get shareToLinkedinPost;
 
+  /// No description provided for @shareToXPost.
+  ///
+  /// In en, this message translates to:
+  /// **'X post'**
+  String get shareToXPost;
+
   /// Shared-post text when there's no change yet.
   ///
   /// In en, this message translates to:
@@ -5410,7 +5416,7 @@ abstract class AppLocalizations {
   /// No description provided for @helpAssetDetailStep6Body.
   ///
   /// In en, this message translates to:
-  /// **'Tap share to post the price and chart as an image sized for WhatsApp, Instagram, Facebook or LinkedIn, with a ready caption.'**
+  /// **'Tap share to post the price and chart as an image sized for WhatsApp, Instagram, Facebook, LinkedIn or X, with a ready caption.'**
   String get helpAssetDetailStep6Body;
 
   /// No description provided for @captureRecordThis.

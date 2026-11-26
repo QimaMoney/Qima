@@ -2079,6 +2079,7 @@
   "shareToFacebookPost": "Facebook post",
   "shareToFacebookStory": "Facebook story",
   "shareToLinkedinPost": "LinkedIn post",
+  "shareToXPost": "X post",
   "shareCaption": "{name} is at {price}.",
   "@shareCaption": {
     "description": "Shared-post text when there's no change yet.",
@@ -2123,7 +2124,7 @@
   "helpWatchlistStep6Title": "Change the order",
   "helpWatchlistStep6Body": "Tap the arrows at the top to drag cards by their handles, or sort by name, performance or asset class. You can also press and hold a card to drag it.",
   "helpAssetDetailStep6Title": "Share it",
-  "helpAssetDetailStep6Body": "Tap share to post the price and chart as an image sized for WhatsApp, Instagram, Facebook or LinkedIn, with a ready caption.",
+  "helpAssetDetailStep6Body": "Tap share to post the price and chart as an image sized for WhatsApp, Instagram, Facebook, LinkedIn or X, with a ready caption.",
   "captureRecordThis": "Record this",
   "captureCheckTitle": "Check this",
   "captureYouWrote": "You wrote",

@@ -3117,6 +3117,9 @@ class AppLocalizationsAr extends AppLocalizations {
   String get shareToLinkedinPost => 'منشور لينكدإن';
 
   @override
+  String get shareToXPost => 'منشور على إكس';
+
+  @override
   String shareCaption(String name, String price) {
     return 'سعر $name الآن $price.';
   }
@@ -3154,7 +3157,7 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get helpAssetDetailStep6Body =>
-      'اضغط على المشاركة لنشر السعر والرسم البياني كصورة بمقاس واتساب أو إنستغرام أو فيسبوك أو لينكدإن، مع نص جاهز.';
+      'اضغط على المشاركة لنشر السعر والرسم البياني كصورة بمقاس واتساب أو إنستغرام أو فيسبوك أو لينكدإن أو إكس، مع نص جاهز.';
 
   @override
   String get captureRecordThis => 'سجّل هذه العملية';

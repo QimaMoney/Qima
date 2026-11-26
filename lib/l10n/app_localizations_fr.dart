@@ -3126,6 +3126,9 @@ class AppLocalizationsFr extends AppLocalizations {
   String get shareToLinkedinPost => 'Publication LinkedIn';
 
   @override
+  String get shareToXPost => 'Publication X';
+
+  @override
   String shareCaption(String name, String price) {
     return '$name est à $price.';
   }
@@ -3164,7 +3167,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get helpAssetDetailStep6Body =>
-      'Touchez partager pour publier le prix et le graphique en image au format WhatsApp, Instagram, Facebook ou LinkedIn, avec un texte prêt.';
+      'Touchez partager pour publier le prix et le graphique en image au format WhatsApp, Instagram, Facebook, LinkedIn ou X, avec un texte prêt.';
 
   @override
   String get captureRecordThis => 'Enregistrer ceci';
