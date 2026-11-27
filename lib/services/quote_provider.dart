@@ -213,6 +213,20 @@ class Bar {
   const Bar({required this.date, required this.close, required this.currency, this.open, this.high, this.low});
 }
 
+/// The bars of one history request, and the price the feed had when it
+/// answered.
+class BarHistory {
+  final List<Bar> bars;
+
+  /// The feed's own latest price, dated when it traded, as a bar of only a
+  /// close. The bars can stop hours short of it: the 15-minute series
+  /// skips a holiday's shortened session whole. Null when the feed didn't
+  /// say.
+  final Bar? latest;
+
+  const BarHistory({this.bars = const [], this.latest});
+}
+
 /// Historical bars via Yahoo Finance's unofficial chart endpoint. Never
 /// throws — returns an empty list on any failure so a bad symbol never
 /// blocks a batch backfill.
@@ -223,14 +237,17 @@ class YahooHistoryProvider {
   YahooHistoryProvider({http.Client? client, this.baseUrl = 'https://query1.finance.yahoo.com/v8/finance/chart'})
       : client = client ?? http.Client();
 
-  Future<List<Bar>> bars(String symbol, {String range = '5y', String interval = '1d'}) async {
+  Future<List<Bar>> bars(String symbol, {String range = '5y', String interval = '1d'}) async =>
+      (await history(symbol, range: range, interval: interval)).bars;
+
+  Future<BarHistory> history(String symbol, {String range = '5y', String interval = '1d'}) async {
     try {
       final uri = Uri.parse('$baseUrl/${Uri.encodeComponent(symbol)}?range=$range&interval=$interval');
       final response = await client.get(uri, headers: _userAgentHeader);
-      if (response.statusCode != 200) return const [];
+      if (response.statusCode != 200) return const BarHistory();
       final json = jsonDecode(response.body) as Map<String, dynamic>;
       final results = (json['chart'] as Map<String, dynamic>)['result'] as List<dynamic>?;
-      if (results == null || results.isEmpty) return const [];
+      if (results == null || results.isEmpty) return const BarHistory();
       final result = results.first as Map<String, dynamic>;
       final meta = result['meta'] as Map<String, dynamic>;
       final currency = _feedCurrency(meta, symbol) ?? 'USD';
@@ -259,9 +276,17 @@ class YahooHistoryProvider {
           currency: currency,
         ));
       }
-      return out;
+      final price = meta['regularMarketPrice'], at = meta['regularMarketTime'];
+      final latest = price is num && at is num
+          ? Bar(
+              date: DateTime.fromMillisecondsSinceEpoch(at.toInt() * 1000, isUtc: true),
+              close: price.toDouble(),
+              currency: currency,
+            )
+          : null;
+      return BarHistory(bars: out, latest: latest);
     } catch (_) {
-      return const [];
+      return const BarHistory();
     }
   }
 }

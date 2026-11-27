@@ -22,6 +22,9 @@ class _FakeHistoryProvider extends YahooHistoryProvider {
   final List<String> requestedRanges = [];
   int intradayRequests = 0;
 
+  /// The feed's own latest price, when a test gives it one.
+  Bar? latest;
+
   _FakeHistoryProvider(this.from, this.to, {this.close = 4000, this.intraday = const [], this.daily});
 
   @override
@@ -37,6 +40,10 @@ class _FakeHistoryProvider extends YahooHistoryProvider {
         Bar(date: d, close: close, currency: 'USD'),
     ];
   }
+
+  @override
+  Future<BarHistory> history(String symbol, {String range = '5y', String interval = '1d'}) async =>
+      BarHistory(bars: await bars(symbol, range: range, interval: interval), latest: latest);
 }
 
 /// The live spot price, or a failure when [price] is null.
@@ -61,7 +68,7 @@ void main() {
   setUp(() {
     // History already stored in the current shape, as after the first
     // pull with this version.
-    SharedPreferences.setMockInitialValues({'quoteHistoryLevel.${gold.id}': 'ohlc-v1'});
+    SharedPreferences.setMockInitialValues({'quoteHistoryLevel.${gold.id}': 'ohlc-v2'});
     dir = Directory.systemTemp.createTempSync('qima_backfill_test');
     LocalFileStore.overrideDirectoryForTesting(dir);
   });
@@ -276,6 +283,85 @@ void main() {
 
       expect(result, isEmpty);
       expect((await store.load(gold.id)).isEmpty, isTrue);
+    });
+
+    group('whose 15-minute bars stopped a day ago', () {
+      // The feed skipped a shortened session: its bars end at 3620 while
+      // its own price has gone on to 3698 and spot to 3673.
+      final lastBar = now.subtract(const Duration(hours: 28));
+      _FakeHistoryProvider stopped({double close = 3620}) => _FakeHistoryProvider(
+            now.subtract(const Duration(days: 365)),
+            now.subtract(const Duration(days: 3)),
+            close: close,
+            intraday: intradayBars(lastBar.subtract(const Duration(hours: 2)), lastBar, close: close),
+          );
+
+      test('are leveled by the feed\'s own latest price, not by their last bar', () async {
+        final provider = stopped()..latest = Bar(date: now.subtract(const Duration(minutes: 10)), close: 3698, currency: 'USD');
+
+        await repositoryWith(provider, spot: 3673).backfillInstruments([gold], FXHistory.empty, now: now);
+
+        final series = await store.load(gold.id);
+        expect(series.latest!.timestamp, lastBar);
+        expect(series.latest!.canonicalUSD, closeTo(3620 * 3673 / 3698, 1e-9), reason: 'the rise since is no part of the level');
+        expect(series.quotes.first.canonicalUSD, closeTo(3620 * 3673 / 3698, 1e-9));
+      });
+
+      test('keep the level last measured when the feed has no later price', () async {
+        final live = stopped(close: 4040)..intraday = intradayBars(now.subtract(const Duration(hours: 2)), now, close: 4040);
+        await repositoryWith(live, spot: 4000).backfillInstruments([gold], FXHistory.empty, force: true, now: now);
+
+        await repositoryWith(stopped(), spot: 3673).backfillInstruments([gold], FXHistory.empty, force: true, now: now);
+
+        final stored = (await store.load(gold.id)).quotes.firstWhere((q) => q.timestamp == lastBar);
+        expect(stored.canonicalUSD, closeTo(3620 * 4000 / 4040, 1e-9), reason: 'not 3673, which a day of trading lies before');
+      });
+
+      test('are not stored while no level was ever measured', () async {
+        final result = await repositoryWith(stopped(), spot: 3673).backfillInstruments([gold], FXHistory.empty, now: now);
+
+        expect(result, isEmpty);
+        expect((await store.load(gold.id)).isEmpty, isTrue);
+      });
+
+      test('still meet a live price from before a weekend', () async {
+        // Sunday morning: nothing has traded since Friday's close.
+        final sunday = DateTime.utc(2026, 10, 25, 9);
+        final fridayClose = DateTime.utc(2026, 10, 23, 20, 45);
+        final provider = _FakeHistoryProvider(
+          sunday.subtract(const Duration(days: 365)),
+          sunday.subtract(const Duration(days: 3)),
+          close: 4040,
+          intraday: intradayBars(fridayClose.subtract(const Duration(hours: 2)), fridayClose, close: 4040),
+        );
+
+        await repositoryWith(provider, spot: 4000).backfillInstruments([gold], FXHistory.empty, now: sunday);
+
+        expect((await store.load(gold.id)).latest!.canonicalUSD, closeTo(4000, 1e-9));
+      });
+    });
+
+    test('a daily pull replaces days stored at another level', () async {
+      // A week of days kept from 15-minute bars an earlier fetch scaled
+      // 4% low, each dated at its last bar.
+      final days = [for (var d = 9; d >= 3; d--) DateTime.utc(now.year, now.month, now.day - d)];
+      await store.save(QuoteSeries(instrumentID: gold.id, quotes: [
+        for (final day in days)
+          Quote(instrumentID: gold.id, timestamp: day.add(const Duration(hours: 20, minutes: 45)), canonicalUSD: 3840, open: 3830, high: 3850, low: 3820),
+      ]));
+      final provider = _FakeHistoryProvider(
+        days.first,
+        days.last,
+        daily: [for (final day in days) Bar(date: day.add(const Duration(hours: 5)), open: 3990, close: 4000, high: 4010, low: 3980, currency: 'USD')],
+        intraday: intradayBars(now.subtract(const Duration(hours: 2)), now),
+      );
+
+      await repositoryWith(provider).backfillInstruments([gold], FXHistory.empty, force: true, now: now);
+
+      final old = (await store.load(gold.id)).quotes.where((q) => q.timestamp.isBefore(now.subtract(const Duration(days: 2))));
+      expect(old, hasLength(days.length));
+      expect(old.map((q) => q.canonicalUSD).toSet(), {4000});
+      expect(old.map((q) => q.low).toSet(), {3980}, reason: 'no extreme left from the other level');
     });
 
     test("a bar's open is stored, scaled like its close", () async {
