@@ -25,6 +25,20 @@ void main() {
   });
 
   group('ChartTimeAxis', () {
+    test('even steps place each sample one from the last, whatever its date', () {
+      final start = DateTime.utc(2026, 11, 25, 20, 45);
+      // A day whose last price came eight hours after the one before, and
+      // one whose last price came two days later.
+      final dates = [start, start.add(const Duration(hours: 8)), start.add(const Duration(days: 2, hours: 20))];
+      final axis = ChartTimeAxis.even([for (final d in dates) _p(d)]);
+      expect(axis.positions, [0, 1, 2]);
+      expect(axis.length, 2);
+      expect([for (final p in [0.2, 0.6, 1.4, 1.6]) axis.nearestIndex(p)], [0, 1, 1, 2]);
+      expect(axis.positionOf(start.add(const Duration(hours: 4))), 0.5);
+      expect(axis.dateAt(0.5).toUtc(), start.add(const Duration(hours: 4)));
+      expect(ChartTimeAxis.even(const []).length, 0);
+    });
+
     test('without a market, positions are plain elapsed seconds', () {
       final start = DateTime.utc(2026, 11, 20);
       final axis = ChartTimeAxis.build([

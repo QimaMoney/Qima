@@ -132,15 +132,15 @@ class HistoryPeriodSwitch extends StatelessWidget {
 (double, double) historyScale(Iterable<PriceBar> bars) {
   var low = double.infinity, high = double.negativeInfinity;
   for (final bar in bars) {
-    if (bar.low < low) low = bar.low;
-    if (bar.high > high) high = bar.high;
+    if (bar.drawnLow < low) low = bar.drawnLow;
+    if (bar.drawnHigh > high) high = bar.drawnHigh;
   }
   return (low, high);
 }
 
 /// One period drawn as a lying-down candle: a thin line from its low to its
-/// high and a thick part from its open to its close, on [scale]. As wide as
-/// its parent lets it be.
+/// high and a thick part from where the period before closed to its own
+/// close (`PriceBar.bodyOpen`), on [scale]. As wide as its parent lets it be.
 class HistoryRangeBar extends StatelessWidget {
   final PriceBar bar;
   final (double, double) scale;
@@ -179,7 +179,7 @@ class _RangeBarPainter extends CustomPainter {
     // Low to high reads left to right in every language, like the chart.
     double x(double value) => hi <= lo ? size.width / 2 : (value - lo) / (hi - lo) * size.width;
     final mid = size.height / 2;
-    final low = x(bar.low), high = x(bar.high);
+    final low = x(bar.drawnLow), high = x(bar.drawnHigh);
     if (high - low >= 2) {
       canvas.drawRRect(RRect.fromLTRBR(low, mid - 1, high, mid + 1, const Radius.circular(1)), Paint()..color = track);
     }

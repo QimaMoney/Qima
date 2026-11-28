@@ -322,8 +322,10 @@ void main() {
 
       void expectBounded(List<PriceBar> bars) {
         for (final bar in bars) {
-          expect(bar.high, greaterThanOrEqualTo(bar.bodyOpen > bar.close ? bar.bodyOpen : bar.close), reason: '${bar.start}');
-          expect(bar.low, lessThanOrEqualTo(bar.bodyOpen < bar.close ? bar.bodyOpen : bar.close), reason: '${bar.start}');
+          expect(bar.drawnHigh, greaterThanOrEqualTo(bar.bodyOpen > bar.close ? bar.bodyOpen : bar.close), reason: '${bar.start}');
+          expect(bar.drawnLow, lessThanOrEqualTo(bar.bodyOpen < bar.close ? bar.bodyOpen : bar.close), reason: '${bar.start}');
+          expect(bar.drawnHigh, greaterThanOrEqualTo(bar.high), reason: '${bar.start}');
+          expect(bar.drawnLow, lessThanOrEqualTo(bar.low), reason: '${bar.start}');
         }
       }
 
@@ -336,12 +338,51 @@ void main() {
         expectBounded(bars);
       });
 
-      test('but not over a weekend, where the gap is real', () {
+      test('its own open is kept over a weekend, for the figures', () {
         final bars = PriceBars.build(gold, BarPeriod.day, now: holiday, market: Market.metals);
         expect(bars[5].open, 3570.5);
         expect(bars[5].previousClose, 3515.4);
         final weeks = PriceBars.build(gold, BarPeriod.week, now: holiday, market: Market.metals);
         expect(weeks.map((b) => b.open), [3869.7, 3570.5]);
+      });
+
+      test('as drawn, over a weekend too, and its drawn range reaches there', () {
+        for (final period in [BarPeriod.day, BarPeriod.week]) {
+          final bars = PriceBars.build(gold, period, now: holiday, market: Market.metals);
+          final candles = [for (final bar in bars) bar.toPoint()];
+          for (var i = 1; i < bars.length; i++) {
+            expect(bars[i].bodyOpen, bars[i - 1].close, reason: '$period ${bars[i].start}');
+            expect(candles[i].open, candles[i - 1].value, reason: '$period ${bars[i].start}');
+          }
+          expectBounded(bars);
+        }
+        // Monday the 23rd opened above its own low, which was above
+        // Friday's close: the candle reaches down to that close, and the
+        // day's own low stays as the feed gave it.
+        final monday = PriceBars.build(gold, BarPeriod.day, now: holiday, market: Market.metals)[5];
+        expect(monday.low, 3552.3);
+        expect(monday.drawnLow, 3515.4);
+        expect(monday.toPoint().low, 3515.4);
+        expect(monday.closedUp, isTrue);
+      });
+
+      test('as drawn, after a night between sessions and a day with no bar', () {
+        DisplayPoint session(int dayOfMonth, double open, double close) => DisplayPoint(
+              date: DateTime.utc(2026, 11, dayOfMonth, 15),
+              value: close,
+              open: open,
+              high: (open > close ? open : close) + 1,
+              low: (open < close ? open : close) - 1,
+            );
+        // A stock that opens away from its last close each day, with
+        // Thursday the 19th missing.
+        final stock = [session(16, 100, 104), session(17, 107, 106), session(18, 101, 103), session(20, 110, 108)];
+        for (final market in [Market.us, null]) {
+          final bars = PriceBars.build(stock, BarPeriod.day, now: holiday, market: market);
+          expect(bars.map((b) => b.open), [100, 107, 101, 110], reason: '$market');
+          expect(bars.map((b) => b.bodyOpen), [100, 104, 106, 103], reason: '$market');
+          expectBounded(bars);
+        }
       });
 
       test('and its range reaches to that open', () {

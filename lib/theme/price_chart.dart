@@ -158,9 +158,10 @@ class _PriceChartViewState extends State<PriceChartView> {
 
   ChartTimeAxis get _timeAxis {
     final points = widget.points;
-    final key = (points.length, points.first.date, points.last.date, widget.market);
+    final candles = widget.style == ChartStyle.candles;
+    final key = (points.length, points.first.date, points.last.date, widget.market, candles);
     if (_axis == null || _axisKey != key) {
-      _axis = ChartTimeAxis.build(points, market: widget.market);
+      _axis = candles ? ChartTimeAxis.even(points) : ChartTimeAxis.build(points, market: widget.market);
       _axisKey = key;
     }
     return _axis!;
