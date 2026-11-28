@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -13,6 +14,7 @@ import 'blocs/money_cubit.dart';
 import 'blocs/settings_cubit.dart';
 import 'blocs/settings_state.dart';
 import 'l10n/app_localizations.dart';
+import 'mcp/mcp_stdio.dart';
 import 'models/watch_card.dart';
 import 'screens/backup_screen.dart';
 import 'screens/home_shell.dart';
@@ -49,6 +51,18 @@ void main() {
   // pure-Dart fallback. See `BackupCrypto`/`backup_crypto.dart`.
   LicenseRegistry.addLicense(_bundledFontLicenses);
   runApp(const QimaApp());
+}
+
+/// The Mac `qima-mcp` helper's entry point (`tool/qima_mcp/macos/main.swift`):
+/// it runs the app's own compiled Dart on the Flutter engine with no window,
+/// and passes its version ahead of the command line. No plugin is
+/// registered there, so this must reach pure Dart only.
+@pragma('vm:entry-point')
+Future<void> mcpMain(List<String> args) async {
+  final code = await runMcpStdio(args.skip(1).toList(), version: args.isEmpty ? 'dev' : args.first);
+  await stdout.flush();
+  // The engine keeps the process alive; leave once the AI app hangs up.
+  exit(code);
 }
 
 /// Surfaces the bundled fonts' licenses on the system licenses page, as the
