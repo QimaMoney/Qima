@@ -43,21 +43,33 @@ abstract final class SnapshotLocation {
     return at < 0 ? home : home.substring(0, at);
   }
 
+  /// What the helper answers when there is no copy to read.
+  static const SnapshotUnavailable notShared = SnapshotUnavailable(
+    'Qima is not sharing its books with AI apps on this computer. In Qima, open Settings, then AI apps, '
+    'and turn on "Let AI apps read Qima". Qima must be opened once after that.',
+  );
+
+  /// What the helper answers when the copy is there and cannot be opened;
+  /// [why] is the system's own message.
+  static SnapshotUnavailable unreadable(String why) =>
+      SnapshotUnavailable('Qima\'s shared copy could not be opened ($why).');
+
   /// Reads the snapshot at [path], or explains why it can't.
   static AiSnapshot read(String path) {
     final file = File(path);
-    if (!file.existsSync()) {
-      throw const SnapshotUnavailable(
-        'Qima is not sharing its books with AI apps on this computer. In Qima, open Settings, then AI apps, '
-        'and turn on "Let AI apps read Qima". Qima must be opened once after that.',
-      );
-    }
+    if (!file.existsSync()) throw notShared;
     final String text;
     try {
       text = file.readAsStringSync();
     } on FileSystemException catch (e) {
-      throw SnapshotUnavailable('Qima\'s shared copy could not be opened (${e.osError?.message ?? e.message}).');
+      throw unreadable(e.osError?.message ?? e.message);
     }
+    return parse(text);
+  }
+
+  /// The snapshot in [text], the contents of the shared copy. Apart from
+  /// [read] so the Mac helper, which has no `dart:io`, reads it the same way.
+  static AiSnapshot parse(String text) {
     final decoded = jsonDecode(text);
     if (decoded is! Map<String, dynamic>) throw const FormatException('not a JSON object');
     return AiSnapshot.fromJson(decoded);

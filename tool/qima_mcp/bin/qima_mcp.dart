@@ -19,7 +19,8 @@ import '../../../lib/mcp/snapshot_location.dart';
 /// It reads only the copy Qima writes when "Let AI apps read Qima" is on,
 /// and with "Let AI apps add transactions" on it leaves transactions in the
 /// folder beside that copy for the person to review in Qima.
-/// Built with `dart compile exe` and shipped inside the desktop app.
+/// Built with `dart compile exe` and shipped inside the Windows and Linux
+/// apps. The Mac's helper is `macos/main.swift` with `qima_mcp_js.dart`.
 const String _version = String.fromEnvironment('QIMA_VERSION', defaultValue: 'dev');
 
 Future<void> main(List<String> args) async {
