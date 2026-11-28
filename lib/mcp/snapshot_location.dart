@@ -68,7 +68,7 @@ abstract final class SnapshotLocation {
   }
 
   /// The snapshot in [text], the contents of the shared copy. Apart from
-  /// [read] so the Mac helper, which has no `dart:io`, reads it the same way.
+  /// [read] so it can be checked without a file.
   static AiSnapshot parse(String text) {
     final decoded = jsonDecode(text);
     if (decoded is! Map<String, dynamic>) throw const FormatException('not a JSON object');

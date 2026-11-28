@@ -21,7 +21,7 @@ class SnapshotUnavailable implements Exception {
 /// [leaveFile] for the person to review in Qima.
 ///
 /// Pure Dart and transport-free so tests can drive it line by line;
-/// `bin/qima_mcp.dart` wires it to stdin and stdout.
+/// `runMcpStdio` (`mcp_stdio.dart`) wires it to stdin and stdout.
 class McpServer {
   static const List<String> protocolVersions = ['2025-06-18', '2025-03-26', '2024-11-05'];
 

@@ -84,33 +84,39 @@ imported, as any file is.
 
 ## Building
 
-The helper is its own small Dart package, `tool/qima_mcp`, which reaches the
-app's pure-Dart models by path, so it needs neither Flutter nor the app's
-plugins (`dart compile exe` refuses packages with build hooks, which the
-app's plugins have).
+Every helper runs the same command line, `runMcpStdio`
+(`lib/mcp/mcp_stdio.dart`).
 
-- macOS: the Runner build phase "Embed qima-mcp" runs
-  `tool/qima_mcp/embed_macos.sh`, which builds the helper with
-  `tool/qima_mcp/build_macos.sh` and signs it. The Mac App Store turns away a
-  `dart compile exe` binary (Dart's runtime calls `_dyld_find_unwind_sections`,
-  which Apple keeps private), so on the Mac the helper is a small Swift
-  program, `tool/qima_mcp/macos/main.swift`, that owns stdin, stdout and the
-  files and runs the same server as JavaScript in the system's engine:
-  `bin/qima_mcp_js.dart`, compiled with `dart compile js` into the bundle's
-  `Resources/qima_mcp.js`. It is wrapped in a small bundle because a sandboxed
-  process needs a bundle id. `test/mcp/mac_helper_test.dart` builds it and
-  holds its answers against the server's own.
-- Windows and Linux: `tool/qima_mcp/qima_mcp.cmake`, included from each
-  `CMakeLists.txt`, builds it and installs it beside the app, so the
-  installer, zip and tarball carry it.
+- Windows and Linux: the helper is its own small Dart package,
+  `tool/qima_mcp`, which reaches the app's pure-Dart models by path, so it
+  needs neither Flutter nor the app's plugins (`dart compile exe` refuses
+  packages with build hooks, which the app's plugins have).
+  `tool/qima_mcp/qima_mcp.cmake`, included from each `CMakeLists.txt`,
+  builds it and installs it beside the app, so the installer, zip and
+  tarball carry it.
+- macOS: the helper is a few lines of Swift, `tool/qima_mcp/macos/main.swift`,
+  that start the Flutter engine already inside Qima.app with no window and
+  run `mcpMain` (`lib/main.dart`) from the app's own compiled Dart. The
+  Runner build phase "Embed qima-mcp" runs `tool/qima_mcp/embed_macos.sh`,
+  which compiles it, wraps it in a small bundle, because a sandboxed process
+  needs a bundle id, and signs it.
 
-Keep `lib/models` and `lib/mcp` free of Flutter imports; the helper build
-fails otherwise. What the server itself reaches (`mcp_server.dart`,
-`qima_tools.dart` and the models) must also stay free of `dart:io`, which
-does not exist in the Mac helper's JavaScript; files go through
-`SnapshotLocation` and `AiInbox` on Windows and Linux and through the Swift
-program on the Mac.
+Never ship a `dart compile exe` binary inside the Mac app. Dart's standalone
+runtime links the private `__dyld_find_unwind_sections`, and App Review
+rejected 5.0.0 for it (guideline 2.5.1). Check a build before uploading:
+
+    find build/macos/Build/Products/Release/Qima.app -type f -exec sh -c \
+      'nm -u "$1" 2>/dev/null | grep -q __dyld_find_unwind_sections && echo "$1"' _ {} \;
+
+It must print nothing.
+
+Keep `lib/models` and `lib/mcp` free of Flutter imports; the Windows and
+Linux helper build fails otherwise, and the Mac helper registers no plugins.
 
 Run it by hand:
 
     cd tool/qima_mcp && dart run bin/qima_mcp.dart --snapshot <path>
+
+or, for the Mac helper, from a built app:
+
+    build/macos/Build/Products/Release/Qima.app/Contents/Helpers/QimaMCP.app/Contents/MacOS/qima-mcp --snapshot <path>
