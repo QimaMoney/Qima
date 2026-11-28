@@ -78,6 +78,23 @@ class AppLocalizationsFr extends AppLocalizations {
   String get addCustomTickerTitle => 'Ajouter un symbole personnalisé';
 
   @override
+  String get addMarketUs => 'États-Unis';
+
+  @override
+  String get addMarketSaudi => 'Arabie saoudite';
+
+  @override
+  String get addMarketEgypt => 'Égypte';
+
+  @override
+  String get addMarketOther => 'Autres marchés';
+
+  @override
+  String addShowAll(int count) {
+    return 'Tout afficher ($count)';
+  }
+
+  @override
   String get addCustomTickerSymbol => 'Symbole boursier';
 
   @override
@@ -3109,6 +3126,9 @@ class AppLocalizationsFr extends AppLocalizations {
   String get shareToLinkedinPost => 'Publication LinkedIn';
 
   @override
+  String get shareToXPost => 'Publication X';
+
+  @override
   String shareCaption(String name, String price) {
     return '$name est à $price.';
   }
@@ -3147,7 +3167,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get helpAssetDetailStep6Body =>
-      'Touchez partager pour publier le prix et le graphique en image au format WhatsApp, Instagram, Facebook ou LinkedIn, avec un texte prêt.';
+      'Touchez partager pour publier le prix et le graphique en image au format WhatsApp, Instagram, Facebook, LinkedIn ou X, avec un texte prêt.';
 
   @override
   String get captureRecordThis => 'Enregistrer ceci';
@@ -5542,6 +5562,199 @@ class AppLocalizationsFr extends AppLocalizations {
       'Répondez de nouveau aux questions. Rien de ce que vous utilisez n’est désactivé.';
 
   @override
+  String chartSince(String change, String date) {
+    return '$change depuis le $date';
+  }
+
+  @override
+  String get chartResetZoom => 'Réinitialiser le zoom';
+
+  @override
+  String chartCompareWith(String name) {
+    return 'Comparer avec $name';
+  }
+
+  @override
+  String get chartStopComparing => 'Arrêter la comparaison';
+
+  @override
+  String get chartLoadingOlder => 'Chargement des prix plus anciens';
+
+  @override
+  String get statPreviousClose => 'Clôture précédente';
+
+  @override
+  String get statDividendYield => 'Rendement du dividende';
+
+  @override
+  String get statYearRange => 'Fourchette sur 52 semaines';
+
+  @override
+  String get statDayRange => 'Fourchette du jour';
+
+  @override
+  String factsStale(String date) {
+    return 'Dernière transaction : $date. Ce prix n\'est peut-être plus à jour.';
+  }
+
+  @override
+  String splitRatio(String numerator, String denominator) {
+    return '$numerator pour $denominator';
+  }
+
+  @override
+  String splitTitle(String ratio, String date) {
+    return 'Division $ratio le $date';
+  }
+
+  @override
+  String get splitBody =>
+      'Vos opérations antérieures sont en anciennes actions : la quantité détenue et son coût moyen sont faussés. Les convertir en actions d\'aujourd\'hui ? Le total de chaque opération reste le même.';
+
+  @override
+  String get splitAdjust => 'Ajuster mes opérations';
+
+  @override
+  String get splitAlreadyAdjusted => 'Déjà en actions d\'aujourd\'hui';
+
+  @override
+  String chartDividendMark(String amount) {
+    return 'Dividende $amount';
+  }
+
+  @override
+  String get holdingsTotalReturn => 'Rendement total';
+
+  @override
+  String get holdingsPerYear => 'Par an';
+
+  @override
+  String holdingsDividendsLine(String received, String yearly) {
+    return 'Dividendes : $received jusqu\'ici · environ $yearly par an';
+  }
+
+  @override
+  String get realisedByYear => 'Réalisé par année';
+
+  @override
+  String netWorthThisMonth(String change, String saved, String other) {
+    return 'Ce mois-ci $change : épargné $saved, prix et autres $other';
+  }
+
+  @override
+  String get savingsRate => 'Taux d\'épargne';
+
+  @override
+  String savingsRateAverage(String percent, int months) {
+    return 'Moyenne de $percent sur $months mois';
+  }
+
+  @override
+  String get cashRunway => 'Autonomie de trésorerie';
+
+  @override
+  String cashRunwayValue(String months) {
+    return 'Environ $months mois';
+  }
+
+  @override
+  String cashRunwaySubtitle(String amount) {
+    return 'À vos dépenses habituelles de $amount par mois';
+  }
+
+  @override
+  String categoryUsual(String amount) {
+    return 'Habituel $amount';
+  }
+
+  @override
+  String debtRatio(String percent) {
+    return 'Vous devez $percent de ce que vous possédez';
+  }
+
+  @override
+  String get statOpen => 'Ouverture';
+
+  @override
+  String get statVolume => 'Volume';
+
+  @override
+  String get statAverageVolume => 'Volume moyen (3 mois)';
+
+  @override
+  String get statEarningsDate => 'Date des résultats';
+
+  @override
+  String statEarningsEstimated(String date) {
+    return '$date (estimée)';
+  }
+
+  @override
+  String get valuationTitle => 'Valorisation';
+
+  @override
+  String get statMarketCap => 'Capitalisation';
+
+  @override
+  String get statEnterpriseValue => 'Valeur d\'entreprise';
+
+  @override
+  String get statPeRatio => 'PER';
+
+  @override
+  String get statForwardPe => 'PER prévisionnel';
+
+  @override
+  String get statPegRatio => 'Ratio PEG';
+
+  @override
+  String get statPriceToSales => 'Cours/ventes';
+
+  @override
+  String get statPriceToBook => 'Cours/valeur comptable';
+
+  @override
+  String get statEvToEbitda => 'VE/EBITDA';
+
+  @override
+  String get statBeta => 'Bêta (5 ans, mensuel)';
+
+  @override
+  String get financialsTitle => 'Données financières';
+
+  @override
+  String financialsAsOf(String date) {
+    return 'Dernier rapport : $date';
+  }
+
+  @override
+  String get statRevenue => 'Chiffre d\'affaires (12 mois)';
+
+  @override
+  String get statNetIncome => 'Résultat net (12 mois)';
+
+  @override
+  String get statProfitMargin => 'Marge bénéficiaire';
+
+  @override
+  String get statEps => 'BPA (12 mois)';
+
+  @override
+  String get statReturnOnEquity => 'Rentabilité des capitaux propres';
+
+  @override
+  String get statReturnOnAssets => 'Rentabilité des actifs';
+
+  @override
+  String get statCash => 'Trésorerie';
+
+  @override
+  String get statDebtToEquity => 'Dette/capitaux propres';
+
+  @override
+  String get statFreeCashFlow => 'Flux de trésorerie disponible (12 mois)';
+
+  @override
   String get settingsNeedsAttention => 'À vérifier';
 
   @override
@@ -5591,5 +5804,60 @@ class AppLocalizationsFr extends AppLocalizations {
           'Remplacer retire le compte avec lequel 1 opération a été payée ou encaissée, car cette ancienne sauvegarde ne l\'a pas.',
     );
     return '$_temp0';
+  }
+
+  @override
+  String get historyTitle => 'Historique';
+
+  @override
+  String get historyDay => 'Jour';
+
+  @override
+  String get historyMonth => 'Mois';
+
+  @override
+  String get historyYear => 'Année';
+
+  @override
+  String get historyShowAll => 'Voir tout l’historique';
+
+  @override
+  String get historyPeriod => 'Période';
+
+  @override
+  String get historyToday => 'Aujourd’hui';
+
+  @override
+  String get historyYesterday => 'Hier';
+
+  @override
+  String get historySoFar => 'Jusqu’ici';
+
+  @override
+  String get historyDayAverageNote =>
+      'La moyenne et la médiane demandent des prix relevés dans la journée. Qima les garde pour les 2 derniers jours.';
+
+  @override
+  String get historyRowHint =>
+      'Affiche ouverture, clôture, haut, bas, moyenne et médiane';
+
+  @override
+  String get statClose => 'Clôture';
+
+  @override
+  String get statAverage => 'Moyenne';
+
+  @override
+  String get statMedian => 'Médiane';
+
+  @override
+  String get chartStyleLine => 'Graphique en ligne';
+
+  @override
+  String get chartStyleCandles => 'Graphique en chandeliers';
+
+  @override
+  String chartCandleFigures(String open, String high, String low) {
+    return 'Ouverture $open · Haut $high · Bas $low';
   }
 }

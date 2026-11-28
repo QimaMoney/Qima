@@ -181,7 +181,7 @@ void main() {
   test('only apps that keep the caption get it with the image, so stories stay photos on iOS', () {
     expect(
       [for (final d in ShareDestination.values) if (d.sendsCaption) d],
-      [ShareDestination.whatsappMessage, ShareDestination.linkedinPost],
+      [ShareDestination.whatsappMessage, ShareDestination.linkedinPost, ShareDestination.xPost],
     );
   });
 
@@ -227,5 +227,6 @@ String _label(WidgetTester tester, ShareDestination destination) {
     ShareDestination.facebookPost => l10n.shareToFacebookPost,
     ShareDestination.facebookStory => l10n.shareToFacebookStory,
     ShareDestination.linkedinPost => l10n.shareToLinkedinPost,
+    ShareDestination.xPost => l10n.shareToXPost,
   };
 }

@@ -9,6 +9,7 @@ import '../../blocs/money_cubit.dart';
 import '../../blocs/settings_cubit.dart';
 import '../../blocs/settings_state.dart';
 import '../../l10n/app_localizations.dart';
+import '../../models/book_figures.dart';
 import '../../models/net_worth.dart';
 import '../../theme/design_system.dart';
 import '../../theme/money_labels.dart';
@@ -115,6 +116,14 @@ class BalanceSheetScreen extends StatelessWidget {
                       DonutPart(label: l10n.youOweSide, value: summary.owed, figure: moneyText(summary.owed, ccy, hidden: hidden), color: colors.down),
                     ],
                   ),
+                  if (BookFigures.debtRatio(summary.owned, summary.owed) case final ratio? when summary.owed > 0) ...[
+                    const SizedBox(height: DS.spaceSM),
+                    Text(
+                      l10n.debtRatio('\u2066${(ratio * 100).toStringAsFixed(ratio < 0.1 ? 1 : 0)}%\u2069'),
+                      key: const ValueKey('debtRatio'),
+                      style: TextStyle(color: colors.textSecondary, fontSize: 13),
+                    ),
+                  ],
                 ],
               ),
             ),

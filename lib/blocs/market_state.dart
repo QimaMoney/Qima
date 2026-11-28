@@ -1,6 +1,7 @@
 import 'package:equatable/equatable.dart';
 
 import '../models/fx_history.dart';
+import '../models/instrument_facts.dart';
 import '../models/money.dart';
 import '../models/quote.dart';
 
@@ -20,6 +21,10 @@ class MarketState extends Equatable {
   final bool isBackfilling;
   final bool isLoadingHistory;
 
+  /// What the exchange says about each stock and index beyond its price,
+  /// by instrument id; see `PriceRepository.refreshFacts`.
+  final Map<String, InstrumentFacts> factsByID;
+
   MarketState({
     Map<String, QuoteSeries>? seriesByID,
     FXRates? rates,
@@ -29,6 +34,7 @@ class MarketState extends Equatable {
     this.lastRefresh,
     this.isBackfilling = false,
     this.isLoadingHistory = false,
+    this.factsByID = const {},
   })  : seriesByID = seriesByID ?? const {},
         rates = rates ?? FXRates.usdIdentity;
 
@@ -42,6 +48,7 @@ class MarketState extends Equatable {
     DateTime? lastRefresh,
     bool? isBackfilling,
     bool? isLoadingHistory,
+    Map<String, InstrumentFacts>? factsByID,
   }) {
     return MarketState(
       seriesByID: seriesByID ?? this.seriesByID,
@@ -52,9 +59,10 @@ class MarketState extends Equatable {
       lastRefresh: lastRefresh ?? this.lastRefresh,
       isBackfilling: isBackfilling ?? this.isBackfilling,
       isLoadingHistory: isLoadingHistory ?? this.isLoadingHistory,
+      factsByID: factsByID ?? this.factsByID,
     );
   }
 
   @override
-  List<Object?> get props => [seriesByID, rates, fxHistory, phase, errorMessage, lastRefresh, isBackfilling, isLoadingHistory];
+  List<Object?> get props => [seriesByID, rates, fxHistory, phase, errorMessage, lastRefresh, isBackfilling, isLoadingHistory, factsByID];
 }

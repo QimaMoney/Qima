@@ -1,7 +1,9 @@
 import '../services/price_converter.dart';
+import '../services/quote_provider.dart';
 import 'asset.dart';
 import 'chart_range.dart';
 import 'display_point.dart';
+import 'instrument_facts.dart';
 import 'metal_breakdown.dart';
 import 'money.dart';
 import 'quote.dart';
@@ -56,6 +58,38 @@ class InstrumentPresentation {
   }
 
   RangeChange? sparklineChange(DateTime now, {ChartRange range = ChartRange.sparklineRange}) => change(range, now);
+
+  /// [value] as the exchange quotes it in [currency] (pence included), in
+  /// this presentation's currency and unit.
+  Money exchangeMoney(double value, String currency) => converter.money(usdFromPrice(value, currency, converter.rates));
+
+  /// Today's change against the exchange's previous close, the figure
+  /// exchanges quote, rather than against the first price fetched today.
+  /// Null without both prices, or once the price has gone stale.
+  RangeChange? dayChange(InstrumentFacts? facts, DateTime now) {
+    final price = facts?.price, close = facts?.previousClose;
+    if (facts == null || price == null || close == null || close <= 0 || facts.isStale(now)) return null;
+    final fraction = price / close - 1;
+    return RangeChange(
+      absoluteValue: exchangeMoney(price - close, facts.currency).amount,
+      percentValue: fraction,
+      isUp: fraction >= 0,
+    );
+  }
+
+  /// The lowest and highest price over the year to [now] from the history
+  /// held, or null when it doesn't reach back most of a year.
+  (double, double)? yearRangeFromHistory(DateTime now) {
+    final since = now.subtract(const Duration(days: 365));
+    final window = [for (final p in points) if (!p.date.isBefore(since)) p];
+    if (window.length < 2 || window.first.date.isAfter(now.subtract(const Duration(days: 300)))) return null;
+    var low = window.first.value, high = low;
+    for (final p in window) {
+      if (p.value < low) low = p.value;
+      if (p.value > high) high = p.value;
+    }
+    return (low, high);
+  }
 
   /// Whole-series (unbounded) trend, used by widgets/watch complications.
   bool get isTrendingUp {

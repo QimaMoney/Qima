@@ -13,6 +13,7 @@ const _names = {
   'asset.silver': 'Silver',
   'asset.bitcoin': 'Bitcoin',
   'asset.apple': 'Apple',
+  'Saudi Aramco': 'Saudi Aramco',
   'asset.usDollar': 'US Dollar',
   'asset.egyptianPound': 'Egyptian Pound',
 };
@@ -172,6 +173,20 @@ void main() {
     test('comma decimals and thousands', () {
       expect(_parse('2,5 g gold at 4100').quantity.value, 2.5);
       expect(_parse('1 kg silver at 1,234,567.5 EGP').unitPrice?.value, 1234567.5);
+    });
+
+    test('an amount that is also a share listed by number stays an amount', () {
+      // 1120 is Al Rajhi Bank on the Saudi exchange.
+      final d = _parse('bought 1120 USD at 48.5 EGP');
+      expect(d.instrument.value.id, 'fx.USD');
+      expect(d.quantity.value, 1120);
+      expect(_parse('20 g gold at 4100').instrument.value.id, 'metal.XAU');
+    });
+
+    test('a share listed by number is named in words', () {
+      final d = _parse('bought 10 Saudi Aramco at 26.3 SAR');
+      expect(d.instrument.value.id, 'stock.2222.SR');
+      expect(d.quantity.value, 10);
     });
 
     test('a currency held as an asset: "1000 USD at 48.5 EGP"', () {

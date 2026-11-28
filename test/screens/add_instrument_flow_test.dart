@@ -13,6 +13,7 @@ import 'package:qima/models/fx_history.dart';
 import 'package:qima/models/instrument_catalog.dart';
 import 'package:qima/models/quote.dart';
 import 'package:qima/models/watch_card.dart';
+import 'package:qima/models/market_listings.dart';
 import 'package:qima/screens/add_instrument_screen.dart';
 import 'package:qima/screens/card_config_screen.dart';
 import 'package:qima/screens/custom_ticker_screen.dart';
@@ -213,6 +214,45 @@ void main() {
     final scrollable = find.descendant(of: listView, matching: find.byType(Scrollable));
     await tester.scrollUntilVisible(customRowTitleFinder, 200, scrollable: scrollable.first);
     expect(customRowTitleFinder, findsOneWidget);
+  });
+
+  testWidgets('shares are listed by market, each shortened until opened', (tester) async {
+    await tester.pumpWidget(_app(cubit));
+    await _openWatch(tester);
+    final scrollable = find.descendant(of: find.byType(ListView).last, matching: find.byType(Scrollable)).first;
+
+    final saudi = find.text('STOCKS · SAUDI ARABIA');
+    await tester.scrollUntilVisible(saudi, 200, scrollable: scrollable);
+    expect(saudi, findsOneWidget);
+    expect(find.text('Saudi Aramco'), findsOneWidget);
+    // Past the first few, a share waits behind the market's own "Show all".
+    expect(find.text('Jarir'), findsNothing);
+
+    final showAll = find.text('Show all ${MarketListings.saudiStocks.length}');
+    await tester.ensureVisible(showAll);
+    await tester.pumpAndSettle();
+    await tester.tap(showAll);
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('Jarir'), 200, scrollable: scrollable);
+    expect(find.text('Jarir'), findsOneWidget);
+
+    // Egypt's list is still short, and the one custom-ticker row for shares
+    // closes the last market.
+    await tester.scrollUntilVisible(find.text('STOCKS · EGYPT'), 200, scrollable: scrollable);
+    expect(find.text('Show all ${MarketListings.egyptStocks.length}'), findsOneWidget);
+  });
+
+  testWidgets('a Saudi share is found by its number or its Arabic name', (tester) async {
+    await tester.pumpWidget(_app(cubit));
+    await _openWatch(tester);
+
+    await tester.enterText(find.byType(TextField), '2222');
+    await tester.pumpAndSettle();
+    expect(find.text('Saudi Aramco'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField), 'الراجحي');
+    await tester.pumpAndSettle();
+    expect(find.text('Al Rajhi Bank'), findsOneWidget);
   });
 
   testWidgets('the no-results state prefills the custom ticker screen with the query', (tester) async {

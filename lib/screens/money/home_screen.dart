@@ -15,11 +15,14 @@ import '../../blocs/zakat_cubit.dart';
 import '../../l10n/app_localizations.dart';
 import '../../models/book.dart';
 import '../../models/book_account.dart';
+import '../../models/book_figures.dart';
 import '../../models/chart_range.dart';
 import '../../models/display_point.dart';
 import '../../models/holding.dart';
 import '../../models/net_worth_history.dart';
 import '../../models/portfolio_history.dart';
+import '../../models/minor_units.dart';
+import '../../models/money_analysis.dart';
 import '../../models/money_settings.dart';
 import '../../models/net_worth.dart';
 import '../../models/zakat_book.dart';
@@ -333,10 +336,45 @@ class _NetWorthCard extends StatefulWidget {
 }
 
 class _NetWorthCardState extends State<_NetWorthCard> {
+  /// A signed amount that never breaks across lines, sign included.
+  static String _signed(double v, String ccy, bool hidden) =>
+      signedFigure(moneyText(v, ccy, hidden: hidden), isUp: v >= 0).replaceAll(' ', '\u00A0').replaceFirst('+', '+\u2060');
+
   // One walk over the book per change, not per rebuild: the inputs are
   // immutable, so identity says when they changed.
   List<Object?> _inputs = const [];
   List<DisplayPoint> _points = const [];
+  List<Object?> _monthInputs = const [];
+  NetWorthChange? _month;
+
+  /// What changed net worth since the month began: what was saved, and
+  /// prices and everything else. Walked once a day per change, like
+  /// [points].
+  NetWorthChange? get monthChange {
+    final app = widget.settings;
+    final market = widget.market;
+    final now = DateTime.now();
+    final inputs = [widget.book, widget.holdings, market.fxHistory, market.rates, app.baseCurrency, DateUtils.dateOnly(now)];
+    final same = _monthInputs.length == inputs.length &&
+        [for (var i = 0; i < inputs.length; i++) i < 4 ? identical(_monthInputs[i], inputs[i]) : _monthInputs[i] == inputs[i]].every((x) => x);
+    if (same) return _month;
+    _monthInputs = inputs;
+    // A book begun this month has no start to measure from: its opening
+    // balances would read as prices.
+    final first = BookFigures.firstMonth(widget.book);
+    if (first == null || !first.isBefore(DateTime(now.year, now.month))) return _month = null;
+    final history = NetWorthHistory.build(
+      book: widget.book,
+      holdings: widget.holdings,
+      currency: app.baseCurrency,
+      rates: market.rates,
+      fxHistory: market.fxHistory,
+      range: ChartRange.month3,
+      now: now,
+    );
+    final net = MonthAnalysis.of(widget.book, now, currency: app.baseCurrency, rates: market.rates).net;
+    return _month = BookFigures.monthChange(history, now, MinorUnits.toMajor(net, app.baseCurrency));
+  }
 
   List<DisplayPoint> get points {
     final app = widget.settings;
@@ -394,6 +432,18 @@ class _NetWorthCardState extends State<_NetWorthCard> {
                 Expanded(child: _Side(label: l10n.youOwn, value: moneyText(summary.owned, ccy, hidden: hidden))),
                 Expanded(child: _Side(label: l10n.youOweSide, value: moneyText(summary.owed, ccy, hidden: hidden))),
               ]),
+              if (monthChange case final change?) ...[
+                const SizedBox(height: DS.spaceXS),
+                Text(
+                  l10n.netWorthThisMonth(
+                    _signed(change.total, ccy, hidden),
+                    _signed(change.saved, ccy, hidden),
+                    _signed(change.other, ccy, hidden),
+                  ),
+                  key: const ValueKey('netWorthThisMonth'),
+                  style: TextStyle(color: colors.textSecondary, fontSize: 12),
+                ),
+              ],
               const SizedBox(height: DS.spaceSM),
               SizedBox(
                 key: const ValueKey('netWorthChart'),

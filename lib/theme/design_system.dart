@@ -152,7 +152,10 @@ class DS {
   /// border is drawn in the track's own color, so it reads as the gap that
   /// insets the thumb rather than as an outline. Callers pass
   /// `showSelectedIcon: false`; the thumb already marks the selection.
-  static ButtonStyle segmentedButtonStyle(QimaColors colors) {
+  ///
+  /// A button's label style replaces the ambient text style, so [label]
+  /// must carry the app's font family.
+  static ButtonStyle segmentedButtonStyle(QimaColors colors, {required TextStyle label}) {
     return SegmentedButton.styleFrom(
       backgroundColor: colors.tileTop,
       foregroundColor: colors.textSecondary,
@@ -160,7 +163,7 @@ class DS {
       selectedForegroundColor: colors.textPrimary,
       side: BorderSide(color: colors.tileTop, width: 3),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(radiusPill)),
-      textStyle: const TextStyle(fontWeight: FontWeight.w600),
+      textStyle: label,
     );
   }
 

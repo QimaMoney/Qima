@@ -225,6 +225,7 @@ class SyncCubit extends Cubit<SyncState> with GuardedEmit<SyncState> {
       'custominstruments.records': () => _watchlist.loadCustomInstruments(),
       'alerts.records': () => _serialized(_applyAlerts),
       'zakatSettings': () => _serialized(_applyZakat),
+      'handledSplits': () => _serialized(_applySplits),
       for (final key in BookStore.cloudKeys)
         if (key != BookStore.entriesKey) key: () async => onBookChanged?.call(key),
       // The trades are entries of the book: a change there reaches both.
@@ -582,6 +583,7 @@ class SyncCubit extends Cubit<SyncState> with GuardedEmit<SyncState> {
     await _applyTrades();
     await _applyAlerts();
     await _applyZakat();
+    await _applySplits();
   }
 
   /// Shows the stored cards with the cached prices of what they track. Prices
@@ -610,4 +612,6 @@ class SyncCubit extends Cubit<SyncState> with GuardedEmit<SyncState> {
   Future<void> _applyAlerts() async => _alerts.adopt(await _alerts.read());
 
   Future<void> _applyZakat() async => _zakat.adopt(await _zakat.read());
+
+  Future<void> _applySplits() async => _holdings.adoptSplits(await _holdings.readSplits());
 }

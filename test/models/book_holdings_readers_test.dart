@@ -317,7 +317,7 @@ void main() {
     test('is a custom instrument\'s own name, and the instrument id when it is not known', () {
       InstrumentCatalog.reloadCustom(const [Instrument(id: 'stock.ZZZ', symbol: 'ZZZ', assetClass: AssetClass.stock, nameKey: 'Index fund')]);
       expect(l10n.accountName(BookAccount.holding('stock.ZZZ')), 'Index fund');
-      expect(l10n.accountName(BookAccount.holding('stock.QQQ')), 'stock.QQQ');
+      expect(l10n.accountName(BookAccount.holding('stock.ZZNONE')), 'stock.ZZNONE');
     });
   });
 }

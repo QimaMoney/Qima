@@ -1,6 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:qima/models/book.dart';
 import 'package:qima/models/book_account.dart';
+import 'package:qima/models/book_figures.dart';
+import 'package:qima/models/display_point.dart';
 import 'package:qima/models/entry_builder.dart';
 import 'package:qima/models/minor_units.dart';
 import 'package:qima/models/money.dart';
@@ -347,6 +349,54 @@ void main() {
 
     test('only an asset may have a kind', () {
       expect(own('x', AccountType.debit).copyWith(assetKind: AssetKind.vehicle).problem, isNotNull);
+    });
+  });
+
+  group('BookFigures', () {
+    final x = builder();
+    final b = Book(accounts, [
+      x.opening(rajhi, sar(10000), DateTime(2026, 8, 1)),
+      x.income(rajhi, salary, sar(10000), DateTime(2026, 9, 1)),
+      x.spend(rajhi, groceries, sar(1000), DateTime(2026, 9, 5)),
+      x.income(rajhi, salary, sar(10000), DateTime(2026, 10, 1)),
+      x.spend(rajhi, groceries, sar(2000), DateTime(2026, 10, 5)),
+      x.income(rajhi, salary, sar(10000), DateTime(2026, 11, 1)),
+      x.spend(rajhi, groceries, sar(3000), DateTime(2026, 11, 5)),
+      x.spend(rajhi, dining, sar(500), DateTime(2026, 11, 6)),
+    ]);
+
+    test('flows start at the book’s first month and give each month’s savings rate', () {
+      final flows = BookFigures.flows(b, DateTime(2026, 11, 20), currency: 'SAR', rates: rates);
+      expect(flows.map((f) => f.month), [DateTime(2026, 8), DateTime(2026, 9), DateTime(2026, 10), DateTime(2026, 11)]);
+      expect(flows.first.savingsRate, isNull, reason: 'no income in the opening month');
+      expect(flows[1].savingsRate, closeTo(0.9, 1e-9));
+      expect(flows.last.savingsRate, closeTo(0.65, 1e-9));
+    });
+
+    test('usual spending averages the whole months before, per category too', () {
+      // August (0), September (1,000), October (2,000).
+      expect(BookFigures.usualSpending(b, DateTime(2026, 11, 20), currency: 'SAR', rates: rates), closeTo(1000, 1e-9));
+      final usual = BookFigures.usualByCategory(b, DateTime(2026, 11, 20), currency: 'SAR', rates: rates);
+      expect(usual['groceries'], closeTo(1000, 1e-9));
+      expect(usual.containsKey('dining'), isFalse);
+      expect(BookFigures.usualByCategory(b, DateTime(2026, 8, 20), currency: 'SAR', rates: rates), isEmpty);
+    });
+
+    test('runway, debt ratio and the month’s change', () {
+      expect(BookFigures.runwayMonths(6000, 1500), closeTo(4, 1e-9));
+      expect(BookFigures.runwayMonths(6000, null), isNull);
+      expect(BookFigures.runwayMonths(-5, 1500), isNull);
+      expect(BookFigures.debtRatio(1000, 250), closeTo(0.25, 1e-9));
+      expect(BookFigures.debtRatio(0, 250), isNull);
+      final points = [
+        DisplayPoint(date: DateTime(2026, 10, 30), value: 100),
+        DisplayPoint(date: DateTime(2026, 10, 31), value: 110),
+        DisplayPoint(date: DateTime(2026, 11, 10), value: 150),
+      ];
+      final change = BookFigures.monthChange(points, DateTime(2026, 11, 10), 30)!;
+      expect(change.total, closeTo(40, 1e-9));
+      expect(change.other, closeTo(10, 1e-9));
+      expect(BookFigures.monthChange(points.sublist(2), DateTime(2026, 11, 10), 30), isNull);
     });
   });
 }

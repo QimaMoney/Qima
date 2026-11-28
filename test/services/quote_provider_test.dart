@@ -64,6 +64,42 @@ void main() {
       final listing = await read('{"regularMarketPrice":50.0,"currency":"USD","shortName":" "}');
       expect(listing.isDescribed, isFalse);
     });
+
+    Future<Listing> readChart(String result, {String symbol = 'COMI.CA'}) {
+      final client = MockClient((request) async => http.Response('{"chart":{"result":[$result]}}', 200));
+      final rates = FXRates(base: 'USD', rates: const {'EGP': 50.0}, updatedAt: DateTime.utc(2026));
+      return YahooQuoteProvider(rates, client: client)
+          .listing(Instrument(id: 'stock.$symbol', symbol: symbol, assetClass: AssetClass.stock, nameKey: symbol));
+    }
+
+    test('a headline price older than the last daily close gives way to the close', () async {
+      final listing = await readChart(
+        '{"meta":{"regularMarketPrice":80.0,"regularMarketTime":1721764800,"currency":"EGP"},'
+        '"timestamp":[1795420800,1795507200,1795593600],"indicators":{"quote":[{"close":[126.5,125.0,null]}]}}',
+      );
+      expect(listing.canonicalUSD, 2.5);
+    });
+
+    test('a live headline price stands over the bar of the session it belongs to', () async {
+      final listing = await readChart(
+        '{"meta":{"regularMarketPrice":100.0,"regularMarketTime":1795609199,"currency":"EGP"},'
+        '"timestamp":[1795507200,1795593600],"indicators":{"quote":[{"close":[125.0,99.0]}]}}',
+      );
+      expect(listing.canonicalUSD, 2.0);
+    });
+
+    test('a listing the feed gives no currency is priced in its exchange currency', () async {
+      final listing = await readChart('{"meta":{"regularMarketPrice":150.0,"regularMarketTime":1795609199,"currency":null}}');
+      expect(listing.canonicalUSD, 3.0);
+      expect(listing.currency, 'EGP');
+    });
+
+    test('no currency and no exchange to read one from is not a price', () {
+      expect(
+        readChart('{"meta":{"regularMarketPrice":150.0}}', symbol: 'ZD'),
+        throwsA(isA<PriceError>().having((e) => e.kind, 'kind', 'decodingFailed')),
+      );
+    });
   });
 
   group('YahooHistoryProvider.bars', () {
@@ -80,6 +116,19 @@ void main() {
       expect(bars.map((b) => b.close), [10.0, 12.0, 11.5]);
       expect(bars.map((b) => b.high), [10.0, 14.0, 12.5]);
       expect(bars.map((b) => b.low), [10.0, 9.5, 11.0]);
+    });
+
+    test('reads the feed\'s own latest price and when it traded, when it gives them', () async {
+      const body = '{"chart":{"result":[{"meta":{"currency":"USD","regularMarketPrice":3698.1,"regularMarketTime":1700009000},'
+          '"timestamp":[1700000000],"indicators":{"quote":[{"close":[3620.4]}]}}]}}';
+      final provider = YahooHistoryProvider(client: MockClient((request) async => http.Response(body, 200)));
+      final history = await provider.history('ZZTEST');
+      expect(history.bars.single.close, 3620.4);
+      expect(history.latest!.close, 3698.1);
+      expect(history.latest!.date, DateTime.fromMillisecondsSinceEpoch(1700009000 * 1000, isUtc: true));
+
+      final without = YahooHistoryProvider(client: MockClient((request) async => http.Response(chart(quote: '{"close":[1,2,3]}'), 200)));
+      expect((await without.history('ZZTEST')).latest, isNull);
     });
 
     test('missing high and low arrays, or null entries, give null', () async {

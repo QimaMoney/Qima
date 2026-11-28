@@ -1,9 +1,9 @@
-Qima 5.0: everything you own and owe, in one place
-• Home shows your net worth over time, with your accounts, holdings, spending and zakat
-• Add bank accounts, cash, cards and loans, and see each balance over time
-• Spending by category, a monthly budget and recurring payments
-• Import statements as PDF, spreadsheet or screenshot, read on your device
-• Add a transaction by typing it or saying it
-• Value property, cars and other assets yourself
-• Track money you lent and borrowed, and split bills
-• Zakat now counts your whole balance sheet, and the hawl is always a lunar year
+Qima 5.1: more about every price
+• Price history by day, month and year: open, close, high, low, average and median
+• Candle charts, beside the line
+• Your own buys and sells marked on the price chart, with zoom, measure and compare
+• Stocks show previous close, dividend yield, 52-week range, valuation, financials and the next earnings date
+• Holdings show total return with dividends and fees
+• Saudi, Egyptian and more Nasdaq shares are built in, with TASI, EGX and the Nasdaq-100
+• Share to X
+• Fixed: gold, silver and crypto history now lines up with the live price

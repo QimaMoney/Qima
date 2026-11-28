@@ -141,6 +141,7 @@ class Preferences {
   static const String _appLanguageKey = 'appLanguage';
   static const String _appearanceKey = 'appearance';
   static const String _preferredChartRangeKey = 'preferredChartRange';
+  static const String _candleChartsKey = 'candleCharts';
   static const String _hideBalancesKey = 'hideBalances';
   static const String _plainSummariesKey = 'plainSummaries';
   static const String _speechLanguageKey = 'speechLanguage';
@@ -157,6 +158,7 @@ class Preferences {
   static const String _setupAnswersKey = 'setupAnswers';
   static const String _getStartedDismissedKey = 'getStartedDismissed';
   static const String _zakatSettingsKey = 'zakatSettings';
+  static const String _handledSplitsKey = 'handledSplits';
   static const String _zakatReminderNotifiedForKey = 'zakatReminderNotifiedFor';
   static const String _legacyWatchcardsKey = 'pref.watchcards';
   static const String _legacyWatchlistKey = 'pref.watchlist';
@@ -242,6 +244,30 @@ class Preferences {
     return const ZakatSettings();
   }
 
+  /// Synced: the splits the person has answered (adjusted their trades, or
+  /// said they were already in today's shares), by `StockSplit.keyFor`, so the
+  /// notice never comes back on another device.
+  Future<Set<String>> get handledSplits async {
+    final cloudValue = await cloud.getString(_handledSplitsKey);
+    if (cloudValue != null) await local.setString(_handledSplitsKey, cloudValue);
+    final raw = cloudValue ?? local.getString(_handledSplitsKey);
+    if (raw == null) return const {};
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is List) return {for (final k in decoded) if (k is String) k};
+    } on FormatException {
+      // Corrupt value: the notices come back, nothing is lost.
+    }
+    return const {};
+  }
+
+  Future<void> setHandledSplits(Set<String> value) async {
+    final encoded = jsonEncode(value.toList()..sort());
+    await local.setString(_handledSplitsKey, encoded);
+    await cloud.setString(_handledSplitsKey, encoded);
+    await cloud.synchronize();
+  }
+
   /// Local-only: the hawl completion day this device last posted the zakat
   /// reminder for, so each completion notifies once per device.
   DateTime? get zakatReminderNotifiedFor {
@@ -302,6 +328,11 @@ class Preferences {
     final coerced = value.isExtended ? ChartRange.fallbackDefault : value;
     await local.setString(_preferredChartRangeKey, coerced.name);
   }
+
+  /// Local-only: whether price charts draw candles rather than a line.
+  bool get candleCharts => local.getBool(_candleChartsKey) ?? false;
+
+  Future<void> setCandleCharts(bool value) => local.setBool(_candleChartsKey, value);
 
   /// Local-only, NOT synced — hiding balances is a per-device, in-the-moment
   /// privacy choice (e.g. "don't show this over someone's shoulder right

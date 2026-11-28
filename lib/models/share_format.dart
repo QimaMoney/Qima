@@ -10,7 +10,7 @@ enum ShareFormat {
   /// 1:1, chats and square posts.
   square(widthPx: 1080, heightPx: 1080),
 
-  /// 1.91:1, link-style feed posts (Facebook, LinkedIn).
+  /// 1.91:1, link-style feed posts (Facebook, LinkedIn, X).
   landscape(widthPx: 1200, heightPx: 628);
 
   final int widthPx;
@@ -39,7 +39,8 @@ enum ShareDestination {
   instagramStory(ShareFormat.story),
   facebookPost(ShareFormat.landscape),
   facebookStory(ShareFormat.story),
-  linkedinPost(ShareFormat.landscape, sendsCaption: true);
+  linkedinPost(ShareFormat.landscape, sendsCaption: true),
+  xPost(ShareFormat.landscape, sendsCaption: true);
 
   final ShareFormat format;
 

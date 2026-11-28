@@ -78,6 +78,23 @@ class AppLocalizationsEn extends AppLocalizations {
   String get addCustomTickerTitle => 'Add custom ticker';
 
   @override
+  String get addMarketUs => 'United States';
+
+  @override
+  String get addMarketSaudi => 'Saudi Arabia';
+
+  @override
+  String get addMarketEgypt => 'Egypt';
+
+  @override
+  String get addMarketOther => 'Other markets';
+
+  @override
+  String addShowAll(int count) {
+    return 'Show all $count';
+  }
+
+  @override
   String get addCustomTickerSymbol => 'Ticker symbol';
 
   @override
@@ -3084,6 +3101,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get shareToLinkedinPost => 'LinkedIn post';
 
   @override
+  String get shareToXPost => 'X post';
+
+  @override
   String shareCaption(String name, String price) {
     return '$name is at $price.';
   }
@@ -3122,7 +3142,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get helpAssetDetailStep6Body =>
-      'Tap share to post the price and chart as an image sized for WhatsApp, Instagram, Facebook or LinkedIn, with a ready caption.';
+      'Tap share to post the price and chart as an image sized for WhatsApp, Instagram, Facebook, LinkedIn or X, with a ready caption.';
 
   @override
   String get captureRecordThis => 'Record this';
@@ -5497,6 +5517,199 @@ class AppLocalizationsEn extends AppLocalizations {
       'Answer the setup questions again. Nothing you use is turned off.';
 
   @override
+  String chartSince(String change, String date) {
+    return '$change since $date';
+  }
+
+  @override
+  String get chartResetZoom => 'Reset zoom';
+
+  @override
+  String chartCompareWith(String name) {
+    return 'Compare with $name';
+  }
+
+  @override
+  String get chartStopComparing => 'Stop comparing';
+
+  @override
+  String get chartLoadingOlder => 'Loading older prices';
+
+  @override
+  String get statPreviousClose => 'Previous close';
+
+  @override
+  String get statDividendYield => 'Dividend yield';
+
+  @override
+  String get statYearRange => '52-week range';
+
+  @override
+  String get statDayRange => 'Day range';
+
+  @override
+  String factsStale(String date) {
+    return 'Last traded $date. This price may be out of date.';
+  }
+
+  @override
+  String splitRatio(String numerator, String denominator) {
+    return '$numerator-for-$denominator';
+  }
+
+  @override
+  String splitTitle(String ratio, String date) {
+    return '$ratio split on $date';
+  }
+
+  @override
+  String get splitBody =>
+      'Your trades before then are in the old shares, so the quantity held and its average cost are off. Restate them in today\'s shares? Each trade\'s total stays the same.';
+
+  @override
+  String get splitAdjust => 'Adjust my trades';
+
+  @override
+  String get splitAlreadyAdjusted => 'Already in today\'s shares';
+
+  @override
+  String chartDividendMark(String amount) {
+    return 'Dividend $amount';
+  }
+
+  @override
+  String get holdingsTotalReturn => 'Total return';
+
+  @override
+  String get holdingsPerYear => 'Per year';
+
+  @override
+  String holdingsDividendsLine(String received, String yearly) {
+    return 'Dividends: $received so far · about $yearly a year';
+  }
+
+  @override
+  String get realisedByYear => 'Realised by year';
+
+  @override
+  String netWorthThisMonth(String change, String saved, String other) {
+    return 'This month $change: saved $saved, prices and other $other';
+  }
+
+  @override
+  String get savingsRate => 'Savings rate';
+
+  @override
+  String savingsRateAverage(String percent, int months) {
+    return 'Average $percent over $months months';
+  }
+
+  @override
+  String get cashRunway => 'Cash runway';
+
+  @override
+  String cashRunwayValue(String months) {
+    return 'About $months months';
+  }
+
+  @override
+  String cashRunwaySubtitle(String amount) {
+    return 'At your usual $amount a month';
+  }
+
+  @override
+  String categoryUsual(String amount) {
+    return 'Usual $amount';
+  }
+
+  @override
+  String debtRatio(String percent) {
+    return 'You owe $percent of what you own';
+  }
+
+  @override
+  String get statOpen => 'Open';
+
+  @override
+  String get statVolume => 'Volume';
+
+  @override
+  String get statAverageVolume => 'Avg. volume (3 mo)';
+
+  @override
+  String get statEarningsDate => 'Earnings date';
+
+  @override
+  String statEarningsEstimated(String date) {
+    return '$date (estimated)';
+  }
+
+  @override
+  String get valuationTitle => 'Valuation';
+
+  @override
+  String get statMarketCap => 'Market cap';
+
+  @override
+  String get statEnterpriseValue => 'Enterprise value';
+
+  @override
+  String get statPeRatio => 'P/E';
+
+  @override
+  String get statForwardPe => 'Forward P/E';
+
+  @override
+  String get statPegRatio => 'PEG ratio';
+
+  @override
+  String get statPriceToSales => 'Price/sales';
+
+  @override
+  String get statPriceToBook => 'Price/book';
+
+  @override
+  String get statEvToEbitda => 'EV/EBITDA';
+
+  @override
+  String get statBeta => 'Beta (5Y monthly)';
+
+  @override
+  String get financialsTitle => 'Financials';
+
+  @override
+  String financialsAsOf(String date) {
+    return 'Latest report $date';
+  }
+
+  @override
+  String get statRevenue => 'Revenue (12 mo)';
+
+  @override
+  String get statNetIncome => 'Net income (12 mo)';
+
+  @override
+  String get statProfitMargin => 'Profit margin';
+
+  @override
+  String get statEps => 'EPS (12 mo)';
+
+  @override
+  String get statReturnOnEquity => 'Return on equity';
+
+  @override
+  String get statReturnOnAssets => 'Return on assets';
+
+  @override
+  String get statCash => 'Cash';
+
+  @override
+  String get statDebtToEquity => 'Debt/equity';
+
+  @override
+  String get statFreeCashFlow => 'Free cash flow (12 mo)';
+
+  @override
   String get settingsNeedsAttention => 'Needs attention';
 
   @override
@@ -5546,5 +5759,60 @@ class AppLocalizationsEn extends AppLocalizations {
           'Replacing removes the account that 1 trade was paid from or into, because this older backup doesn\'t have it.',
     );
     return '$_temp0';
+  }
+
+  @override
+  String get historyTitle => 'History';
+
+  @override
+  String get historyDay => 'Day';
+
+  @override
+  String get historyMonth => 'Month';
+
+  @override
+  String get historyYear => 'Year';
+
+  @override
+  String get historyShowAll => 'Show all history';
+
+  @override
+  String get historyPeriod => 'Period';
+
+  @override
+  String get historyToday => 'Today';
+
+  @override
+  String get historyYesterday => 'Yesterday';
+
+  @override
+  String get historySoFar => 'So far';
+
+  @override
+  String get historyDayAverageNote =>
+      'Average and median need prices from within the day. Qima keeps those for the last 2 days.';
+
+  @override
+  String get historyRowHint =>
+      'Shows open, close, high, low, average and median';
+
+  @override
+  String get statClose => 'Close';
+
+  @override
+  String get statAverage => 'Average';
+
+  @override
+  String get statMedian => 'Median';
+
+  @override
+  String get chartStyleLine => 'Line chart';
+
+  @override
+  String get chartStyleCandles => 'Candle chart';
+
+  @override
+  String chartCandleFigures(String open, String high, String low) {
+    return 'Open $open · High $high · Low $low';
   }
 }

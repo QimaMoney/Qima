@@ -78,6 +78,23 @@ class AppLocalizationsAr extends AppLocalizations {
   String get addCustomTickerTitle => 'إضافة رمز مخصص';
 
   @override
+  String get addMarketUs => 'الولايات المتحدة';
+
+  @override
+  String get addMarketSaudi => 'السعودية';
+
+  @override
+  String get addMarketEgypt => 'مصر';
+
+  @override
+  String get addMarketOther => 'أسواق أخرى';
+
+  @override
+  String addShowAll(int count) {
+    return 'عرض الكل ($count)';
+  }
+
+  @override
   String get addCustomTickerSymbol => 'رمز التداول';
 
   @override
@@ -3100,6 +3117,9 @@ class AppLocalizationsAr extends AppLocalizations {
   String get shareToLinkedinPost => 'منشور لينكدإن';
 
   @override
+  String get shareToXPost => 'منشور على إكس';
+
+  @override
   String shareCaption(String name, String price) {
     return 'سعر $name الآن $price.';
   }
@@ -3137,7 +3157,7 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get helpAssetDetailStep6Body =>
-      'اضغط على المشاركة لنشر السعر والرسم البياني كصورة بمقاس واتساب أو إنستغرام أو فيسبوك أو لينكدإن، مع نص جاهز.';
+      'اضغط على المشاركة لنشر السعر والرسم البياني كصورة بمقاس واتساب أو إنستغرام أو فيسبوك أو لينكدإن أو إكس، مع نص جاهز.';
 
   @override
   String get captureRecordThis => 'سجّل هذه العملية';
@@ -5521,6 +5541,199 @@ class AppLocalizationsAr extends AppLocalizations {
       'أجب عن أسئلة التجهيز مرة أخرى. لا يُعطَّل شيء تستخدمه.';
 
   @override
+  String chartSince(String change, String date) {
+    return '$change منذ $date';
+  }
+
+  @override
+  String get chartResetZoom => 'إلغاء التكبير';
+
+  @override
+  String chartCompareWith(String name) {
+    return 'قارن مع $name';
+  }
+
+  @override
+  String get chartStopComparing => 'إيقاف المقارنة';
+
+  @override
+  String get chartLoadingOlder => 'جارٍ تحميل الأسعار الأقدم';
+
+  @override
+  String get statPreviousClose => 'الإغلاق السابق';
+
+  @override
+  String get statDividendYield => 'عائد التوزيعات';
+
+  @override
+  String get statYearRange => 'نطاق 52 أسبوعًا';
+
+  @override
+  String get statDayRange => 'نطاق اليوم';
+
+  @override
+  String factsStale(String date) {
+    return 'آخر تداول $date. قد لا يكون هذا السعر حديثًا.';
+  }
+
+  @override
+  String splitRatio(String numerator, String denominator) {
+    return '$numerator مقابل $denominator';
+  }
+
+  @override
+  String splitTitle(String ratio, String date) {
+    return 'تجزئة $ratio في $date';
+  }
+
+  @override
+  String get splitBody =>
+      'صفقاتك قبل ذلك بالأسهم القديمة، لذا الكمية المملوكة ومتوسط تكلفتها غير دقيقين. هل تعيد كتابتها بأسهم اليوم؟ يبقى إجمالي كل صفقة كما هو.';
+
+  @override
+  String get splitAdjust => 'عدّل صفقاتي';
+
+  @override
+  String get splitAlreadyAdjusted => 'مسجلة بأسهم اليوم';
+
+  @override
+  String chartDividendMark(String amount) {
+    return 'توزيعات $amount';
+  }
+
+  @override
+  String get holdingsTotalReturn => 'العائد الكلي';
+
+  @override
+  String get holdingsPerYear => 'سنويًا';
+
+  @override
+  String holdingsDividendsLine(String received, String yearly) {
+    return 'التوزيعات: $received حتى الآن · نحو $yearly سنويًا';
+  }
+
+  @override
+  String get realisedByYear => 'المحقق حسب السنة';
+
+  @override
+  String netWorthThisMonth(String change, String saved, String other) {
+    return 'هذا الشهر $change: ادخار $saved، أسعار وغيرها $other';
+  }
+
+  @override
+  String get savingsRate => 'نسبة الادخار';
+
+  @override
+  String savingsRateAverage(String percent, int months) {
+    return 'المتوسط $percent خلال $months أشهر';
+  }
+
+  @override
+  String get cashRunway => 'مدة كفاية النقد';
+
+  @override
+  String cashRunwayValue(String months) {
+    return 'نحو $months أشهر';
+  }
+
+  @override
+  String cashRunwaySubtitle(String amount) {
+    return 'بإنفاقك المعتاد $amount شهريًا';
+  }
+
+  @override
+  String categoryUsual(String amount) {
+    return 'المعتاد $amount';
+  }
+
+  @override
+  String debtRatio(String percent) {
+    return 'عليك $percent مما تملك';
+  }
+
+  @override
+  String get statOpen => 'الافتتاح';
+
+  @override
+  String get statVolume => 'حجم التداول';
+
+  @override
+  String get statAverageVolume => 'متوسط الحجم (3 أشهر)';
+
+  @override
+  String get statEarningsDate => 'موعد النتائج';
+
+  @override
+  String statEarningsEstimated(String date) {
+    return '$date (تقديري)';
+  }
+
+  @override
+  String get valuationTitle => 'التقييم';
+
+  @override
+  String get statMarketCap => 'القيمة السوقية';
+
+  @override
+  String get statEnterpriseValue => 'قيمة المنشأة';
+
+  @override
+  String get statPeRatio => 'مكرر الربحية';
+
+  @override
+  String get statForwardPe => 'مكرر الربحية المتوقع';
+
+  @override
+  String get statPegRatio => 'نسبة PEG';
+
+  @override
+  String get statPriceToSales => 'السعر إلى المبيعات';
+
+  @override
+  String get statPriceToBook => 'السعر إلى القيمة الدفترية';
+
+  @override
+  String get statEvToEbitda => 'قيمة المنشأة/EBITDA';
+
+  @override
+  String get statBeta => 'بيتا (5 سنوات شهريًا)';
+
+  @override
+  String get financialsTitle => 'البيانات المالية';
+
+  @override
+  String financialsAsOf(String date) {
+    return 'آخر تقرير $date';
+  }
+
+  @override
+  String get statRevenue => 'الإيرادات (12 شهرًا)';
+
+  @override
+  String get statNetIncome => 'صافي الدخل (12 شهرًا)';
+
+  @override
+  String get statProfitMargin => 'هامش الربح';
+
+  @override
+  String get statEps => 'ربحية السهم (12 شهرًا)';
+
+  @override
+  String get statReturnOnEquity => 'العائد على حقوق الملكية';
+
+  @override
+  String get statReturnOnAssets => 'العائد على الأصول';
+
+  @override
+  String get statCash => 'النقد';
+
+  @override
+  String get statDebtToEquity => 'الدين إلى حقوق الملكية';
+
+  @override
+  String get statFreeCashFlow => 'التدفق النقدي الحر (12 شهرًا)';
+
+  @override
   String get settingsNeedsAttention => 'تحتاج إلى انتباه';
 
   @override
@@ -5569,5 +5782,60 @@ class AppLocalizationsAr extends AppLocalizations {
           'الاستبدال يزيل الحساب الذي دُفعت منه عملية واحدة أو دخلت إليه، لأن هذه النسخة الأقدم لا تحتويه.',
     );
     return '$_temp0';
+  }
+
+  @override
+  String get historyTitle => 'السجل';
+
+  @override
+  String get historyDay => 'يوم';
+
+  @override
+  String get historyMonth => 'شهر';
+
+  @override
+  String get historyYear => 'سنة';
+
+  @override
+  String get historyShowAll => 'عرض السجل كاملًا';
+
+  @override
+  String get historyPeriod => 'الفترة';
+
+  @override
+  String get historyToday => 'اليوم';
+
+  @override
+  String get historyYesterday => 'أمس';
+
+  @override
+  String get historySoFar => 'حتى الآن';
+
+  @override
+  String get historyDayAverageNote =>
+      'المتوسط والوسيط يحتاجان إلى أسعار من داخل اليوم. يحتفظ Qima بها لآخر يومين.';
+
+  @override
+  String get historyRowHint =>
+      'يعرض الافتتاح والإغلاق والأعلى والأدنى والمتوسط والوسيط';
+
+  @override
+  String get statClose => 'الإغلاق';
+
+  @override
+  String get statAverage => 'المتوسط';
+
+  @override
+  String get statMedian => 'الوسيط';
+
+  @override
+  String get chartStyleLine => 'مخطط خطي';
+
+  @override
+  String get chartStyleCandles => 'مخطط الشموع';
+
+  @override
+  String chartCandleFigures(String open, String high, String low) {
+    return 'الافتتاح $open · الأعلى $high · الأدنى $low';
   }
 }

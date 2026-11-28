@@ -13,11 +13,15 @@ class HoldingsState extends Equatable {
   /// change, never on a price tick.
   final Ledger ledger;
 
+  /// Splits the person has answered, by `StockSplit.keyFor`; synced.
+  final Set<String> handledSplits;
+
   HoldingsState({
     List<HoldingTransaction>? transactions,
     // Shorthand for a ledger of plain buys, one per lot.
     List<HoldingLot>? lots,
     Ledger? ledger,
+    this.handledSplits = const {},
   })  : transactions = transactions ?? _buys(lots),
         ledger = ledger ?? Ledger.derive(transactions ?? _buys(lots));
 
@@ -33,14 +37,16 @@ class HoldingsState extends Equatable {
     List<HoldingTransaction>? transactions,
     // Shorthand for a ledger of plain buys, one per lot.
     List<HoldingLot>? lots,
+    Set<String>? handledSplits,
   }) {
     final nextTransactions = transactions ?? (lots == null ? null : _buys(lots));
     return HoldingsState(
       transactions: nextTransactions ?? this.transactions,
       ledger: nextTransactions == null ? ledger : null,
+      handledSplits: handledSplits ?? this.handledSplits,
     );
   }
 
   @override
-  List<Object?> get props => [transactions];
+  List<Object?> get props => [transactions, handledSplits];
 }

@@ -9,6 +9,7 @@ import '../models/asset.dart';
 import '../models/instrument_aliases.dart';
 import '../models/instrument_catalog.dart';
 import '../models/instrument_search.dart';
+import '../models/market_hours.dart';
 import '../models/transaction_capture.dart';
 import '../services/ai_assist_provider.dart';
 import '../theme/design_system.dart';
@@ -61,6 +62,12 @@ class AddInstrumentScreen extends StatefulWidget {
 class _AddInstrumentScreenState extends State<AddInstrumentScreen> {
   final _searchController = TextEditingController();
   String _query = '';
+
+  /// How many shares a market's card shows before "Show all".
+  static const _previewCount = 6;
+
+  /// The markets whose share lists have been opened in full.
+  final _expanded = <_StockMarket>{};
 
   @override
   void dispose() {
@@ -147,21 +154,70 @@ class _AddInstrumentScreenState extends State<AddInstrumentScreen> {
 
   Widget _section(BuildContext context, WatchlistCubit cubit, AssetClass assetClass) {
     final instruments = InstrumentCatalog.all.where((i) => i.assetClass == assetClass).toList();
-    final showsCustomTickerRow = assetClass == AssetClass.stock || assetClass == AssetClass.indices;
+    final title = displayLabel(context, assetClass.titleKey);
+    if (assetClass == AssetClass.stock) return _stockSections(context, cubit, title, instruments);
+    final showsCustomTickerRow = assetClass == AssetClass.indices;
     if (instruments.isEmpty && !showsCustomTickerRow) return const SizedBox.shrink();
+    return _group(context, cubit, header: title, instruments: instruments, customTickerFor: showsCustomTickerRow ? assetClass : null);
+  }
+
+  /// Shares, a card per market, each shortened to its first few until
+  /// opened: the catalog lists far more shares than anything else, and in
+  /// one card they would bury the indices and currencies below them. A
+  /// ticker the person added themselves leads its market, so it is never
+  /// behind "Show all".
+  Widget _stockSections(BuildContext context, WatchlistCubit cubit, String title, List<Instrument> stocks) {
+    final l10n = AppLocalizations.of(context)!;
+    final byMarket = <_StockMarket, List<Instrument>>{};
+    for (final custom in [true, false]) {
+      for (final stock in stocks.where((i) => cubit.isCustom(i.id) == custom)) {
+        byMarket.putIfAbsent(_StockMarket.of(stock), () => []).add(stock);
+      }
+    }
+    final markets = [for (final m in _StockMarket.values) if (byMarket.containsKey(m)) m];
+    if (markets.isEmpty) return _group(context, cubit, header: title, instruments: const [], customTickerFor: AssetClass.stock);
+    return Column(
+      children: [
+        for (final market in markets)
+          _group(
+            context,
+            cubit,
+            header: '$title · ${market.label(l10n)}',
+            instruments: byMarket[market]!,
+            customTickerFor: market == markets.last ? AssetClass.stock : null,
+            collapseKey: market,
+          ),
+      ],
+    );
+  }
+
+  /// One headed card of instruments. With a [collapseKey] a long list shows
+  /// its first [_previewCount] and a row that opens the rest.
+  Widget _group(
+    BuildContext context,
+    WatchlistCubit cubit, {
+    required String header,
+    required List<Instrument> instruments,
+    AssetClass? customTickerFor,
+    _StockMarket? collapseKey,
+  }) {
     final colors = context.colors;
+    final l10n = AppLocalizations.of(context)!;
+    // Collapsing has to hide at least two rows to be worth its own row.
+    final collapsed = collapseKey != null && !_expanded.contains(collapseKey) && instruments.length > _previewCount + 1;
+    final shown = collapsed ? instruments.take(_previewCount) : instruments;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: DS.spaceLG),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _GroupHeader(text: displayLabel(context, assetClass.titleKey).toUpperCase()),
+          _GroupHeader(text: header.toUpperCase()),
           DSCard(
             padding: EdgeInsets.zero,
             child: Column(
               children: [
-                for (final instrument in instruments)
+                for (final instrument in shown)
                   _InstrumentTile(
                     instrument: instrument,
                     isCustom: cubit.isCustom(instrument.id),
@@ -171,11 +227,17 @@ class _AddInstrumentScreenState extends State<AddInstrumentScreen> {
                       setState(() {});
                     },
                   ),
-                if (showsCustomTickerRow)
+                if (collapsed)
+                  ListTile(
+                    leading: Icon(Icons.expand_more, color: colors.textPrimary),
+                    title: Text(l10n.addShowAll(instruments.length), style: TextStyle(color: colors.textPrimary)),
+                    onTap: () => setState(() => _expanded.add(collapseKey)),
+                  ),
+                if (customTickerFor != null)
                   ListTile(
                     leading: Icon(Icons.add_circle_outline, color: colors.textPrimary),
-                    title: Text(AppLocalizations.of(context)!.addCustomTickerTitle, style: TextStyle(color: colors.textPrimary)),
-                    onTap: () => _openCustomTicker(context, initialAssetClass: assetClass),
+                    title: Text(l10n.addCustomTickerTitle, style: TextStyle(color: colors.textPrimary)),
+                    onTap: () => _openCustomTicker(context, initialAssetClass: customTickerFor),
                   ),
               ],
             ),
@@ -353,6 +415,28 @@ class _CaptureCard extends StatelessWidget {
       ),
     );
   }
+}
+
+/// The markets the plain catalog splits shares into.
+enum _StockMarket {
+  us,
+  saudi,
+  egypt,
+  other;
+
+  static _StockMarket of(Instrument instrument) => switch (MarketHours.marketOf(instrument)) {
+        Market.us => us,
+        Market.tadawul => saudi,
+        Market.egx => egypt,
+        _ => other,
+      };
+
+  String label(AppLocalizations l10n) => switch (this) {
+        us => l10n.addMarketUs,
+        saudi => l10n.addMarketSaudi,
+        egypt => l10n.addMarketEgypt,
+        other => l10n.addMarketOther,
+      };
 }
 
 class _GroupHeader extends StatelessWidget {

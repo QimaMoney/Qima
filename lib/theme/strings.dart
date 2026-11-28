@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../l10n/app_localizations.dart';
 import '../models/asset_group.dart';
 import '../models/hijri_date.dart';
+import '../models/market_listings.dart';
 
 /// Resolves the model layer's dotted localization keys (e.g. `asset.gold`,
 /// `unit.troyOunce`) to real translated text via the generated
@@ -32,6 +33,10 @@ String displayLabel(BuildContext context, String key) {
 String displayLabelFor(AppLocalizations loc, String key) {
   final resolved = _resolve(loc, key);
   if (resolved != null) return resolved;
+
+  // A listed share or index: its key is its English name.
+  final listed = MarketListings.localizedName(key, loc.localeName);
+  if (listed != null) return listed;
 
   if (key.contains(' ')) {
     return key.split(' ').map((part) => _resolve(loc, part) ?? part).join(' ');
