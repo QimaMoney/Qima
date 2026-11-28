@@ -48,6 +48,14 @@ class ChartTimeAxis {
     return ChartTimeAxis._(dates, positions);
   }
 
+  /// Every sample one step from the last, whatever its date: for samples
+  /// that each stand for a whole period (candles), which are as wide as
+  /// one another. A period's last price can be minutes or days after the
+  /// one before it, and by time its candle would sit against a neighbour
+  /// or far from it.
+  factory ChartTimeAxis.even(List<DisplayPoint> points) =>
+      ChartTimeAxis._([for (final p in points) p.date], [for (var i = 0; i < points.length; i++) i.toDouble()]);
+
   double get length => positions.isEmpty ? 0 : positions.last;
 
   /// The position of [date], between the samples around it.

@@ -102,15 +102,23 @@ class PriceBar extends Equatable {
     return previous == null || previous == 0 ? null : close / previous - 1;
   }
 
-  /// Where the body of this bar starts when drawn: its open, else the close
-  /// before it.
-  double get bodyOpen => open ?? previousClose ?? close;
+  /// Where the body of this bar starts when drawn: the close before it,
+  /// so every drawn bar starts where the last one ended, whatever lay
+  /// between them (a night, a weekend, a day with no bar of its own). The
+  /// move over a closure is then part of the bar that follows it, as it is
+  /// of [change], and no bar stands apart from its neighbour. The first
+  /// bar has none before it and starts at its own [open].
+  double get bodyOpen => previousClose ?? open ?? close;
 
-  /// Whether the period closed at or above where it started.
+  /// The extremes as drawn: [high] and [low], reaching to [bodyOpen].
+  double get drawnHigh => bodyOpen > high ? bodyOpen : high;
+  double get drawnLow => bodyOpen < low ? bodyOpen : low;
+
+  /// Whether the period closed at or above where its drawn body starts.
   bool get closedUp => close >= bodyOpen;
 
   /// This bar as one chart sample, dated at its last price.
-  DisplayPoint toPoint() => DisplayPoint(date: end, value: close, high: high, low: low, open: bodyOpen);
+  DisplayPoint toPoint() => DisplayPoint(date: end, value: close, high: drawnHigh, low: drawnLow, open: bodyOpen);
 
   @override
   List<Object?> get props => [period, start, end, open, high, low, close, hasExtremes, mean, median, previousClose];
