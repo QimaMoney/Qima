@@ -3,11 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Qima: Gold and portfolio tracker</title>
-<meta name="description" content="Gold by the gram and karat, plus crypto, stocks and currencies, added up in your currency. Zakat worked out from what you hold. No account. Your data stays on your devices.">
+<title>Qima: Net worth, money and zakat</title>
+<meta name="description" content="Qima adds up everything you own and owe into one number: your net worth. Bank accounts, cards, loans, gold, crypto and property, with spending, a budget and zakat. No account. Your data stays on your devices.">
 <link rel="canonical" href="https://qima.money/">
 <meta property="og:title" content="Qima: Every asset you hold. One number.">
-<meta property="og:description" content="Gold by the gram and karat, plus crypto, stocks and currencies, added up in your currency. No account. Your data stays on your devices.">
+<meta property="og:description" content="Your money, gold and debts added up into your net worth, in your currency. No account. Your data stays on your devices.">
 <meta property="og:url" content="https://qima.money/">
 <meta property="og:type" content="website">
 <meta property="og:image" content="https://qima.money/img/og-card.png">
@@ -31,11 +31,12 @@
       <svg class="wordmark" viewBox="29 -739 2388 815" aria-hidden="true"><path d="M644 -102 735 -12 657 64 561 -31Q487 10 385 11Q234 11 141 -86Q41 -192 41 -358Q41 -523 141 -630Q232 -727 386 -727Q539 -727 630 -630Q730 -522 730 -358Q730 -210 651 -110ZM544 -202 547 -208Q583 -269 583 -359Q583 -476 522 -543Q469 -601 386 -601Q290 -601 235 -526Q188 -461 188 -358Q188 -239 249 -173Q302 -115 386 -115Q426 -115 462 -129L379 -213L457 -289ZM962 -530V0H824V-530ZM892 -712Q919 -712 937.5 -693.0Q956 -674 956 -647Q956 -620 937.5 -601.5Q919 -583 892 -583Q865 -583 846.0 -601.5Q827 -620 827 -647Q827 -674 846.0 -693.0Q865 -712 892 -712ZM1085 -530H1222V-466Q1283 -541 1367 -541Q1470 -541 1511 -463Q1571 -541 1666 -541Q1746 -541 1790.5 -497.5Q1835 -454 1835 -377V0H1698V-355Q1698 -424 1623 -424Q1579 -424 1554.0 -396.5Q1529 -369 1529 -320V0H1391V-355Q1391 -424 1317 -424Q1273 -424 1248.0 -396.5Q1223 -369 1223 -320V0H1085ZM2405 -35V0H2255Q2240 -19 2239 -54Q2184 11 2079 11Q2002 11 1955 -36Q1917 -74 1917 -141Q1917 -241 1997 -283Q2031 -301 2132 -319L2240 -339L2239 -377Q2238 -430 2159 -430Q2108 -430 2087.5 -414.5Q2067 -399 2062 -358H1930Q1942 -541 2156 -541Q2274 -541 2326 -499Q2373 -459 2373 -378V-82Q2373 -46 2405 -35ZM2240 -256 2139 -233Q2096 -223 2075 -204Q2055 -185 2055 -157Q2055 -100 2129 -100Q2236 -100 2239 -217Z"/></svg>
     </a>
     <nav class="nav-links" aria-label="Main">
+      <a class="optional" href="#money">Money</a>
       <a class="optional" href="#gold">Gold</a>
       <a class="optional" href="#zakat">Zakat</a>
       <a href="#privacy">Privacy</a>
       <a href="#download">Download</a>
-      <a href="https://github.com/DevLab-Technologies/Qima/issues">Support</a>
+      <a href="https://github.com/QimaMoney/Qima/issues">Support</a>
     </nav>
   </div>
 </header>
@@ -46,8 +47,9 @@
   <div class="hero-copy">
     <h1><span>Every asset you hold.</span> <span>One number.</span></h1>
     <p class="lead">
-      Gold by the gram and karat, plus crypto, stocks and currencies, added up
-      in your currency. No account. Your data stays on your devices.
+      Bank accounts, cash, cards, loans, gold, crypto and property, added up
+      into your net worth in the currency you choose. No account. Your data
+      stays on your devices.
     </p>
     <div class="cta-row store-badges">
       <a class="store-badge" href="https://apps.apple.com/app/id6815332595">
@@ -60,8 +62,49 @@
     <p class="fineprint">Free. No subscription and no in-app purchases.</p>
   </div>
   <figure class="screen">
-    <img src="img/watchlist.webp" alt="Qima watchlist: a portfolio total above live prices for gold by the ounce and by the 21K gram, silver, Bitcoin, Apple and the S&amp;P 500" width="660" height="1434" fetchpriority="high">
+    <img src="img/home.webp" alt="Qima home screen: net worth with what you own and what you owe, a chart over time, the amount left to spend this month, and holdings split between gold, Bitcoin and other assets" width="660" height="1434" fetchpriority="high">
   </figure>
+</section>
+
+<section class="feature" id="net-worth">
+  <div class="wrap feature-grid">
+    <div class="feature-copy">
+      <h2>What you own, less what you owe</h2>
+      <p>
+        Qima keeps a balance sheet. Accounts, holdings, property and money owed
+        to you sit on one side; cards, loans and money you owe sit on the other.
+        The difference is your net worth, day by day.
+      </p>
+      <dl class="facts">
+        <div><dt>Chart</dt><dd>Net worth from one week to all time</dd></div>
+        <div><dt>Property</dt><dd>Value property, cars and other assets yourself. Each value keeps its date, and nothing is made up in between.</dd></div>
+        <div><dt>People</dt><dd>Money you lent and borrowed, with the net at a glance</dd></div>
+      </dl>
+    </div>
+    <figure class="screen">
+      <img src="img/balance-sheet.webp" alt="Balance sheet screen: net worth above a list of what you own (holdings, cash and bank, money owed to you, property) and what you owe (cards, loans, money you owe people)" width="660" height="1434" loading="lazy">
+    </figure>
+  </div>
+</section>
+
+<section class="feature feature-flip" id="money">
+  <div class="wrap feature-grid">
+    <div class="feature-copy">
+      <h2>Everyday money, checked by you</h2>
+      <p>
+        Bank accounts, cash, credit cards and loans, each with its balance over
+        time. Spending by category, a monthly budget and recurring payments.
+      </p>
+      <dl class="facts">
+        <div><dt>Statements</dt><dd>Import a PDF, spreadsheet or screenshot. It is read on your device, and you check every row before it's added.</dd></div>
+        <div><dt>Bank texts</dt><dd>On iPhone and Android, Qima reads the messages your bank sends and suggests each one as a transaction. On iPhone this runs through a Shortcuts automation.</dd></div>
+        <div><dt>Balances</dt><dd>Check a balance against your bank and choose how a difference comes in: as a transaction or as a new opening balance.</dd></div>
+      </dl>
+    </div>
+    <figure class="screen">
+      <img src="img/money.webp" alt="Money screen for November 2026: the amount left to spend, spending by category against budgets for groceries and dining, and cash flow with money in, money out and what is left over" width="660" height="1434" loading="lazy">
+    </figure>
+  </div>
 </section>
 
 <section class="feature" id="gold">
@@ -69,9 +112,8 @@
     <div class="feature-copy">
       <h2>Gold by the gram, ounce or kilo</h2>
       <p>
-        Most trackers add metals to a stock app as an afterthought. Qima starts
-        with them: gold, silver, platinum and palladium, priced in the weight
-        and karat you actually bought.
+        Gold, silver, platinum and palladium, priced in the weight and karat you
+        actually bought, beside crypto, stocks, indices and currencies.
       </p>
       <dl class="facts">
         <div><dt>Units</dt><dd>Troy ounce, gram, kilogram</dd></div>
@@ -81,7 +123,7 @@
       <p class="note">Prices come from third-party sources and may be delayed. Qima is not investment advice.</p>
     </div>
     <figure class="screen">
-      <img src="img/gold.webp" alt="Gold detail screen: price per troy ounce, kilogram and 24K gram, above a holdings card with value, gain and gain percent" width="660" height="1434" loading="lazy">
+      <img src="img/prices.webp" alt="Prices screen: gold per troy ounce in dollars and per 21K gram in riyals, silver, Bitcoin, Apple, the S&amp;P 500 and the euro, each with a small chart and its change" width="660" height="1434" loading="lazy">
     </figure>
   </div>
 </section>
@@ -91,44 +133,46 @@
     <div class="feature-copy">
       <h2>Zakat, worked out from what you hold</h2>
       <p>
-        Qima checks your holdings against nisab at today's prices, shows what is
-        due and reminds you when your hawl completes.
+        Qima works out zakat over your whole balance sheet, checks it against
+        nisab at today's prices and reminds you when your hawl completes.
       </p>
       <dl class="facts">
         <div><dt>Nisab</dt><dd>85 g of gold or 595 g of silver</dd></div>
-        <div><dt>Hawl</dt><dd>Hijri or Gregorian calendar, with a reminder</dd></div>
-        <div><dt>What counts</dt><dd>You choose, asset by asset</dd></div>
+        <div><dt>Hawl</dt><dd>Counted in lunar years, with a reminder</dd></div>
+        <div><dt>What counts</dt><dd>Holdings, cash, money owed to you and assets held for sale, less debts due</dd></div>
       </dl>
       <p class="note">Qima calculates; the choices behind the calculation are yours.</p>
     </div>
     <figure class="screen">
-      <img src="img/zakat.webp" alt="Zakat screen: above nisab, with the amount due at 2.5% of the zakatable base, the gold basis, the hawl start date and the assets that count" width="660" height="1434" loading="lazy">
+      <img src="img/zakat.webp" alt="Zakat screen: above nisab, the amount due at 2.5% of the zakatable base, the gold basis and threshold, the hawl start date, and what counts: holdings, cash and bank, money owed to you and assets held for sale, less debts due now" width="660" height="1434" loading="lazy">
     </figure>
   </div>
 </section>
 
 <section class="wrap block">
-  <h2>Everything else you own, in the same total</h2>
+  <h2>Also in Qima</h2>
   <dl class="specs">
     <div><dt>Crypto, stocks and currencies</dt><dd>Bitcoin and Ethereum, major stocks and indices and world currencies, converted into the currency you choose.</dd></div>
-    <div><dt>Custom tickers</dt><dd>Add any stock or ETF that isn't built in. Qima checks the symbol with the price source first.</dd></div>
-    <div><dt>Allocation</dt><dd>Your portfolio split by asset class, and your gold split by karat.</dd></div>
+    <div><dt>Split bills</dt><dd>Split a bill with other people and keep only your share as spending.</dd></div>
+    <div><dt>Recurring payments</dt><dd>Rent, bills, instalments and income, listed before they're due.</dd></div>
     <div><dt>Price alerts</dt><dd>When a price goes above or below a level, or moves by a percent in 24 hours or 7 days.</dd></div>
-    <div><dt>Charts</dt><dd>From one day to all time.</dd></div>
+    <div><dt>Charts</dt><dd>Prices and balances from one day to all time.</dd></div>
     <div><dt>Languages</dt><dd>English, Arabic, Spanish and French, with full right-to-left Arabic.</dd></div>
   </dl>
 </section>
 
 <section class="wrap block" id="privacy">
   <h2>No account. Your data stays on your devices.</h2>
-  <p class="block-lead">There is no Qima server holding your portfolio. This is where everything lives.</p>
+  <p class="block-lead">There is no Qima server holding your records. This is where everything lives.</p>
   <table class="where">
     <tbody>
-      <tr><th scope="row">Holdings and transactions</th><td>On your device. With iCloud sync turned on, also in your own iCloud account.</td></tr>
-      <tr><th scope="row">Account</th><td>None. No sign-up, no login, no email.</td></tr>
-      <tr><th scope="row">Analytics and ads</th><td>None. No analytics, advertising or tracking SDKs in the app.</td></tr>
+      <tr><th scope="row">Accounts, transactions and holdings</th><td>On your device. With iCloud sync turned on, also in your own iCloud account.</td></tr>
+      <tr><th scope="row">Statements and bank messages</th><td>Read on your device. They are never sent anywhere.</td></tr>
+      <tr><th scope="row">Sign-up</th><td>None. No Qima account, no login, no email.</td></tr>
+      <tr><th scope="row">Analytics and ads</th><td>None from Qima. No analytics, advertising or tracking.</td></tr>
+      <tr><th scope="row">On-device model</th><td>Off until you turn it on, and it runs on your device. On Android, Google's ML Kit then reports figures about its own use to Google, never what it read. On Windows and Linux the model is downloaded once.</td></tr>
       <tr><th scope="row">Price requests</th><td>Sent to public market-data providers. They ask for prices only and never include your holdings.</td></tr>
-      <tr><th scope="row">Backups</th><td>A file you keep where you choose, protected with a password if you want (AES-256). Holdings also export to CSV.</td></tr>
+      <tr><th scope="row">Backups</th><td>A file you keep where you choose, protected with a password if you want (AES-256).</td></tr>
       <tr><th scope="row">App lock</th><td>Face ID, Touch ID, fingerprint or passcode, and an option to hide balances.</td></tr>
     </tbody>
   </table>
@@ -146,15 +190,15 @@
       </tr>
       <tr>
         <th scope="row">Windows</th>
-        <td>An installer for 64-bit Windows. It isn't code-signed yet, so SmartScreen may warn the first time: choose More info, then Run anyway. <a href="https://github.com/DevLab-Technologies/Qima/releases/latest">Download the Windows installer</a></td>
+        <td>An installer for 64-bit Windows. It isn't code-signed yet, so SmartScreen may warn the first time: choose More info, then Run anyway. <a href="https://github.com/QimaMoney/Qima/releases/latest">Download the Windows installer</a></td>
       </tr>
       <tr>
         <th scope="row">Linux</th>
-        <td>A tar.gz for 64-bit (x86-64) Linux with GTK 3, extracted into your home folder. <a href="/linux">Installation guide</a> <a href="https://github.com/DevLab-Technologies/Qima/releases/latest">Download for Linux</a></td>
+        <td>A tar.gz for 64-bit (x86-64) Linux with GTK 3, extracted into your home folder. <a href="/linux">Installation guide</a> <a href="https://github.com/QimaMoney/Qima/releases/latest">Download for Linux</a></td>
       </tr>
       <tr>
         <th scope="row">Android APK</th>
-        <td>For Android devices without Google Play. It doesn't update itself; get each new version from the same page. <a href="https://github.com/DevLab-Technologies/Qima/releases/latest">Download the APK</a></td>
+        <td>For Android devices without Google Play. It doesn't update itself; get each new version from the same page. <a href="https://github.com/QimaMoney/Qima/releases/latest">Download the APK</a></td>
       </tr>
     </tbody>
   </table>
@@ -181,11 +225,11 @@
       <span>© 2026 DevLab Technologies</span>
       <a href="/privacy">Privacy</a>
       <a href="/terms">Terms</a>
-      <a href="https://github.com/DevLab-Technologies/Qima/issues">Support</a>
+      <a href="https://github.com/QimaMoney/Qima/issues">Support</a>
     </div>
     <p class="disclaimer">
       Qima provides market information only. It is not investment advice and
-      not a broker, exchange or custodian. Prices come from third-party
+      not a broker, exchange, bank or custodian. Prices come from third-party
       sources, may be delayed or inaccurate, and should not be relied on as
       the sole basis for a transaction.
     </p>
