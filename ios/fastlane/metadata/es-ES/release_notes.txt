@@ -1,9 +1,9 @@
-Qima 5.0: todo lo que tienes y debes, en un solo lugar
-• El inicio muestra tu patrimonio neto a lo largo del tiempo, con tus cuentas, inversiones, gastos y zakat
-• Añade cuentas bancarias, efectivo, tarjetas y préstamos, y sigue cada saldo en el tiempo
-• Gastos por categoría, presupuesto mensual y pagos recurrentes
-• Importa extractos en PDF, hoja de cálculo o captura, leídos en tu dispositivo
-• Añade un movimiento escribiéndolo o diciéndolo
-• Valora tú mismo un inmueble, un coche u otro activo
-• Sigue el dinero que prestaste y te prestaron, y divide cuentas
-• El zakat cuenta todo tu balance, y el hawl es siempre un año lunar
+Qima 5.1: más sobre cada precio
+• Historial de precios por día, mes y año: apertura, cierre, máximo, mínimo, media y mediana
+• Gráficos de velas, además de la línea
+• Tus compras y ventas marcadas en el gráfico de precios, con zoom, medición y comparación
+• Las acciones muestran cierre anterior, rentabilidad por dividendo, rango de 52 semanas, valoración, datos financieros y la próxima fecha de resultados
+• Tus inversiones muestran la rentabilidad total con dividendos y comisiones
+• Acciones saudíes, egipcias y más del Nasdaq ya incluidas, con TASI, EGX y Nasdaq-100
+• Comparte en X
+• Corregido: el historial del oro, la plata y las criptomonedas coincide con el precio actual
