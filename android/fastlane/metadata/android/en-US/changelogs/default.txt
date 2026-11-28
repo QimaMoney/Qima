@@ -1,7 +1,7 @@
-Qima 5.0.0
-• Home shows your net worth over time, with your accounts, holdings, spending and zakat
-• Add bank accounts, cash, cards and loans
-• Spending by category, a monthly budget and recurring payments
-• Bank text messages and statements become transactions you review, read on your phone
-• Track money you lent and borrowed, and split bills
-• Zakat now counts your whole balance sheet
+Qima 5.1.0
+• Price history by day, month and year, with open, close, high and low
+• Candle charts
+• Your buys and sells marked on the price chart, with zoom and compare
+• Stocks show dividends, 52-week range, valuation and financials
+• Saudi, Egyptian and more Nasdaq shares built in
+• Share to X

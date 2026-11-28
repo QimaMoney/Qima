@@ -304,6 +304,110 @@ void main() {
       expect(PriceBars.build(points, BarPeriod.day, now: holiday, market: Market.always).single.start, DateTime(2026, 11, 21));
     });
 
+    group('a candle opens where the one before closed', () {
+      /// Gold futures as the feed gives them: a bar a day dated at midnight
+      /// in New York, whose open is not the close of the bar before.
+      DisplayPoint daily(int dayOfMonth, double open, double high, double low, double close) =>
+          DisplayPoint(date: DateTime.utc(2026, 11, dayOfMonth, 5), value: close, open: open, high: high, low: low);
+      final gold = [
+        daily(16, 3869.7, 3904.3, 3835.2, 3853.0),
+        daily(17, 3859.5, 3894.0, 3839.2, 3864.2),
+        daily(18, 3855.2, 3859.3, 3721.8, 3741.9),
+        daily(19, 3730.3, 3759.5, 3620.6, 3685.5),
+        daily(20, 3633.8, 3638.1, 3502.9, 3515.4),
+        // After the weekend.
+        daily(23, 3570.5, 3691.0, 3552.3, 3651.4),
+        daily(24, 3636.4, 3676.7, 3545.4, 3561.9),
+      ];
+
+      void expectBounded(List<PriceBar> bars) {
+        for (final bar in bars) {
+          expect(bar.high, greaterThanOrEqualTo(bar.bodyOpen > bar.close ? bar.bodyOpen : bar.close), reason: '${bar.start}');
+          expect(bar.low, lessThanOrEqualTo(bar.bodyOpen < bar.close ? bar.bodyOpen : bar.close), reason: '${bar.start}');
+        }
+      }
+
+      test('through a trading week of a market open around the clock', () {
+        final bars = PriceBars.build(gold, BarPeriod.day, now: holiday, market: Market.metals);
+        expect(bars, hasLength(7));
+        for (final i in [1, 2, 3, 4, 6]) {
+          expect(bars[i].open, bars[i - 1].close, reason: '${bars[i].start}');
+        }
+        expectBounded(bars);
+      });
+
+      test('but not over a weekend, where the gap is real', () {
+        final bars = PriceBars.build(gold, BarPeriod.day, now: holiday, market: Market.metals);
+        expect(bars[5].open, 3570.5);
+        expect(bars[5].previousClose, 3515.4);
+        final weeks = PriceBars.build(gold, BarPeriod.week, now: holiday, market: Market.metals);
+        expect(weeks.map((b) => b.open), [3869.7, 3570.5]);
+      });
+
+      test('and its range reaches to that open', () {
+        final bars = PriceBars.build(gold, BarPeriod.day, now: holiday, market: Market.metals);
+        // Friday's own high was 3638.1, under Thursday's close.
+        expect(bars[4].high, 3685.5);
+        expect(bars[4].low, 3502.9);
+        // Tuesday the 17th opened under its own low.
+        expect(bars[1].low, 3839.2);
+        expect(bars[1].high, 3894.0);
+      });
+
+      test('when its first sample is hours into the day', () {
+        final friday = DateTime.utc(2026, 11, 20, 9);
+        final bars = PriceBars.build(
+          [
+            gold[3],
+            for (var i = 0; i < 4; i++)
+              DisplayPoint(
+                date: friday.add(Duration(minutes: 15 * i)),
+                value: 3520.0 - i,
+                open: 3534.0 - i,
+                high: 3535.0 - i,
+                low: 3517.0 - i,
+              ),
+          ],
+          BarPeriod.day,
+          now: holiday,
+          market: Market.metals,
+        );
+        expect(bars.last.open, 3685.5);
+        expect(bars.last.close, 3517);
+        expect(bars.last.closedUp, isFalse);
+        expectBounded(bars);
+      });
+
+      test('on a market that never closes, weekends included, unless a day is missing', () {
+        final points = [
+          // Friday to Monday, then Wednesday.
+          for (final (d, close) in [(20, 100.0), (21, 104.0), (22, 103.0), (23, 108.0), (25, 120.0)])
+            DisplayPoint(date: DateTime(2026, 11, d, 12), value: close, open: close - 10, high: close + 2, low: close - 12),
+        ];
+        final bars = PriceBars.build(points, BarPeriod.day, now: holiday, market: Market.always);
+        expect(bars.map((b) => b.open), [90, 100, 104, 103, 110]);
+        expectBounded(bars);
+      });
+
+      test('through the half hours of a session, and not from the session before', () {
+        final tuesdayClose = DisplayPoint(date: DateTime.utc(2026, 11, 24, 20, 45), value: 90, open: 89, high: 91, low: 88);
+        final halfHours = PriceBars.build([tuesdayClose, ...session], BarPeriod.halfHour, now: holiday, market: Market.us);
+        expect(halfHours[1].open, 99.5, reason: 'the session opened above Tuesday\'s close');
+        for (var i = 2; i < halfHours.length; i++) {
+          expect(halfHours[i].open, halfHours[i - 1].close);
+        }
+        expectBounded(halfHours);
+
+        final days = PriceBars.build([tuesdayClose, ...session], BarPeriod.day, now: holiday, market: Market.us);
+        expect(days.map((b) => b.open), [89, 99.5]);
+      });
+
+      test('only where the market\'s hours are known', () {
+        final bars = PriceBars.build(gold, BarPeriod.day, now: holiday);
+        expect(bars.map((b) => b.open), gold.map((p) => p.open));
+      });
+    });
+
     test('history older than the last week is left on its own dates', () {
       final old = [DisplayPoint(date: DateTime(2026, 7, 4, 12), value: 10), DisplayPoint(date: DateTime(2026, 7, 5, 12), value: 11)];
       expect(PriceBars.build(old, BarPeriod.day, now: holiday, market: Market.us), hasLength(2));

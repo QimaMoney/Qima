@@ -1,7 +1,7 @@
-Qima 5.0.0
-• L'accueil montre votre patrimoine net dans le temps, avec vos comptes, placements, dépenses et zakat
-• Ajoutez comptes bancaires, espèces, cartes et prêts
-• Dépenses par catégorie, budget mensuel et paiements récurrents
-• Les SMS de la banque et les relevés deviennent des opérations à vérifier, lus sur votre téléphone
-• Suivez l'argent prêté et emprunté, et partagez les additions
-• La zakat porte sur tout votre bilan
+Qima 5.1.0
+• Historique des cours par jour, mois et année, avec ouverture, clôture, plus haut et plus bas
+• Graphiques en chandeliers
+• Vos achats et ventes marqués sur le graphique, avec zoom et comparaison
+• Les actions affichent dividendes, fourchette sur 52 semaines, valorisation et données financières
+• Actions saoudiennes, égyptiennes et davantage de titres du Nasdaq intégrés
+• Partage sur X

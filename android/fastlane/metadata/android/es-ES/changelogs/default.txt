@@ -1,7 +1,7 @@
-Qima 5.0.0
-• El inicio muestra tu patrimonio neto a lo largo del tiempo, con tus cuentas, inversiones, gastos y zakat
-• Añade cuentas bancarias, efectivo, tarjetas y préstamos
-• Gastos por categoría, presupuesto mensual y pagos recurrentes
-• Los SMS del banco y los extractos se convierten en movimientos que revisas, leídos en tu teléfono
-• Sigue el dinero que prestaste y te prestaron, y divide cuentas
-• El zakat cuenta todo tu balance
+Qima 5.1.0
+• Historial de precios por día, mes y año, con apertura, cierre, máximo y mínimo
+• Gráficos de velas
+• Tus compras y ventas marcadas en el gráfico, con zoom y comparación
+• Las acciones muestran dividendos, rango de 52 semanas, valoración y datos financieros
+• Acciones saudíes, egipcias y más del Nasdaq ya incluidas
+• Comparte en X
