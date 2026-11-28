@@ -30,15 +30,24 @@ abstract final class AiInbox {
 
   static bool accepting(String folder) => File('$folder${Platform.pathSeparator}$marker').existsSync();
 
+  /// What the helper answers while the person has not allowed adding.
+  static const AddingUnavailable notAccepting = AddingUnavailable(
+    'Qima is not letting AI apps add transactions on this computer. In Qima, open Settings, then AI apps, '
+    'and turn on "Let AI apps add transactions".',
+  );
+
+  /// What the helper answers when the folder cannot be written; [why] is
+  /// the system's own message.
+  static AddingUnavailable unwritable(String why) => AddingUnavailable('Qima\'s folder could not be written ($why).');
+
+  /// The `meta.json` that goes beside a file named [name] left at [now].
+  static String meta(String name, DateTime now) =>
+      jsonEncode({'name': name, 'receivedAt': now.toUtc().toIso8601String()});
+
   /// Leaves one file for Qima to read. Written under a dotted name and
   /// renamed once complete, so the app never reads half a batch.
   static void leave(String folder, String name, String contents, DateTime now, {Random? random}) {
-    if (!accepting(folder)) {
-      throw const AddingUnavailable(
-        'Qima is not letting AI apps add transactions on this computer. In Qima, open Settings, then AI apps, '
-        'and turn on "Let AI apps add transactions".',
-      );
-    }
+    if (!accepting(folder)) throw notAccepting;
     final r = random ?? Random.secure();
     final id = [for (var i = 0; i < 16; i++) r.nextInt(256).toRadixString(16).padLeft(2, '0')].join();
     final sep = Platform.pathSeparator;
@@ -47,7 +56,7 @@ abstract final class AiInbox {
       staging.createSync();
       File('${staging.path}$sep$name').writeAsStringSync(contents, flush: true);
       File('${staging.path}${sep}meta.json')
-          .writeAsStringSync(jsonEncode({'name': name, 'receivedAt': now.toUtc().toIso8601String()}), flush: true);
+          .writeAsStringSync(meta(name, now), flush: true);
       staging.renameSync('$folder$sep$id');
     } on FileSystemException catch (e) {
       try {
@@ -55,7 +64,7 @@ abstract final class AiInbox {
       } on FileSystemException {
         // Left behind under a dotted name, which Qima ignores.
       }
-      throw AddingUnavailable('Qima\'s folder could not be written (${e.osError?.message ?? e.message}).');
+      throw unwritable(e.osError?.message ?? e.message);
     }
   }
 }
