@@ -4,6 +4,7 @@ import '../models/asset.dart';
 import '../models/fx_history.dart';
 import '../models/instrument_facts.dart';
 import '../models/instrument_fundamentals.dart';
+import '../models/market_hours.dart';
 import '../models/metal_breakdown.dart';
 import '../models/money.dart';
 import '../models/quote.dart';
@@ -27,10 +28,15 @@ class PriceRepository {
   static const Duration factsRefreshInterval = Duration(minutes: 15);
   static const Duration eventsRefreshInterval = Duration(hours: 24);
 
-  /// The widest gap between the live price and the latest history bar that
-  /// is still the same market (gold futures sit within a percent or two of
-  /// spot).
+  /// The widest gap between the live price and the history feed's price
+  /// that is still the same market (gold futures sit within a percent or
+  /// two of spot).
   static const double maxLevelGap = 0.05;
+
+  /// How long the market may have traded since the history feed's latest
+  /// price for the two prices to be of the same moment. The feed's futures
+  /// quotes run some ten minutes behind.
+  static const Duration maxLevelLag = Duration(minutes: 30);
 
   static const Map<String, String> metalHistorySymbols = {
     'XAU': 'GC=F',
@@ -326,8 +332,11 @@ class PriceRepository {
   ///
   /// Metals and crypto are priced live by another provider than their
   /// history (gold's history is the futures contract, not spot), so their
-  /// bars are scaled to the live price at fetch time and the line meets it
-  /// without a step.
+  /// bars are scaled by what the live price is of the feed's own latest one
+  /// (see [_levelFactor]) and the line meets the live price without a step.
+  /// Every bar of a pull is scaled alike, and a daily pull replaces what
+  /// was stored over the days it covers, so days scaled by an earlier
+  /// fetch never stand beside these at another level.
   Future<Map<String, QuoteSeries>> backfillInstruments(
     List<Instrument> instruments,
     FXHistory fxHistory, {
@@ -418,22 +427,33 @@ class PriceRepository {
               range: doTail ? _tailRange(_lastDailyClose(existing, effectiveNow), effectiveNow) : '5y',
             )).where((q) => q.timestamp.isBefore(intradayCutoff)).toList()
           : const <Quote>[];
-      final intraday =
-          doIntraday ? quotesOf(await historyProvider.bars(symbol, range: '5d', interval: '15m')) : const <Quote>[];
+      final feed = doIntraday ? await historyProvider.history(symbol, range: '5d', interval: '15m') : const BarHistory();
+      final intraday = quotesOf(feed.bars);
       if (daily.isEmpty && intraday.isEmpty) continue;
 
       var factor = 1.0;
       if (scaled) {
-        // Without a current bar and a live price to meet, store nothing
-        // rather than bars at another level; the next pass tries again.
-        final level = intraday.isEmpty ? null : await _levelFactor(instrument, intraday.last, rates);
+        // The feed's price nearest now: its own latest, else its last bar.
+        final latest = feed.latest == null ? null : quotesOf([feed.latest!]).firstOrNull;
+        final reference = intraday.isEmpty || (latest != null && !latest.timestamp.isBefore(intraday.last.timestamp))
+            ? latest
+            : intraday.last;
+        // With no level known, store nothing rather than bars at another
+        // one; the next pass tries again.
+        final level = await _levelFactor(instrument, reference, rates, prefs, effectiveNow);
         if (level == null) continue;
         factor = level;
       }
       List<Quote> leveled(List<Quote> quotes) => factor == 1.0 ? quotes : [for (final q in quotes) q.scaled(factor)];
 
       var merged = existing;
-      if (daily.isNotEmpty) merged = merged.merging(leveled(daily), effectiveNow);
+      if (daily.isNotEmpty) {
+        merged = merged.merging(
+          leveled(daily),
+          effectiveNow,
+          replacing: scaled ? (from: daily.first.timestamp, to: intradayCutoff) : null,
+        );
+      }
       if (intraday.isNotEmpty) {
         merged = merged.merging(
           leveled(intraday),
@@ -456,25 +476,59 @@ class PriceRepository {
 
   /// Bumped when stored history must be pulled again to match how new bars
   /// are stored.
-  static const String _historyLevel = 'ohlc-v1';
+  static const String _historyLevel = 'ohlc-v2';
 
   /// Whether [instrument]'s live price comes from another provider than its
   /// history bars.
   bool _pricedByAnotherSource(Instrument instrument) =>
       instrument.assetClass == AssetClass.metal || instrument.assetClass == AssetClass.crypto;
 
-  /// What to multiply [instrument]'s history bars by so the latest one,
-  /// [reference], meets the live price. Null when there's no live price, or
-  /// it's so far off that one of the two sources must be wrong.
-  Future<double?> _levelFactor(Instrument instrument, Quote reference, FXRates rates) async {
-    if (reference.canonicalUSD <= 0) return null;
-    try {
-      final live = await provider(instrument, rates).canonicalUSDPrice(instrument);
-      final factor = live / reference.canonicalUSD;
-      return (factor - 1).abs() <= maxLevelGap ? factor : null;
-    } catch (_) {
-      return null;
+  /// What to multiply [instrument]'s history bars by to bring them to the
+  /// level of its live price: the live price over [reference], the history
+  /// feed's price nearest now.
+  ///
+  /// That only measures the two sources apart when both prices are of the
+  /// same moment. Where the market has traded for more than [maxLevelLag]
+  /// since [reference] (the feed's bars stopped short, or it is behind),
+  /// the price has moved on, and dividing by it would shift every bar by
+  /// that move. The factor last measured is used then, as it is when there
+  /// is no live price: the two sources drift apart by a fraction of a
+  /// percent in a month. Null when none was ever measured, or when the two
+  /// prices are so far apart that one of the sources must be wrong.
+  Future<double?> _levelFactor(
+    Instrument instrument,
+    Quote? reference,
+    FXRates rates,
+    SharedPreferences prefs,
+    DateTime now,
+  ) async {
+    final key = 'quoteLevelFactor.${instrument.id}';
+    if (reference == null || reference.canonicalUSD <= 0 || !_sameMoment(instrument, reference.timestamp, now)) {
+      return prefs.getDouble(key);
     }
+    final double live;
+    try {
+      live = await provider(instrument, rates).canonicalUSDPrice(instrument);
+    } catch (_) {
+      return prefs.getDouble(key);
+    }
+    final factor = live / reference.canonicalUSD;
+    if ((factor - 1).abs() > maxLevelGap) return null;
+    await prefs.setDouble(key, factor);
+    return factor;
+  }
+
+  /// Whether [instrument]'s market has traded for no more than
+  /// [maxLevelLag] between [at] and [now]. A price from before a weekend is
+  /// still the price on the Sunday.
+  bool _sameMoment(Instrument instrument, DateTime at, DateTime now) {
+    final market = MarketHours.marketOf(instrument);
+    if (market == null) return now.difference(at) <= maxLevelLag;
+    var traded = Duration.zero;
+    for (final (start, end) in MarketHours.openSpans(market, at, now)) {
+      traded += end.difference(start);
+    }
+    return traded <= maxLevelLag;
   }
 
   // ---- Facts ----

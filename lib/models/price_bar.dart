@@ -54,16 +54,22 @@ class PriceBar extends Equatable {
   /// When the period's last price was recorded.
   final DateTime end;
 
-  /// The first price of the period: the open the feed gave its first
-  /// sample, else that sample's own price when the period has more than
-  /// one. Null for a period known from a single price with no open.
+  /// The price the period started at. Where the market traded straight
+  /// through from the period before, that is the close before it: the same
+  /// moment, and the one price known for it. After a closure it is the open
+  /// the feed gave the period's first sample, else that sample's own price
+  /// when the period has more than one. Null for a period known from a
+  /// single price with no open and nothing before it to start from.
   final double? open;
+
+  /// The period's extremes. They reach to [open] and [close] whatever its
+  /// samples say.
   final double high;
   final double low;
   final double close;
 
   /// False when the period is known from a single closing price, so [high]
-  /// and [low] are only that price.
+  /// and [low] say nothing of the prices within it.
   final bool hasExtremes;
 
   /// The average and median of the period's prices. For a week, month or
@@ -191,6 +197,19 @@ class _TradingDays {
     return i < 0 || !date.isAfter(_spans[i].$2);
   }
 
+  /// Whether the market kept trading from [from] to [to] but for its daily
+  /// breaks, so the price at [to] carries on from the one at [from]. False
+  /// across a night between sessions or a weekend, and for dates from
+  /// before the spans looked at.
+  bool tradedThrough(DateTime from, DateTime to) {
+    final first = _indexAt(from), last = _indexAt(to);
+    if (first < 0) return false;
+    for (var i = first; i < last; i++) {
+      if (_spans[i + 1].$1.difference(_spans[i].$2) >= _longClosure) return false;
+    }
+    return true;
+  }
+
   /// A moment on the day [date]'s price counts towards.
   DateTime dayOf(DateTime date) {
     final i = _indexAt(date);
@@ -232,15 +251,27 @@ abstract final class PriceBars {
   /// before (see [_TradingDays]). Without that, a closing price that
   /// lands after midnight on this device, or a quote fetched on a holiday,
   /// would make a day of its own on which nothing happened.
+  ///
+  /// With [market], a bar also opens at the close of the one before where
+  /// the market traded straight through from one to the next: every bar of
+  /// a market that never closes, the days of a trading week of one open
+  /// around the clock, the half hours of one session. The first sample of
+  /// a period is not its first price: it can be hours into the period, or
+  /// a feed's own open taken from another source than the close before it,
+  /// and a candle starting there would stand apart from the last one over
+  /// a move that never happened. A bar after a closure, a night between
+  /// sessions or a weekend, keeps the open its samples give it, since
+  /// that gap is real. Without [market] nothing is known of its hours, and
+  /// every bar keeps its own open.
   static List<PriceBar> build(List<DisplayPoint> points, BarPeriod period, {required DateTime now, Market? market}) {
     final intradaySince = now.subtract(QuoteSeries.intradayWindow);
     // A market that never closes has calendar days and nothing to remap.
-    final days = period == BarPeriod.halfHour || market == null || market == Market.always || points.isEmpty
-        ? null
-        : _TradingDays.of(market, now, points.first.date);
+    final hours =
+        market == null || market == Market.always || points.isEmpty ? null : _TradingDays.of(market, now, points.first.date);
+    // A half hour is the half hour its price was recorded in.
+    final days = period == BarPeriod.halfHour ? null : hours;
     DateTime startAt(int index) => period.startOf(days?.dayOf(points[index].date) ?? points[index].date);
     final bars = <PriceBar>[];
-    double? previousClose;
     var i = 0;
     while (i < points.length) {
       final start = startAt(i);
@@ -248,9 +279,13 @@ abstract final class PriceBars {
       while (j < points.length && startAt(j) == start) {
         j++;
       }
-      final bar = _bar(points, i, j, period, start, previousClose, intradaySince, days);
-      bars.add(bar);
-      previousClose = bar.close;
+      final previous = bars.lastOrNull;
+      // Straight on from the period before: the one next to this, with no
+      // closure between its last price and this one's first.
+      final carriesOn = previous != null &&
+          previous.start == period.startOf(start.subtract(const Duration(microseconds: 1))) &&
+          (market == Market.always || (hours?.tradedThrough(points[i - 1].date, points[i].date) ?? false));
+      bars.add(_bar(points, i, j, period, start, previous?.close, carriesOn, intradaySince, days));
       i = j;
     }
     return bars;
@@ -263,6 +298,7 @@ abstract final class PriceBars {
     BarPeriod period,
     DateTime start,
     double? previousClose,
+    bool carriesOn,
     DateTime intradaySince,
     _TradingDays? days,
   ) {
@@ -298,11 +334,16 @@ abstract final class PriceBars {
     };
     final values = measurable ? (slots.values.toList()..sort()) : const <double>[];
 
+    final open = carriesOn ? previousClose : first.open ?? (count > 1 ? first.value : null);
+    // An open from outside the bar's samples can lie beyond their extremes.
+    if (open != null && open > high) high = open;
+    if (open != null && open < low) low = open;
+
     return PriceBar(
       period: period,
       start: start,
       end: last.date,
-      open: first.open ?? (count > 1 ? first.value : null),
+      open: open,
       high: high,
       low: low,
       close: last.value,

@@ -118,6 +118,19 @@ void main() {
       expect(bars.map((b) => b.low), [10.0, 9.5, 11.0]);
     });
 
+    test('reads the feed\'s own latest price and when it traded, when it gives them', () async {
+      const body = '{"chart":{"result":[{"meta":{"currency":"USD","regularMarketPrice":3698.1,"regularMarketTime":1700009000},'
+          '"timestamp":[1700000000],"indicators":{"quote":[{"close":[3620.4]}]}}]}}';
+      final provider = YahooHistoryProvider(client: MockClient((request) async => http.Response(body, 200)));
+      final history = await provider.history('ZZTEST');
+      expect(history.bars.single.close, 3620.4);
+      expect(history.latest!.close, 3698.1);
+      expect(history.latest!.date, DateTime.fromMillisecondsSinceEpoch(1700009000 * 1000, isUtc: true));
+
+      final without = YahooHistoryProvider(client: MockClient((request) async => http.Response(chart(quote: '{"close":[1,2,3]}'), 200)));
+      expect((await without.history('ZZTEST')).latest, isNull);
+    });
+
     test('missing high and low arrays, or null entries, give null', () async {
       final without = await read('{"close":[10.0,12,11.5]}');
       expect(without.map((b) => b.high), [null, null, null]);
